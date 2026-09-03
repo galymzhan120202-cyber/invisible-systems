@@ -15,6 +15,11 @@
     "keep_silent_mp4": false,
     "burn_subtitles": false
   },
+  "schedule": {
+    "_comment": "new-channel ramp: 1 video/day until ramp_until, then DAILY_COUNT/day",
+    "ramp_until": "2026-09-13",
+    "ramp_count": 1
+  },
   "review_gate": {
     "upload_privacy": "private",
     "require_human_approval": true

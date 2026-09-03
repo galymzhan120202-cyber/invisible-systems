@@ -16,6 +16,8 @@ calls. The human still approves each video later with 40_review.py.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
+import json
 import os
 import re
 import subprocess
@@ -32,6 +34,21 @@ except Exception:
 
 PY = sys.executable or "python"
 IN_CI = bool(os.environ.get("CI"))
+
+
+def ramped_count(target: int) -> int:
+    """New-channel ramp: while today < schedule.ramp_until, cap at ramp_count."""
+    try:
+        sch = json.loads((ROOT / "config" / "settings.json").read_text(encoding="utf-8")).get("schedule", {})
+        until = sch.get("ramp_until")
+        if until and dt.date.today() < dt.date.fromisoformat(until):
+            rc = int(sch.get("ramp_count", 1))
+            if rc < target:
+                print(f"ramp: {rc}/run until {until} (target {target})")
+                return rc
+    except Exception as e:  # noqa: BLE001
+        print(f"  [ramp] ignored ({e})")
+    return target
 
 
 def _tg(text: str, enabled: bool) -> None:
@@ -65,7 +82,7 @@ def main() -> None:
     ap.add_argument("--no-notify", action="store_true", help="no Telegram line")
     args = ap.parse_args()
     notify_on = not args.no_notify
-    n = 1 if args.id else max(1, args.count)
+    n = 1 if args.id else ramped_count(max(1, args.count))
 
     if n > 1:
         made = 0

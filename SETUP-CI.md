@@ -43,6 +43,11 @@ gh secret set GEMINI_API_KEYS --body "$(sed 's/^GEMINI_API_KEYS=//' secrets/keys
 Repo → Settings → Secrets and variables → Actions → **Variables** →
 `DAILY_COUNT` (default 1). Each cron run then produces + uploads that many.
 
+**New-channel ramp:** `config/settings.json` → `schedule.ramp_until` (a date).
+Until that date `run_daily.py` caps output at `schedule.ramp_count` (1/day) no
+matter what `DAILY_COUNT` says; on/after that date it uses the full `DAILY_COUNT`.
+Set `ramp_until` in the past (or remove the block) to disable the ramp.
+
 ### Public vs private (review gate)
 
 `DAILY_PRIVACY` repo variable — **leave it unset** and every video uploads
