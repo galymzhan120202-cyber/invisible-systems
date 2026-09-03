@@ -1,4 +1,3 @@
-{"id": "why-popcorn-costs-more-than-the-ticket", "title_working": "Why the popcorn costs more than the movie ticket", "system": "two-part pricing / where the profit actually sits", "cluster": "pricing-and-incentives", "needs_stats": false, "status": "pending"}
 {"id": "why-free-refills-make-sense", "title_working": "Why free refills make business sense", "system": "marginal cost near zero / anchoring the first sale", "cluster": "pricing-and-incentives", "needs_stats": false, "status": "pending"}
 {"id": "why-milk-is-at-the-back", "title_working": "Why supermarket milk is at the very back", "system": "store layout as a forced path past high-margin goods", "cluster": "platforms-and-layout", "needs_stats": false, "status": "pending"}
 {"id": "why-flights-are-overbooked", "title_working": "Why your flight was overbooked on purpose", "system": "expected no-shows / yield management", "cluster": "pricing-and-incentives", "needs_stats": false, "status": "pending"}
