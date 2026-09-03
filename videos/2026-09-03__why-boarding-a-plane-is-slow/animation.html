@@ -1,0 +1,510 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why boarding a plane is slower than it should be</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / the rules
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want
+var CORAL = "#FF5B5B";              // coral red    -> friction / naive model
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+function lerpColor(a, b, t) {
+  var ca = parseInt(a.slice(1), 16), cb = parseInt(b.slice(1), 16);
+  var ra = (ca >> 16) & 0xFF, ga = (ca >> 8) & 0xFF, ba = ca & 0xFF;
+  var rb = (cb >> 16) & 0xFF, gb = (cb >> 8) & 0xFF, bb = cb & 0xFF;
+  var r = Math.round(ra + (rb - ra) * t);
+  var g = Math.round(ga + (gb - ga) * t);
+  var b = Math.round(ba + (bb - ba) * t);
+  return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
+}
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+// Stick figure poses: "eager", "walking", "frustrated", "contemplative", "seated", "standing"
+function stickFigure(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" stroke="' + col + '" stroke-width="8" stroke-linecap="round">';
+  var headR = 20;
+  var bodyLen = 80;
+  var armLen = 50;
+  var legLen = 60;
+
+  // Head
+  g += dot(x, y - bodyLen / 2 - headR, headR, col);
+
+  // Torso
+  g += line(x, y - bodyLen / 2, x, y + bodyLen / 2, col);
+
+  // Arms and Legs based on pose
+  switch (pose) {
+    case "eager":
+      g += line(x - 10, y - bodyLen / 4, x - armLen - 10, y - bodyLen / 4 - 20, col); // Left arm up
+      g += line(x + 10, y - bodyLen / 4, x + armLen + 10, y - bodyLen / 4 - 20, col); // Right arm up
+      g += line(x - 15, y + bodyLen / 2, x - 15 - 20, y + bodyLen / 2 + legLen, col);
+      g += line(x + 15, y + bodyLen / 2, x + 15 + 20, y + bodyLen / 2 + legLen, col);
+      break;
+    case "walking":
+      g += line(x - 10, y - bodyLen / 4, x - armLen, y - bodyLen / 4 + 20, col); // Left arm back
+      g += line(x + 10, y - bodyLen / 4, x + armLen, y - bodyLen / 4 - 20, col); // Right arm forward
+      g += line(x - 15, y + bodyLen / 2, x - 15 + 20, y + bodyLen / 2 + legLen, col); // Left leg forward
+      g += line(x + 15, y + bodyLen / 2, x + 15 - 20, y + bodyLen / 2 + legLen, col); // Right leg back
+      break;
+    case "frustrated":
+      g += line(x - 10, y - bodyLen / 4, x - armLen - 10, y - bodyLen / 4 - 10, col); // Left arm up
+      g += line(x + 10, y - bodyLen / 4, x + armLen + 10, y - bodyLen / 4 - 10, col); // Right arm up
+      g += line(x - 15, y + bodyLen / 2, x - 15, y + bodyLen / 2 + legLen, col);
+      g += line(x + 15, y + bodyLen / 2, x + 15, y + bodyLen / 2 + legLen, col);
+      g += line(x - headR/2, y - bodyLen/2 - headR - 10, x + headR/2, y - bodyLen/2 - headR - 10, col); // Frustrated brow
+      break;
+    case "contemplative":
+      g += line(x - 10, y - bodyLen / 4, x - armLen + 10, y + bodyLen / 4, col); // Arms clasped low
+      g += line(x + 10, y - bodyLen / 4, x + armLen - 10, y + bodyLen / 4, col);
+      g += line(x - 15, y + bodyLen / 2, x - 15, y + bodyLen / 2 + legLen, col);
+      g += line(x + 15, y + bodyLen / 2, x + 15, y + bodyLen / 2 + legLen, col);
+      g += line(x - headR/2, y - bodyLen/2 - headR + 10, x + headR/2, y - bodyLen/2 - headR + 10, col); // Contemplative brow
+      break;
+    case "seated":
+      var seatY = y + bodyLen/2 + 20; // Y for the seat bottom
+      g += line(x, y - bodyLen/2, x, y + bodyLen/2 - 20, col); // Shorter torso
+      g += line(x - 10, y + bodyLen/2 - 20, x - 10, seatY, col); // Legs bent
+      g += line(x + 10, y + bodyLen/2 - 20, x + 10, seatY, col);
+      g += line(x - armLen/2, y - bodyLen/4, x + armLen/2, y - bodyLen/4, col); // Arms relaxed on lap
+      break;
+    default: // default standing
+      g += line(x - 10, y - bodyLen / 4, x - armLen, y - bodyLen / 4, col);
+      g += line(x + 10, y - bodyLen / 4, x + armLen, y - bodyLen / 4, col);
+      g += line(x - 15, y + bodyLen / 2, x - 15, y + bodyLen / 2 + legLen, col);
+      g += line(x + 15, y + bodyLen / 2, x + 15, y + bodyLen / 2 + legLen, col);
+      break;
+  }
+  g += '</g>';
+  return g;
+}
+
+// Simple plane outline, can be opaque or translucent with an inner aisle
+function plane(x, y, w, h, bodyCol, bodyOp, aisleCol, aisleOp, wingOp, interior) {
+  var g = '<g>';
+  // Fuselage
+  g += rrect(x, y, w, h, 30, bodyCol, bodyOp);
+
+  // Wings (simple lines)
+  if (wingOp > 0.01) {
+    g += line(x - w / 2, y - h / 4, x - w / 2 - w / 4, y - h / 4 - h / 8, bodyCol, 8, wingOp);
+    g += line(x - w / 2, y + h / 4, x - w / 2 - w / 4, y + h / 4 + h / 8, bodyCol, 8, wingOp);
+    g += line(x + w / 2, y - h / 4, x + w / 2 + w / 4, y - h / 4 - h / 8, bodyCol, 8, wingOp);
+    g += line(x + w / 2, y + h / 4, x + w / 2 + w / 4, y + h / 4 + h / 8, bodyCol, 8, wingOp);
+  }
+
+  // Aisle (if interior is visible)
+  if (interior && aisleOp > 0.01) {
+    var aisleW = w * 0.2; // Aisle is narrower than plane
+    g += rrect(x, y, aisleW, h * 0.9, 20, aisleCol, aisleOp);
+  }
+  g += '</g>';
+  return g;
+}
+
+// Luggage block
+function luggage(x, y, w, h, col, op) {
+  return rrect(x, y, w, h, 8, col, op);
+}
+
+// Simple seat outline
+function seat(x, y, w, h, col, op) {
+  var g = '<g opacity="' + op + '" stroke="' + col + '" stroke-width="4" fill="none">';
+  g += rrect(x, y, w, h, 6, col, op); // Seat back
+  g += line(x - w / 2, y + h / 2, x - w / 2, y + h / 2 + h / 3, col, 4, op); // Leg 1
+  g += line(x + w / 2, y + h / 2, x + w / 2, y + h / 2 + h / 3, col, 4, op); // Leg 2
+  g += rrect(x, y + h / 2 + h / 3, w, h / 3, 6, col, op); // Seat base
+  g += '</g>';
+  return g;
+}
+
+// Clock icon for thought bubble
+function clockIcon(x, y, r, col, op, hourAngle, minuteAngle) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, r, col, 5, op);
+  // Hour hand (shorter)
+  g += line(x, y, x + r * 0.4 * Math.cos(hourAngle - Math.PI / 2), y + r * 0.4 * Math.sin(hourAngle - Math.PI / 2), col, 5, op);
+  // Minute hand (longer)
+  g += line(x, y, x + r * 0.7 * Math.cos(minuteAngle - Math.PI / 2), y + r * 0.7 * Math.sin(minuteAngle - Math.PI / 2), col, 5, op);
+  g += '</g>';
+  return g;
+}
+
+// Thought bubble path
+function thoughtBubble(x, y, w, h, col, op) {
+  var d = "M " + (x - w / 2) + " " + (y - h / 2) +
+          " Q " + (x + w / 2) + " " + (y - h / 2) + " " + (x + w / 2) + " " + y +
+          " Q " + (x + w / 2) + " " + (y + h / 2) + " " + (x) + " " + (y + h / 2) +
+          " Q " + (x - w / 4) + " " + (y + h / 2 + 30) + " " + (x - w / 2 + 10) + " " + (y + h / 2) +
+          " Q " + (x - w / 2) + " " + (y + h / 2) + " " + (x - w / 2) + " " + y +
+          " Z";
+  return '<path d="' + d + '" fill="' + col + '" stroke="' + col + '" stroke-width="5" opacity="' + op + '"/>';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+var SF_Y_BASE = CY + 300; // Base Y for stick figure
+var PLANE_Y_BASE = CY - 300; // Base Y for plane icon
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var sfX = CX;
+  var sfY = SF_Y_BASE + Math.sin(u * Math.PI * 2) * 8; // Gentle bob
+  var planeW = lerp(200, 220, smooth(u));
+  var planeH = lerp(80, 90, smooth(u));
+
+  // Plane icon in background
+  s += plane(CX, PLANE_Y_BASE, planeW, planeH, WHITE, 0.2, null, 0, 0.1, false);
+
+  // Amber stick figure
+  s += stickFigure(sfX, sfY, AMBER, "eager", 1);
+
+  // Thought bubble with clock
+  var bubbleOp = ramp(u, 0.2, 0.6);
+  if (bubbleOp > 0.01) {
+    var bubbleX = sfX + 100;
+    var bubbleY = sfY - 180;
+    var clockR = 30;
+    // Clock hands rotate faster then slow
+    var clockTime = easeOut(ramp(u, 0.3, 0.9)) * 2 * Math.PI; // Rotate 2 full circles
+    s += thoughtBubble(bubbleX, bubbleY, 120, 100, WHITE, bubbleOp);
+    s += clockIcon(bubbleX, bubbleY - 10, clockR, DIM, bubbleOp, clockTime * 1.5, clockTime * 3);
+  }
+
+  return s;
+}
+
+var LINE_Y_START = BOT - 100;
+var PLANE_ENTRANCE_X = CX + 200; // Right side entrance
+var PLANE_ENTRANCE_Y = CY;
+var PLANE_ENTRANCE_W = 200;
+var PLANE_ENTRANCE_H = 1000;
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var sfX = lerp(CX, CX - 100, smooth(u)); // SF moves left to join line
+  var sfY = lerp(SF_Y_BASE, LINE_Y_START, smooth(u));
+
+  // Plane outline with entrance
+  var planeW = lerp(220, 300, smooth(u));
+  var planeH = lerp(90, 120, smooth(u));
+  s += plane(CX, PLANE_Y_BASE, planeW, planeH, WHITE, 0.3, null, 0, 0.1, false);
+  // Simple entrance rectangle
+  var entranceH = lerp(0, 400, easeOut(ramp(u, 0.1, 0.4)));
+  s += rrect(PLANE_ENTRANCE_X, PLANE_ENTRANCE_Y + PLANE_ENTRANCE_H/2 - entranceH/2, 80, entranceH, 20, WHITE, 0.8);
+
+  // Line of stick figures
+  var numFigures = 5;
+  var lineFlow = u * 200; // Line flows upwards
+  for (var i = 0; i < numFigures; i++) {
+    var figY = LINE_Y_START - i * 150 + lineFlow;
+    if (figY > TOP && figY < BOT) {
+      s += stickFigure(CX - 100, figY, DIM, "walking", 0.7);
+    }
+  }
+
+  // Amber stick figure joins and moves forward
+  var amberLineY = lerp(LINE_Y_START, PLANE_ENTRANCE_Y + 100, easeIn(ramp(u, 0.3, 0.9)));
+  var amberLineX = lerp(CX - 100, PLANE_ENTRANCE_X - 40, easeIn(ramp(u, 0.3, 0.9)));
+  s += stickFigure(amberLineX, amberLineY, AMBER, "walking", 1);
+
+  return s;
+}
+
+var PLANE_INTERIOR_W = 400;
+var PLANE_INTERIOR_H = 1600;
+var AISLE_W = 100;
+var SEAT_ROW_X_OFFSET = 120;
+var SEAT_ROW_Y_SPACING = 150;
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var zoom = lerp(1.0, 1.2, smooth(u));
+  var panY = lerp(0, -100, smooth(u)); // Pan slightly up to focus on congestion
+
+  s += '<g ' + camera(zoom, 0, panY) + '>';
+
+  // Plane interior (white tube)
+  s += rrect(CX, CY, PLANE_INTERIOR_W, PLANE_INTERIOR_H, 40, WHITE, 0.2);
+
+  // Seat outlines
+  var numRows = 8;
+  for (var i = 0; i < numRows; i++) {
+    var seatY = TOP + 200 + i * SEAT_ROW_Y_SPACING;
+    s += seat(CX - SEAT_ROW_X_OFFSET, seatY, 60, 80, WHITE, 0.4);
+    s += seat(CX + SEAT_ROW_X_OFFSET, seatY, 60, 80, WHITE, 0.4);
+  }
+
+  // Aisle congestion (coral red)
+  var aisleCongestionOp = lerp(0.0, 0.4, ramp(u, 0.1, 0.5));
+  s += rrect(CX, CY, AISLE_W, PLANE_INTERIOR_H, 20, CORAL, aisleCongestionOp);
+
+  // Stick figures in aisle
+  var sfY_base = BOT - 300;
+  var sfMotion = Math.sin(u * Math.PI * 4) * 10 * pulse(u, 0.5, 0.4); // Stop-start motion
+  var sfX_aisle = CX - 30;
+
+  // Amber stick figure (frustrated)
+  s += stickFigure(sfX_aisle, sfY_base + sfMotion, AMBER, "frustrated", 1);
+
+  // Other white stick figures
+  s += stickFigure(sfX_aisle, sfY_base - 150 + sfMotion, DIM, "standing", 0.8);
+  s += stickFigure(sfX_aisle + 40, sfY_base - 300 + sfMotion, DIM, "standing", 0.8);
+
+  // Luggage blocks
+  var luggageY1 = sfY_base - 100 + sfMotion;
+  var luggageY2 = sfY_base - 250 + sfMotion;
+  s += luggage(sfX_aisle + 60, luggageY1, 80, 60, WHITE, 0.9);
+  s += luggage(sfX_aisle - 60, luggageY2, 70, 50, WHITE, 0.9);
+
+  // Frustration pulse around amber SF
+  var frustrationPulse = pulse(u, 0.7, 0.2);
+  if (frustrationPulse > 0.01) {
+    s += ring(sfX_aisle, sfY_base + sfMotion - 100, 80 + frustrationPulse * 20, CORAL, 8, frustrationPulse * 0.6);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var zoom = lerp(1.2, 0.6, smooth(u)); // Pull back
+  var panY = lerp(-100, 0, smooth(u));
+  var rotation = lerp(0, 5, smooth(u)); // Slight rotation
+
+  s += '<g transform="translate(' + CX + ' ' + CY + ') rotate(' + rotation + ') translate(' + (-CX) + ' ' + (-CY) + ')" ' + camera(zoom, 0, panY) + '>';
+
+  // Plane transforms from opaque white to translucent blue tube
+  var fuselageCol = lerpColor(WHITE, BLUE, smooth(u)); // Morph color
+  var fuselageW = lerp(PLANE_INTERIOR_W, 300, smooth(u));
+  var fuselageH = lerp(PLANE_INTERIOR_H, 1700, smooth(u)); // Make it longer
+
+  s += rrect(CX, CY, fuselageW, fuselageH, 40, fuselageCol, lerp(0.8, 0.3, smooth(u))); // Outer fuselage
+  s += rrect(CX, CY, AISLE_W, fuselageH * 0.9, 20, BLUE, lerp(0.0, 0.6, ramp(u, 0.2, 0.8))); // Inner aisle
+
+  // Small dots representing people
+  var numDots = 10;
+  var dotY_start = CY + fuselageH / 2 - 100;
+  var dotSpacing = 120;
+  var dotSpeed = u * 80;
+  for (var i = 0; i < numDots; i++) {
+    var dotY = dotY_start - i * dotSpacing + dotSpeed;
+    while (dotY < CY - fuselageH / 2) dotY += fuselageH;
+    while (dotY > CY + fuselageH / 2) dotY -= fuselageH;
+    s += dot(CX - AISLE_W / 2 + 20, dotY, 10, DIM, 0.7);
+    s += dot(CX + AISLE_W / 2 - 20, dotY + dotSpacing/2, 10, DIM, 0.7);
+  }
+
+  // Amber stick figure as a dot
+  var amberDotY = lerp(BOT - 400, dotY_start - 3 * dotSpacing + dotSpeed, smooth(u));
+  s += dot(CX - AISLE_W / 2 + 20, amberDotY, 12, AMBER, 1);
+
+  s += '</g>';
+  return s;
+}
+
+var OVERHEAD_BIN_Y = CY - 300;
+var OVERHEAD_BIN_H = 80;
+var OVERHEAD_BIN_W = 200;
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var zoom = lerp(0.6, 1.0, smooth(u)); // Zoom back in
+  var panY = lerp(0, -200, smooth(u)); // Pan up to focus on overhead bins
+
+  s += '<g ' + camera(zoom, 0, panY) + '>';
+
+  // Plane interior (translucent blue aisle)
+  s += rrect(CX, CY, PLANE_INTERIOR_W, PLANE_INTERIOR_H, 40, BLUE, 0.1); // Translucent fuselage
+  s += rrect(CX, CY, AISLE_W, PLANE_INTERIOR_H * 0.9, 20, BLUE, 0.6); // Aisle
+
+  // Overhead bins
+  s += rrect(CX - SEAT_ROW_X_OFFSET - 50, OVERHEAD_BIN_Y, OVERHEAD_BIN_W, OVERHEAD_BIN_H, 10, WHITE, 0.3);
+  s += rrect(CX + SEAT_ROW_X_OFFSET + 50, OVERHEAD_BIN_Y, OVERHEAD_BIN_W, OVERHEAD_BIN_H, 10, WHITE, 0.3);
+
+  // Stick figures in aisle
+  var sfY_base = CY + 200;
+  var sfX_aisle = CX - 30;
+
+  // Luggage stowing animation
+  var luggageStowProgress = ramp(u, 0.1, 0.4);
+  var luggageX = lerp(sfX_aisle + 60, CX - SEAT_ROW_X_OFFSET - 50, luggageStowProgress);
+  var luggageY = lerp(sfY_base - 100, OVERHEAD_BIN_Y, luggageStowProgress);
+  var luggageOp = lerp(1, 0.8, luggageStowProgress);
+  s += luggage(luggageX, luggageY, 80, 60, WHITE, luggageOp);
+
+  // Second luggage stowing animation (delayed)
+  var luggageStowProgress2 = ramp(u, 0.5, 0.8);
+  var luggageX2 = lerp(sfX_aisle + 60, CX + SEAT_ROW_X_OFFSET + 50, luggageStowProgress2);
+  var luggageY2 = lerp(sfY_base + 50, OVERHEAD_BIN_Y + 20, luggageStowProgress2);
+  var luggageOp2 = lerp(1, 0.8, luggageStowProgress2);
+  if (luggageStowProgress2 > 0.01) {
+    s += luggage(luggageX2, luggageY2, 70, 50, WHITE, luggageOp2);
+  }
+
+  // Stick figures stop/start
+  var stopMotion = (luggageStowProgress > 0.01 && luggageStowProgress < 0.99) ||
+                   (luggageStowProgress2 > 0.01 && luggageStowProgress2 < 0.99);
+  var sfMotionOffset = stopMotion ? 0 : Math.sin(u * Math.PI * 2) * 5;
+
+  s += stickFigure(sfX_aisle, sfY_base + sfMotionOffset, AMBER, "walking", 1);
+  s += stickFigure(sfX_aisle, sfY_base - 150 + sfMotionOffset, DIM, "standing", 0.8);
+  s += stickFigure(sfX_aisle + 40, sfY_base - 300 + sfMotionOffset, DIM, "standing", 0.8);
+
+  // Coral pulse for waiting
+  var waitPulse = pulse(u, 0.3, 0.2) + pulse(u, 0.7, 0.2);
+  if (waitPulse > 0.01) {
+    s += ring(sfX_aisle, sfY_base + sfMotionOffset - 100, 80 + waitPulse * 20, CORAL, 8, waitPulse * 0.6);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var zoom = lerp(1.0, 0.8, smooth(u)); // Pull back slightly
+  var panY = lerp(-200, 0, smooth(u));
+
+  s += '<g ' + camera(zoom, 0, panY) + '>';
+
+  // Plane interior (white outline, blue aisle)
+  var planeBodyOp = lerp(0.1, 0.2, smooth(u));
+  var aisleOp = lerp(0.6, 0.8, smooth(u));
+  s += rrect(CX, CY, PLANE_INTERIOR_W, PLANE_INTERIOR_H, 40, WHITE, planeBodyOp); // Outer fuselage
+  s += rrect(CX, CY, AISLE_W, PLANE_INTERIOR_H * 0.9, 20, BLUE, aisleOp); // Aisle
+
+  // Seat outlines
+  var numRows = 8;
+  for (var i = 0; i < numRows; i++) {
+    var seatY = TOP + 200 + i * SEAT_ROW_Y_SPACING;
+    s += seat(CX - SEAT_ROW_X_OFFSET, seatY, 60, 80, WHITE, 0.4);
+    s += seat(CX + SEAT_ROW_X_OFFSET, seatY, 60, 80, WHITE, 0.4);
+  }
+
+  // Amber stick figure seated
+  var sfSeatX = CX - SEAT_ROW_X_OFFSET;
+  var sfSeatY = TOP + 200 + 2 * SEAT_ROW_Y_SPACING; // In a seat
+  s += stickFigure(sfSeatX, sfSeatY, AMBER, "seated", 1);
+
+  // Other figures seated or moving slowly
+  s += stickFigure(CX + SEAT_ROW_X_OFFSET, sfSeatY + SEAT_ROW_Y_SPACING, DIM, "seated", 0.8);
+  s += stickFigure(CX - SEAT_ROW_X_OFFSET, sfSeatY - SEAT_ROW_Y_SPACING, DIM, "seated", 0.8);
+
+  var aislePulse = Math.sin(u * Math.PI * 4) * 0.5 + 0.5; // Gentle pulse
+  s += rrect(CX, CY, AISLE_W, PLANE_INTERIOR_H * 0.9, 20, BLUE, aisleOp * (0.8 + 0.2 * aislePulse)); // Aisle with pulse
+
+  // Contemplative thought (simple dot/bar)
+  var thoughtOp = ramp(u, 0.6, 0.9);
+  if (thoughtOp > 0.01) {
+    s += dot(sfSeatX + 80, sfSeatY - 120, 10, DIM, thoughtOp);
+    s += line(sfSeatX + 80, sfSeatY - 150, sfSeatX + 80, sfSeatY - 170, DIM, 5, thoughtOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

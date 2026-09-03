@@ -1,0 +1,14 @@
+{
+  "id": "why-boarding-a-plane-is-slow",
+  "slug": "2026-09-03__why-boarding-a-plane-is-slow",
+  "title_working": "Why boarding a plane is slower than it should be",
+  "system": "queueing / parallelism lost to aisle and luggage conflicts",
+  "cluster": "queues-and-waiting",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-09-03T16:09:30+00:00",
+  "produced_at": "2026-09-03T16:13:49+00:00",
+  "verify": "PASS",
+  "takeaway": "The fundamental design of a plane and the individual act of stowing luggage create unavoidable bottlenecks, making efficient boarding an illusion."
+}
