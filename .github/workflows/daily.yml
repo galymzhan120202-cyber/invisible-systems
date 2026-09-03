@@ -11,6 +11,9 @@ on:
       topic_id:
         description: "specific pending topic id (blank = next in queue)"
         required: false
+      count:
+        description: "how many videos this run (blank = repo var DAILY_COUNT, else 1)"
+        required: false
       produce_only:
         description: "produce but do not upload"
         type: boolean
@@ -79,11 +82,17 @@ jobs:
           }
 
       - name: Run pipeline
+        env:
+          DAILY_COUNT: ${{ vars.DAILY_COUNT }}
         run: |
-          $args = @()
-          if ("${{ github.event.inputs.topic_id }}") { $args += @("--id", "${{ github.event.inputs.topic_id }}") }
-          if ("${{ github.event.inputs.produce_only }}" -eq "true") { $args += "--produce-only" }
-          python scripts/run_daily.py @args
+          $a = @()
+          if ("${{ github.event.inputs.topic_id }}") { $a += @("--id", "${{ github.event.inputs.topic_id }}") }
+          $count = "${{ github.event.inputs.count }}"
+          if (-not $count) { $count = $env:DAILY_COUNT }
+          if (-not $count) { $count = "1" }
+          $a += @("--count", $count)
+          if ("${{ github.event.inputs.produce_only }}" -eq "true") { $a += "--produce-only" }
+          python scripts/run_daily.py @a
 
       - name: Commit queue + sources
         if: always()

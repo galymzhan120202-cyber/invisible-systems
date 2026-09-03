@@ -36,7 +36,18 @@ gh secret set GEMINI_API_KEYS --body "$(sed 's/^GEMINI_API_KEYS=//' secrets/keys
   self-commit in the workflow keeps the schedule from being disabled for
   inactivity).
 - Manual: Actions tab → **daily** → *Run workflow* (optional `topic_id`,
-  `produce_only`).
+  `count`, `produce_only`).
+
+### Videos per day
+
+Repo → Settings → Secrets and variables → Actions → **Variables** →
+`DAILY_COUNT` (default 1). Each cron run then produces + uploads that many.
+
+Practical ceilings: YouTube upload quota ~6/day; a run is ~8 min → 16 billed
+Action-minutes, so 3/day ≈ 1,440 min/month against the 2,000 free (private repo)
+— go public for headroom. And every video is private and needs a human in
+`40_review.py`, so more/day = more review time. New-channel + auto-content policy
+risk argues for **1/day** until the channel has a track record.
 
 ## What the workflow does
 

@@ -58,11 +58,36 @@ def run(cmd: list[str]) -> tuple[int, str]:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--id", help="specific pending topic id")
+    ap.add_argument("--id", help="specific pending topic id (implies --count 1)")
+    ap.add_argument("--count", type=int, default=1,
+                    help="how many topics to produce+upload this run (default 1)")
     ap.add_argument("--produce-only", action="store_true", help="skip the upload step")
     ap.add_argument("--no-notify", action="store_true", help="no Telegram line")
     args = ap.parse_args()
     notify_on = not args.no_notify
+    n = 1 if args.id else max(1, args.count)
+
+    if n > 1:
+        made = 0
+        for i in range(1, n + 1):
+            print(f"\n========== cycle {i}/{n} ==========")
+            rc = _one_cycle(args, notify_on)
+            if rc == "empty":
+                break
+            if rc != 0:
+                sys.exit(rc)
+            made += 1
+        print(f"\n{made} video(s) produced + uploaded PRIVATE this run")
+        _tg(f"📦 auto-channel: {made} video(s) produced + uploaded private today "
+            f"(review with 40_review.py)", notify_on and made > 0)
+        return
+    rc = _one_cycle(args, notify_on)
+    if isinstance(rc, int) and rc != 0:
+        sys.exit(rc)
+
+
+def _one_cycle(args, notify_on: bool):
+    """Returns 0 on success, 'empty' if the queue is empty, or a nonzero exit code."""
 
     # ---- produce ----
     produce = [PY, "scripts/20_produce.py", "--quiet"]
@@ -73,7 +98,7 @@ def main() -> None:
     if "topics.pending.jsonl is empty" in out:
         print("nothing to do - queue empty")
         _tg("ℹ️ auto-channel: topic queue is empty, nothing produced today.", notify_on)
-        return
+        return "empty"
 
     m = re.search(r"^slug\s*:\s*(\S+)", out, re.MULTILINE)
     slug = m.group(1) if m else None
@@ -84,13 +109,13 @@ def main() -> None:
         print(f"\nPRODUCE FAILED ({reason})")
         _tg(f"❌ auto-channel produce failed"
             + (f" for {slug}" if slug else "") + f"\n{reason}\n{tail}", notify_on)
-        sys.exit(1)
+        return 1
 
     print(f"\nproduced: {slug}")
     if args.produce_only:
         _tg(f"🎬 auto-channel produced {slug} (verify PASS) - upload skipped (--produce-only)",
             notify_on)
-        return
+        return 0
 
     # ---- upload (PRIVATE) ----
     up = [PY, "scripts/30_upload.py", "--slug", slug]
@@ -103,12 +128,10 @@ def main() -> None:
     if rc != 0:
         print(f"\nUPLOAD FAILED for {slug}")
         _tg(f"❌ auto-channel: produced {slug} but upload failed (exit {rc})", notify_on)
-        sys.exit(2)
+        return 2
 
     print(f"\nOK: {slug} produced + uploaded PRIVATE -> {url}")
-    # 30_upload.py already sent its own Telegram line unless --no-notify
-    if not notify_on:
-        pass
+    return 0
 
 
 if __name__ == "__main__":
