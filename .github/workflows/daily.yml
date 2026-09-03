@@ -84,6 +84,7 @@ jobs:
       - name: Run pipeline
         env:
           DAILY_COUNT: ${{ vars.DAILY_COUNT }}
+          DAILY_PRIVACY: ${{ vars.DAILY_PRIVACY }}   # unset => private (review gate)
         run: |
           $a = @()
           if ("${{ github.event.inputs.topic_id }}") { $a += @("--id", "${{ github.event.inputs.topic_id }}") }

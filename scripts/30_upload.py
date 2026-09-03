@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -164,7 +165,14 @@ def main() -> None:
     settings = _load_json(CONFIG / "settings.json")
     channel = _load_json(CONFIG / "channel.json")
     if args.privacy is None:
-        args.privacy = settings.get("review_gate", {}).get("upload_privacy", "private")
+        # precedence: --privacy > DAILY_PRIVACY env/CI var > settings > "private"
+        args.privacy = (os.environ.get("DAILY_PRIVACY", "").strip()
+                        or settings.get("review_gate", {}).get("upload_privacy", "private"))
+    if args.privacy not in ("private", "unlisted", "public"):
+        sys.exit(f"bad privacy '{args.privacy}' (private|unlisted|public)")
+    if args.privacy == "public":
+        print("  NOTE: uploading PUBLIC - no human review gate. Policy risk on a new "
+              "channel; see SETUP-CI.md.")
 
     creds = get_credentials(scopes=UPLOAD_SCOPES)
     svc = build_service(creds)

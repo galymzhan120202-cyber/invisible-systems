@@ -2,7 +2,7 @@
 """
 run_daily.py - one unattended cycle.
 
-    20_produce.py (next pending topic)  ->  if verify PASS  ->  30_upload.py (PRIVATE)
+    20_produce.py (next pending topic)  ->  if verify PASS  ->  30_upload.py
 
 Prints a summary and (with --notify, the default in CI) sends one Telegram line
 for the outcome. This is what Windows Task Scheduler or the GitHub Actions cron
@@ -77,9 +77,10 @@ def main() -> None:
             if rc != 0:
                 sys.exit(rc)
             made += 1
-        print(f"\n{made} video(s) produced + uploaded PRIVATE this run")
-        _tg(f"📦 auto-channel: {made} video(s) produced + uploaded private today "
-            f"(review with 40_review.py)", notify_on and made > 0)
+        mode = os.environ.get("DAILY_PRIVACY", "private")
+        print(f"\n{made} video(s) produced + uploaded {mode} this run")
+        _tg(f"📦 auto-channel: {made} video(s) produced + uploaded {mode} today"
+            + ("" if mode == "public" else " (review with 40_review.py)"), notify_on and made > 0)
         return
     rc = _one_cycle(args, notify_on)
     if isinstance(rc, int) and rc != 0:
@@ -117,20 +118,22 @@ def _one_cycle(args, notify_on: bool):
             notify_on)
         return 0
 
-    # ---- upload (PRIVATE) ----
+    # ---- upload (PRIVATE by default; DAILY_PRIVACY var can override) ----
     up = [PY, "scripts/30_upload.py", "--slug", slug]
     if not notify_on:
         up.append("--no-notify")
     rc, out = run(up)
     m = re.search(r"https://youtu\.be/\S+", out)
     url = m.group(0) if m else "(url not parsed)"
+    pm = re.search(r"^privacy\s*:\s*(\S+)", out, re.MULTILINE)
+    priv = pm.group(1) if pm else os.environ.get("DAILY_PRIVACY", "private")
 
     if rc != 0:
         print(f"\nUPLOAD FAILED for {slug}")
         _tg(f"❌ auto-channel: produced {slug} but upload failed (exit {rc})", notify_on)
         return 2
 
-    print(f"\nOK: {slug} produced + uploaded PRIVATE -> {url}")
+    print(f"\nOK: {slug} produced + uploaded {priv.upper()} -> {url}")
     return 0
 
 

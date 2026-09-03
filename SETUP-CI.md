@@ -43,6 +43,18 @@ gh secret set GEMINI_API_KEYS --body "$(sed 's/^GEMINI_API_KEYS=//' secrets/keys
 Repo → Settings → Secrets and variables → Actions → **Variables** →
 `DAILY_COUNT` (default 1). Each cron run then produces + uploads that many.
 
+### Public vs private (review gate)
+
+`DAILY_PRIVACY` repo variable — **leave it unset** and every video uploads
+`private`; you then watch each one and publish with `40_review.py`. Set it to
+`public` only after ~20 human-reviewed videos have gone out and the animation
+quality is proven.
+
+> Why the gate matters: a brand-new channel auto-publishing several
+> LLM-generated videos a day is the exact pattern YouTube's spam systems flag
+> (`PLAN.md` §6.6, `CHANNEL-CONCEPT.md` §7). Getting this wrong can cost the
+> whole channel. `private` uploads carry none of that risk.
+
 Practical ceilings: YouTube upload quota ~6/day; a run is ~8 min → 16 billed
 Action-minutes, so 3/day ≈ 1,440 min/month against the 2,000 free (private repo)
 — go public for headroom. And every video is private and needs a human in
