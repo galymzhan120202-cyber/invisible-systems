@@ -81,6 +81,16 @@ jobs:
             }
           }
 
+      - name: Top up topic queue if low
+        continue-on-error: true          # a bad idea day must not block production
+        env:
+          DAILY_COUNT: ${{ vars.DAILY_COUNT }}
+        run: |
+          $count = "${{ github.event.inputs.count }}"; if (-not $count) { $count = $env:DAILY_COUNT }
+          if (-not $count) { $count = "1" }
+          $min = [int]$count * 3
+          python scripts/10_suggest_topics.py --min-queue $min --count 12 --quiet
+
       - name: Run pipeline
         env:
           DAILY_COUNT: ${{ vars.DAILY_COUNT }}

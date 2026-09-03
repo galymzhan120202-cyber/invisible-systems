@@ -65,10 +65,15 @@ risk argues for **1/day** until the channel has a track record.
 
 1. checkout, Python 3.13, `pip install -r requirements.txt`, `playwright install chromium`, ensure ffmpeg
 2. write the four secrets back into `secrets/`
-3. `python scripts/run_daily.py` → `20_produce.py` (next topic) → if verify PASS → `30_upload.py` (private)
-4. commit the mutated `queue/*.jsonl` + new `videos/<slug>/` sources back (`[skip ci]`, GITHUB_TOKEN pushes don't retrigger)
-5. upload the MP4 as a 14-day build artifact
-6. Telegram line on success (from `30_upload.py`) or failure (from `run_daily.py` / a final infra-failure step)
+3. **top up the queue** — `10_suggest_topics.py --min-queue (3×count)` asks Gemini for
+   ~12 new topics only when `topics.pending.jsonl` is running low (no-op otherwise)
+4. `python scripts/run_daily.py` → `20_produce.py` (next topic) → if verify PASS → `30_upload.py` (private)
+5. commit the mutated `queue/*.jsonl` + new `videos/<slug>/` sources back (`[skip ci]`, GITHUB_TOKEN pushes don't retrigger)
+6. upload the MP4 as a 14-day build artifact
+7. Telegram line on success (from `30_upload.py`) or failure (from `run_daily.py` / a final infra-failure step)
+
+The queue never runs dry on its own. To add topics by hand anyway:
+`python scripts/10_suggest_topics.py --count 15`.
 
 ## Token note
 
