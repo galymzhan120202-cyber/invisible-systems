@@ -1,0 +1,9 @@
+# auto-channel pipeline runtime deps (CI + local)
+pyyaml>=6.0
+google-generativeai>=0.8      # llm_router (deprecated pkg, still functional 2026-09)
+playwright>=1.44              # render_seek.py + author.validate_animation
+edge-tts>=6.1                 # generate_voiceover.py
+google-api-python-client>=2.100
+google-auth-oauthlib>=1.2
+google-auth-httplib2>=0.2
+requests>=2.31               # notify.py

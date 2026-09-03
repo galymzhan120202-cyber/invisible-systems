@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why the other lane always looks faster</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+var LX = 372, RX = 708;             // left / right lane x  (centre 540, +/-168)
+var CARY = 1120;                    // "you" resting height
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / the wave
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want
+var CORAL = "#FF5B5B";              // coral red    -> the naive model / false signal
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function chevron(x, y, size, col, op) {
+  var d = "M " + (x - size) + " " + (y + size * 0.55) + " L " + x + " " + (y - size * 0.55) + " L " + (x + size) + " " + (y + size * 0.55);
+  return pathTag(d, col, 14, op);
+}
+/* the "you" car: wide rounded body + driver head + two wheels */
+function car(x, y, col, lookBack, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += '<rect x="' + (x - 66) + '" y="' + (y - 34) + '" width="132" height="76" rx="22" fill="none" stroke="' + col + '" stroke-width="10"/>';
+  g += dot(x, y - 58, 17, col);                       // driver head
+  g += dot(x - 42, y + 46, 11, col);                  // wheels
+  g += dot(x + 42, y + 46, 11, col);
+  if (lookBack) g += line(x, y - 58, x - 26, y - 44, WHITE, 7);
+  g += '</g>';
+  return g;
+}
+/* persistent faint lane tracks behind every scene (hero element, always present) */
+function guideTracks(op) {
+  op = (op == null ? 0.16 : op);
+  return rrect(LX, (TOP + BOT) / 2, 96, BOT - TOP, 48, BLUE, op) +
+         rrect(RX, (TOP + BOT) / 2, 96, BOT - TOP, 48, BLUE, op);
+}
+/* scrolling dashed road markers down a lane — constant motion cue.
+   phase in [0,1) shifts the pattern; speed multiplies visually via phase rate. */
+function laneDashes(x, phase, col, op) {
+  var g = '', gap = 150, dash = 66, span = BOT - TOP;
+  var off = (phase % 1) * gap;
+  for (var y = TOP - gap + off; y < BOT; y += gap) {
+    var a = Math.max(y, TOP), b = Math.min(y + dash, BOT);
+    if (b > a) g += line(x, a, x, b, col, 8, op);
+  }
+  return g;
+}
+/* thin horizon perspective lines converging upward — depth for the 9:16 frame */
+function perspective(op) {
+  op = (op == null ? 0.12 : op);
+  var vy = 60;
+  return line(LX, BOT, CX - 30, vy, WHITE, 2, op) +
+         line(RX, BOT, CX + 30, vy, WHITE, 2, op) +
+         line(LX - 150, BOT, CX - 90, vy, WHITE, 2, op * 0.6) +
+         line(RX + 150, BOT, CX + 90, vy, WHITE, 2, op * 0.6);
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+  s += perspective(0.10);
+  s += guideTracks();
+  var fade = ramp(u, 0.0, 0.3);
+  s += line(LX, TOP, LX, BOT, WHITE, 7, 0.85 * (0.5 + 0.5 * fade));
+  s += line(RX, TOP, RX, BOT, WHITE, 7, 0.85 * (0.5 + 0.5 * fade));
+  // scrolling markers — constant motion from frame 0
+  s += laneDashes(LX, u * 1.6, WHITE, 0.22);
+  s += laneDashes(RX, u * 1.6 + 0.4, WHITE, 0.22);
+  // other-lane traffic, evenly seeded, gently drifting
+  for (var i = 0; i < 6; i++) {
+    var y = BOT - 90 - i * 260 - u * 50 + rnd(i) * 40;
+    while (y < TOP) y += (BOT - TOP);
+    s += dot(RX, y, 15, DIM, 0.9);
+  }
+  var bob = Math.sin(u * Math.PI * 3) * 5;
+  s += car(LX, CARY + bob, AMBER, false, 1);
+  // "want": a rising stream of chevrons ahead of the car
+  for (var c = 0; c < 3; c++) {
+    var cp = (u * 2 + c / 3) % 1;
+    s += chevron(LX, CARY - 96 - cp * 150, 26, AMBER, (1 - cp) * 0.7);
+  }
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14);
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+  s += guideTracks();
+  s += line(LX, TOP, LX, BOT, WHITE, 7, 0.85);
+  s += line(RX, TOP, RX, BOT, WHITE, 7, 0.85);
+
+  s += laneDashes(LX, u * 2.2, WHITE, 0.20);
+  s += laneDashes(RX, u * 3.4, WHITE, 0.20);
+
+  var hop = smooth(ramp(u, 0.10, 0.26));
+  var carX = lerp(LX, RX, hop);
+  var carLift = Math.sin(hop * Math.PI) * 30;
+  // curved hop trail
+  if (hop > 0.02 && hop < 0.99) {
+    s += pathTag("M " + LX + " " + (CARY + 10) + " Q " + CX + " " + (CARY - 90) + " " + carX + " " + (CARY - carLift), AMBER, 4, 0.35);
+  }
+
+  for (var i = 0; i < 6; i++) {
+    var yr = BOT - 60 - i * 260 - u * 150 + rnd(i) * 50;
+    while (yr < TOP) yr += (BOT - TOP);
+    s += dot(RX, yr, 15, DIM, 0.9);
+  }
+  var surge = easeIn(ramp(u, 0.34, 1.0));
+  for (var j = 0; j < 6; j++) {
+    var base = BOT - 80 - j * 260 - rnd(j + 9) * 60;
+    var yl = base - surge * 1150;
+    if (yl > TOP - 60 && yl < BOT + 60) {
+      s += line(LX, yl + 18, LX, yl + 18 + 60 * surge, WHITE, 6, 0.4);   // motion streak
+      s += dot(LX, yl, 15, WHITE, 0.95);
+    }
+  }
+  s += car(carX, CARY - carLift, AMBER, u > 0.42, 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH — is something targeting me? (funnel + coral beam on the OTHER lane) */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += guideTracks();
+  var bend = smooth(ramp(u, 0.06, 0.42)) * (1 - smooth(ramp(u, 0.74, 1.0)));
+  var midY = CARY;
+  var pinch = bend * 150;
+  var dL = "M " + LX + " " + TOP + " Q " + (LX + pinch) + " " + midY + " " + LX + " " + BOT;
+  var dR = "M " + RX + " " + TOP + " Q " + (RX - pinch) + " " + midY + " " + RX + " " + BOT;
+  s += pathTag(dL, WHITE, 7, 0.85);
+  s += pathTag(dR, WHITE, 7, 0.85);
+  s += laneDashes(LX, u * 1.4, WHITE, 0.16 * (1 - bend));
+  s += laneDashes(RX, u * 1.4 + 0.5, WHITE, 0.16 * (1 - bend));
+
+  // "picking whichever lane you leave" -> beam lives on LX (the abandoned lane),
+  // with one brief doubt-flicker onto the car's lane, then back.
+  var litLeft = !(u >= 0.42 && u < 0.54);
+  var litX = litLeft ? LX : RX;
+  var glow = (0.3 + 0.7 * Math.min(1, u * 5)) * (1 - smooth(ramp(u, 0.80, 0.97)));
+  if (glow > 0.02) {
+    var lean = (litX === LX ? 1 : -1) * pinch;
+    s += '<path d="M ' + litX + ' ' + TOP + ' Q ' + (litX + lean) + ' ' + midY + ' ' + litX + ' ' + BOT +
+         '" fill="none" stroke="' + CORAL + '" stroke-width="46" opacity="' + (0.12 * glow) + '"/>';
+    s += '<path d="M ' + litX + ' ' + TOP + ' Q ' + (litX + lean) + ' ' + midY + ' ' + litX + ' ' + BOT +
+         '" fill="none" stroke="' + CORAL + '" stroke-width="12" opacity="' + (0.85 * glow) + '"/>';
+    s += ring(litX, midY, 46 + 10 * Math.sin(u * 30), CORAL, 5, 0.8 * glow);
+  }
+  for (var i = 0; i < 5; i++) {
+    s += dot(LX, BOT - 100 - i * 320 - u * 70 + rnd(i) * 40, 14, DIM, 0.8);
+    s += dot(RX, BOT - 200 - i * 320 - u * 100 + rnd(i + 4) * 40, 14, DIM, 0.8);
+  }
+  s += car(RX, CARY, AMBER, false, 1);
+  s += line(RX, CARY - 58, RX + 6, CARY - 86, WHITE, 7, 0.9);           // gaze up
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND — belts; slow lane passed for minutes, fast lane overtakes in seconds */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  var bw = lerp(96, 150, smooth(ramp(u, 0.0, 0.26)));
+  s += rrect(LX, (TOP + BOT) / 2, bw, BOT - TOP, bw / 2, BLUE, 0.34);
+  s += rrect(RX, (TOP + BOT) / 2, bw, BOT - TOP, bw / 2, BLUE, 0.34);
+  s += line(LX, TOP, LX, BOT, WHITE, 4, 0.30);
+  s += line(RX, TOP, RX, BOT, WHITE, 4, 0.30);
+
+  var swap = smooth(ramp(u, 0.48, 0.60));              // 0 = car slow, 1 = car fast
+  var speedL = lerp(1150, 240, swap);
+  var countL = Math.round(lerp(9, 3, swap));
+  var speedR = lerp(150, 1500, swap);
+  var countR = Math.round(lerp(3, 8, swap));
+
+  for (var i = 0; i < countL; i++) {
+    var pL = (u * (speedL / 820) + rnd(i)) % 1;
+    var yl = lerp(BOT, TOP, pL);
+    s += line(LX, yl + 16, LX, yl + 16 + 74, CORAL, 9, 0.9);           // coral streak = the remembered loss
+    s += dot(LX, yl, 15, WHITE, 0.95);
+  }
+  for (var j = 0; j < countR; j++) {
+    var pR = (u * (speedR / 820) + rnd(j + 20)) % 1;
+    var yr = lerp(BOT, TOP, pR);
+    if (swap > 0.4) s += line(RX, yr + 14, RX, yr + 14 + 70 * swap, WHITE, 6, 0.45);
+    s += dot(RX, yr, 15, WHITE, 0.9);
+  }
+  // amber gauge: "time spent being passed" — fills in phase A, then holds
+  var fill = smooth(clamp(u / 0.52, 0, 1));
+  var gx = CX - 300, gy = 1656, gw = 600;
+  s += rrectStroke(gx + gw / 2, gy, gw + 10, 30, 15, AMBER, 3, 0.5);
+  s += '<rect x="' + gx + '" y="' + (gy - 11) + '" width="' + (gw * fill) + '" height="22" rx="11" fill="' + AMBER + '" opacity="0.9"/>';
+  s += rrect(gx + gw * fill, gy, 26, 40, 6, AMBER, 0.95);               // moving marker
+
+  s += car(RX, CARY, AMBER, swap < 0.5, 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE — losing moments stack into a tall coral memory column */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.8, smooth(u));
+  s += '<g ' + camera(scale, 0, lerp(0, 90, smooth(u))) + '>';
+  s += rrect(LX, (TOP + BOT) / 2, lerp(150, 90, smooth(u)), BOT - TOP, 45, BLUE, lerp(0.34, 0.12, smooth(u)));
+  s += rrect(RX, (TOP + BOT) / 2, lerp(150, 90, smooth(u)), BOT - TOP, 45, BLUE, lerp(0.34, 0.12, smooth(u)));
+  s += line(LX, TOP, LX, BOT, WHITE, 4, 0.25 * (1 - smooth(u)));
+  s += line(RX, TOP, RX, BOT, WHITE, 4, 0.25 * (1 - smooth(u)));
+
+  var baseY = 1520;
+  var colX = CX - 150, amX = CX + 130;
+  var nCoral = 13, prog = smooth(ramp(u, 0.05, 0.82)) * nCoral;
+  var stacked = Math.floor(prog);
+  for (var i = 0; i < nCoral; i++) {
+    var slotY = baseY - i * 66;
+    if (i < stacked) {
+      s += '<rect x="' + (colX - 60) + '" y="' + (slotY - 26) + '" width="120" height="52" rx="8" fill="' + CORAL + '" opacity="0.92"/>';
+    } else {
+      var fp = clamp(prog - i, 0, 1);
+      if (fp > 0) {
+        var fx = lerp(LX, colX, easeOut(fp));
+        var fy = lerp(baseY - 240 - rnd(i) * 260, slotY, easeOut(fp));
+        s += line(fx, fy - 34, fx, fy + 34, CORAL, 10, 0.85);
+      }
+    }
+  }
+  var amN = 3, amStacked = Math.floor(smooth(ramp(u, 0.15, 0.7)) * amN);
+  for (var a = 0; a < amStacked; a++) {
+    s += '<rect x="' + (amX - 52) + '" y="' + (baseY - a * 60 - 24) + '" width="104" height="48" rx="8" fill="' + AMBER + '" opacity="0.92"/>';
+  }
+  s += rrectStroke(colX, baseY - nCoral * 33 + 20, 128, nCoral * 66 + 8, 10, CORAL, 2, 0.3);
+  s += rrectStroke(amX, baseY - amN * 30 + 14, 112, amN * 60 + 8, 10, AMBER, 2, 0.3);
+
+  s += car(CX + 330, baseY - 30, AMBER, false, 1);
+  s += line(CX + 330, baseY - 88, CX + 300, baseY - 116, WHITE, 7, 0.9);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE — one shared finish line, then snap back to plain lanes */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.8, 0.92, smooth(clamp(u / 0.7, 0, 1)));
+  s += '<g ' + camera(scale, 0, lerp(90, 0, smooth(u))) + '>';
+
+  var reform = smooth(ramp(u, 0.58, 0.86));
+  var finishY = 1180;
+  var conv = 1 - reform;
+
+  s += guideTracks(0.10 + 0.10 * reform);
+
+  if (conv > 0.02) {
+    var dL = "M " + LX + " " + BOT + " Q " + LX + " " + (finishY + 140) + " " + CX + " " + finishY;
+    var dR = "M " + RX + " " + BOT + " Q " + RX + " " + (finishY + 140) + " " + CX + " " + finishY;
+    s += pathTag(dL, BLUE, lerp(64, 8, reform), 0.4 * conv + 0.15);
+    s += pathTag(dR, BLUE, lerp(64, 8, reform), 0.4 * conv + 0.15);
+    s += line(CX - 250 * conv, finishY, CX + 250 * conv, finishY, WHITE, 9, conv);
+  }
+  if (reform > 0.02) {
+    s += line(LX, TOP, LX, BOT, WHITE, 7, 0.85 * reform);
+    s += line(RX, TOP, RX, BOT, WHITE, 7, 0.85 * reform);
+  }
+
+  var arr = smooth(clamp(u / 0.5, 0, 1));
+  if (reform < 0.5) {
+    var carArrX = lerp(CX - 360, CX, arr), carArrY = lerp(BOT - 40, finishY, arr);
+    var rivalX = lerp(CX + 360, CX, arr), rivalY = lerp(BOT - 40, finishY, arr);
+    s += dot(rivalX, rivalY, 16, WHITE, 1);
+    s += car(carArrX, carArrY, AMBER, false, 1);
+    if (arr > 0.9) s += ring(CX, finishY, 40 + (u - 0.5) * 300, WHITE, 5, clamp(1.2 - (u - 0.5) * 3, 0, 0.6));
+  } else {
+    var restX = lerp(CX, LX, reform), restY = lerp(finishY, CARY, reform);
+    s += dot(lerp(CX, RX, reform), lerp(finishY, 1400, reform), 15, DIM, 0.85);
+    s += car(restX, restY, AMBER, false, 1);
+    s += chevron(restX, restY - 118, 30, AMBER, 0.7 * reform);
+  }
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

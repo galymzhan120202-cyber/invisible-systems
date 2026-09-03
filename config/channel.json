@@ -1,0 +1,17 @@
+{
+  "name": "Invisible Systems",
+  "handle": "@InvisibleSystems",
+  "youtube_channel_id": "",
+  "niche": "Invisible Systems — hidden rules, incentives and feedback loops in everyday life",
+  "language": "en",
+  "category_id": "27",
+  "made_for_kids": false,
+  "default_privacy": "private",
+  "title_pattern": "{title} — Invisible Systems",
+  "description_template": "{takeaway}\n\nEvery day you move through systems you never see. Invisible Systems makes one of them visible in 60 seconds.\n\n#shorts #{cluster_tag} #systemsthinking #howitworks",
+  "base_tags": [
+    "invisible systems", "systems thinking", "how it works", "game theory",
+    "incentives", "everyday economics", "explained", "stick figure animation",
+    "60 seconds", "shorts"
+  ]
+}

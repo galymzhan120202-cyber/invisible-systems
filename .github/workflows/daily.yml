@@ -1,0 +1,119 @@
+name: daily
+
+# Produce the next queued topic and upload it to YouTube as PRIVATE.
+# A human still approves each video with 40_review.py.
+
+on:
+  schedule:
+    - cron: "0 6 * * *"        # 06:00 UTC daily (~11:00 Almaty). GitHub cron is best-effort.
+  workflow_dispatch:
+    inputs:
+      topic_id:
+        description: "specific pending topic id (blank = next in queue)"
+        required: false
+      produce_only:
+        description: "produce but do not upload"
+        type: boolean
+        default: false
+
+concurrency:
+  group: daily
+  cancel-in-progress: false
+
+permissions:
+  contents: write             # commit the mutated queue / video sources back
+
+jobs:
+  run:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      CI: "true"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m playwright install chromium
+
+      - name: Ensure ffmpeg
+        run: |
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+            choco install ffmpeg -y --no-progress
+          }
+          ffmpeg -version | Select-Object -First 1
+
+      - name: Write secrets
+        env:
+          CLIENT_SECRET_JSON: ${{ secrets.CLIENT_SECRET_JSON }}
+          YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
+          TELEGRAM_JSON: ${{ secrets.TELEGRAM_JSON }}
+          GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
+        run: |
+          New-Item -ItemType Directory -Force -Path secrets | Out-Null
+          Set-Content -Path secrets/client_secret.json  -Value $env:CLIENT_SECRET_JSON -NoNewline -Encoding utf8
+          Set-Content -Path secrets/youtube_token.json  -Value $env:YOUTUBE_TOKEN_JSON -NoNewline -Encoding utf8
+          Set-Content -Path secrets/telegram.json       -Value $env:TELEGRAM_JSON      -NoNewline -Encoding utf8
+          Set-Content -Path secrets/keys.env            -Value "GEMINI_API_KEYS=$env:GEMINI_API_KEYS" -NoNewline -Encoding utf8
+          foreach ($f in "client_secret.json","youtube_token.json","telegram.json","keys.env") {
+            if (-not (Test-Path "secrets/$f") -or (Get-Item "secrets/$f").Length -eq 0) {
+              throw "secrets/$f is missing or empty - add the matching GitHub Actions secret"
+            }
+          }
+
+      - name: Run pipeline
+        run: |
+          $args = @()
+          if ("${{ github.event.inputs.topic_id }}") { $args += @("--id", "${{ github.event.inputs.topic_id }}") }
+          if ("${{ github.event.inputs.produce_only }}" -eq "true") { $args += "--produce-only" }
+          python scripts/run_daily.py @args
+
+      - name: Commit queue + sources
+        if: always()
+        run: |
+          git config user.name  "auto-channel bot"
+          git config user.email "actions@github.com"
+          git add queue videos config
+          if (git diff --cached --quiet) { Write-Host "nothing to commit" }
+          else {
+            git commit -m "run_daily: ${{ github.run_id }} [skip ci]"
+            git push
+          }
+
+      - name: Upload MP4 artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-${{ github.run_id }}
+          path: videos/**/*-WITH-AUDIO.mp4
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Notify on infra failure
+        if: failure()
+        env:
+          TELEGRAM_JSON: ${{ secrets.TELEGRAM_JSON }}
+        run: |
+          try {
+            if (-not (Test-Path secrets/telegram.json)) {
+              Set-Content -Path secrets/telegram.json -Value $env:TELEGRAM_JSON -NoNewline -Encoding utf8
+            }
+            python scripts/lib/notify.py "GitHub Actions daily run FAILED (infra) - https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          } catch { Write-Host "notify skipped: $_" }

@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You're in ordinary traffic, moving with everyone else. And you want one simple thing: to get ahead. A small, reasonable urge.",
+    "rate": "+5%",
+    "start": 0.4
+  },
+  {
+    "id": "scene-02",
+    "text": "So you take the lane that's rolling. Seconds later, the lane you left surges past you. You feel it, and it always happens.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "So you go looking for the trick. Is something watching you, picking whichever lane you leave? It isn't. Traffic moves in waves.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "Then it clicks. When your lane crawls, cars pour past for minutes. When it flies, you overtake in seconds. You spend more time being passed.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "And that's the price. Every losing moment gets stored. Your memory of the drive fills with the other lane winning, and it's hard to shake.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "Tomorrow you're in the same traffic, and both lanes still arrive together. But now you see the wave, and it stops fooling you.",
+    "rate": "+5%",
+    "start": 50.2
+  }
+]

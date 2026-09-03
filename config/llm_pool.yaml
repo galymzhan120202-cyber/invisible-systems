@@ -1,0 +1,41 @@
+# LLM router pool. Ordered lists per task; on 429 / quota / 5xx the router
+# cools that key and moves to the next entry. Add providers by adding a backend
+# block + its key in secrets/keys.env. "20 keys" is NOT the model here — mix real
+# providers instead; multiple keys per provider go comma-separated in the env var.
+
+cooldown_seconds: 90          # base cooldown after a rate-limit (Retry-After wins if given)
+max_output_tokens: 12000
+temperature: 0.75
+
+tasks:
+  # 2.5-pro was retired for new keys and 3.x-pro is paid-only (free tier limit 0),
+  # so flash is the workhorse; flash-lite is the fallback. Re-add a pro backend
+  # here first if billing is ever enabled.
+  author: [gemini-flash, gemini-flash-lite]   # storyboard + animation scene code
+  light:  [gemini-flash-lite, gemini-flash]   # topic ideas, metadata, short rewrites
+
+backends:
+  gemini-flash:
+    provider: gemini
+    model: gemini-2.5-flash         # confirmed working 2026-09
+    key_env: GEMINI_API_KEYS
+  gemini-flash-lite:
+    provider: gemini
+    model: gemini-2.5-flash-lite    # lighter, larger free quota; router skips it if it 404s
+    key_env: GEMINI_API_KEYS
+
+  # ---- add later, no code changes needed ----
+  # claude-sonnet:
+  #   provider: anthropic
+  #   model: claude-sonnet-5
+  #   key_env: ANTHROPIC_API_KEYS
+  # groq-llama:
+  #   provider: openai_compat
+  #   model: llama-3.3-70b-versatile
+  #   base_url: https://api.groq.com/openai/v1
+  #   key_env: GROQ_API_KEYS
+  # openrouter-free:
+  #   provider: openai_compat
+  #   model: meta-llama/llama-3.3-70b-instruct
+  #   base_url: https://openrouter.ai/api/v1
+  #   key_env: OPENROUTER_API_KEYS

@@ -1,0 +1,22 @@
+{
+  "python": "python",
+  "video": {
+    "ratio": "9:16",
+    "width": 1080,
+    "height": 1920,
+    "fps": 24,
+    "duration": 60.0,
+    "theme": "dark",
+    "voice": "en-US-AvaNeural",
+    "render_workers": 4
+  },
+  "pipeline": {
+    "videos_per_run": 1,
+    "keep_silent_mp4": false,
+    "burn_subtitles": false
+  },
+  "review_gate": {
+    "upload_privacy": "private",
+    "require_human_approval": true
+  }
+}

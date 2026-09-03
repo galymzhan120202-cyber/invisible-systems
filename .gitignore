@@ -1,0 +1,24 @@
+# secrets
+secrets/*.json
+secrets/*.env
+!secrets/keys.env.example
+
+# per-video build artifacts (keep sources: storyboard.md, animation.html, audio/narration.json, audio/sfx-cues.tsv)
+videos/**/*-silent.mp4
+videos/**/*-WITH-AUDIO.mp4
+videos/**/*-BILINGUAL-SUBTITLES.mp4
+videos/**/audio/voice-native/
+videos/**/audio/voiceover.wav
+videos/**/audio/sfx-track.wav
+videos/**/audio/final-mix.wav
+videos/**/stickman-frames-*/
+videos/**/previews/
+
+# logs / runtime state
+logs/*.log
+logs/llm_state.json
+
+# python
+__pycache__/
+*.pyc
+.venv/
