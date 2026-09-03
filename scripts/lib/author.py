@@ -222,7 +222,12 @@ HARD CONTRACT - the renderer drives it frame by frame:
   frames, seed any randomness from an index (a sin-hash like the reference).
   Frames are requested OUT OF ORDER and in parallel - every t must be correct on
   its own.
-- 6 scenes of 10 s. Canvas 1080x1920, keep action inside the top/bottom ~8%.
+- 6 scenes of 10 s. Canvas 1080x1920 (portrait). Use constants TOP=160 and
+  BOT=1760 and BUILD EVERY SCENE TO FILL THAT BAND. The composition must occupy
+  most of the 1080x1920 frame at all times: a large hero element spanning roughly
+  y=200 to y=1700, figures ~180-260 px tall, generous stroke widths (7-12).
+  NEVER cluster the scene into a corner, a small central clump, or the bottom
+  third - an empty upper half is a FAILED frame. Distribute elements top to bottom.
 - One or two hero elements persist across all 6 scenes and visibly morph at each
   boundary (line -> belt -> column -> finish line ...). No full-frame slide cuts.
 - Frame 0 is a complete composition. The final frame is stable >= 0.8 s. Never
@@ -278,6 +283,121 @@ def author_animation(topic: dict, storyboard_md: str, narration: list[dict],
         if i > 0:
             html = html[i:]
     return html
+
+
+def build_animation(topic: dict, storyboard_md: str, narration: list[dict],
+                    html_path: Path, *, attempts: int = 3, verbose: bool = True) -> bool:
+    """Try the LLM up to `attempts` times; on total failure fall back to the
+    deterministic template so the video still ships. Returns True if the final
+    file is the deterministic fallback."""
+    err = None
+    for i in range(1, attempts + 1):
+        try:
+            html = author_animation(topic, storyboard_md, narration,
+                                    repair_error=err, verbose=verbose)
+            html_path.write_text(html, encoding="utf-8")
+            errs = validate_animation(html_path)
+            if not errs:
+                if verbose:
+                    print(f"  animation.html OK on attempt {i} "
+                          f"({html_path.stat().st_size // 1024} KB)")
+                return False
+            err = "\n".join(errs)
+            if verbose:
+                print(f"  attempt {i} invalid: {err}")
+        except Exception as e:  # noqa: BLE001
+            err = str(e)
+            if verbose:
+                print(f"  attempt {i} errored: {err}")
+    print("  LLM animation failed 3x - using the deterministic fallback template")
+    html_path.write_text(fallback_animation(narration), encoding="utf-8")
+    errs = validate_animation(html_path)
+    if errs:
+        raise RuntimeError("fallback animation invalid (bug): " + "; ".join(errs))
+    return True
+
+
+def fallback_animation(narration: list[dict]) -> str:
+    """A generic but always-valid, full-frame 6-scene animation. Not topic-specific:
+    a hero shape morphs line -> belt -> column -> loop -> split -> line while a
+    figure and dot streams move, with the accent colour keyed to the scene."""
+    starts = [round(float(n["start"]), 2) for n in narration][:6]
+    while len(starts) < 6:
+        starts.append(len(starts) * 10 + 0.3)
+    return _FALLBACK_HTML.replace("__STARTS__", repr(starts))
+
+
+_FALLBACK_HTML = r"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Invisible Systems</title>
+<style>html,body{margin:0;padding:0;background:#000;overflow:hidden}svg{display:block}</style>
+</head><body>
+<svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+<rect width="1080" height="1920" fill="#000"/><g id="stage"></g></svg>
+<script>
+"use strict";
+var W=1080,H=1920,CX=540,TOP=180,BOT=1740,DUR=60;
+var WHITE="#FFFFFF",DIM="#8A93A6",BLUE="#4C86F0",AMBER="#F2A93B",CORAL="#FF5B5B";
+window.__duration=DUR;
+var STARTS=__STARTS__;
+function clamp(x,a,b){return x<a?a:(x>b?b:x);}
+function lerp(a,b,t){return a+(b-a)*t;}
+function smooth(x){x=clamp(x,0,1);return x*x*(3-2*x);}
+function rnd(i){var s=Math.sin((i+1)*12.9898)*43758.5453;return s-Math.floor(s);}
+function L(x1,y1,x2,y2,c,w,o){return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+c+'" stroke-width="'+w+'" stroke-linecap="round" opacity="'+(o==null?1:o)+'"/>';}
+function D(x,y,r,c,o){return '<circle cx="'+x+'" cy="'+y+'" r="'+r+'" fill="'+c+'" opacity="'+(o==null?1:o)+'"/>';}
+function RR(x,y,w,h,rad,c,o){return '<rect x="'+(x-w/2)+'" y="'+(y-h/2)+'" width="'+w+'" height="'+h+'" rx="'+rad+'" fill="'+c+'" opacity="'+(o==null?1:o)+'"/>';}
+function fig(x,fy,h,c,sw){var hr=h*0.13,hc=fy-h+hr,nk=hc+hr,hip=fy-h*0.42,ay=nk+h*0.16;
+ return '<g stroke="'+c+'" stroke-width="'+sw+'" stroke-linecap="round" fill="none">'
+ +'<circle cx="'+x+'" cy="'+hc+'" r="'+hr+'" fill="'+c+'"/>'
+ +'<line x1="'+x+'" y1="'+nk+'" x2="'+x+'" y2="'+hip+'"/>'
+ +'<line x1="'+x+'" y1="'+ay+'" x2="'+(x-h*0.22)+'" y2="'+(ay+h*0.10)+'"/>'
+ +'<line x1="'+x+'" y1="'+ay+'" x2="'+(x+h*0.24)+'" y2="'+(ay-h*0.05)+'"/>'
+ +'<line x1="'+x+'" y1="'+hip+'" x2="'+(x-h*0.16)+'" y2="'+fy+'"/>'
+ +'<line x1="'+x+'" y1="'+hip+'" x2="'+(x+h*0.17)+'" y2="'+fy+'"/></g>';}
+var ACC=[AMBER,AMBER,CORAL,BLUE,CORAL,BLUE];
+function sceneIndex(t){for(var i=5;i>=0;i--){if(t>=STARTS[i])return i;}return 0;}
+function scene(idx,u){
+ var acc=ACC[idx], s='';
+ // hero band: two rails that thicken to belts mid-video, converge at the end
+ var midw=lerp(30,150,smooth(clamp((idx-0.5)/2.2,0,1)));
+ var conv=idx>=5?smooth(u):0;
+ var lx=lerp(CX-190,CX,conv), rx=lerp(CX+190,CX,conv);
+ s+=RR(lx,(TOP+BOT)/2,midw,BOT-TOP,midw/2,BLUE,0.30);
+ s+=RR(rx,(TOP+BOT)/2,midw,BOT-TOP,midw/2,BLUE,0.30);
+ s+=L(lx,TOP,lx,BOT,WHITE,6,0.5);s+=L(rx,TOP,rx,BOT,WHITE,6,0.5);
+ // moving dot streams over the whole height
+ var speed=1+idx*0.5+u;
+ for(var i=0;i<10;i++){
+  var p=((i/10)+u*speed+rnd(i+idx*7))%1;var y=lerp(BOT,TOP,p);
+  s+=D(lx,y,14,i%3?DIM:acc,0.9);
+  var p2=((i/10)+u*(speed*0.6)+rnd(i+99))%1;
+  s+=D(rx,lerp(BOT,TOP,p2),14,WHITE,0.85);
+ }
+ // memory/column motif in the middle scenes
+ if(idx===2||idx===4){
+  var n=Math.floor(smooth(u)*9);
+  for(var k=0;k<n;k++)s+=RR(CX,BOT-120-k*70,150,52,10,CORAL,0.9);
+ }
+ // hero figure, large, stepping; rides the left rail, hops to centre at the end
+ var fx=idx>=5?lerp(lx,CX,conv):lx;
+ var bob=Math.sin((u+idx)*Math.PI*3)*8;
+ s+=fig(fx,BOT-40+bob,300,acc===AMBER?AMBER:WHITE,18);
+ // want-arrow ahead
+ s+='<path d="M '+(fx+120)+' '+(BOT-190)+' l 46 34 l -46 34" fill="none" stroke="'+AMBER+'" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" opacity="'+(0.5+0.4*Math.sin(u*6))+'"/>';
+ // top marker so the upper frame is never empty
+ s+=D(CX,TOP+90,26+8*Math.sin(u*4+idx),acc,0.9);
+ s+=L(CX-70,TOP+90,CX+70,TOP+90,DIM,5,0.4);
+ return s;
+}
+function render(t){t=clamp(t,0,DUR);var idx=sceneIndex(t);
+ var a=STARTS[idx],b=idx<5?STARTS[idx+1]:DUR;var u=clamp((t-a)/Math.max(0.5,b-a),0,1);
+ document.getElementById("stage").innerHTML=scene(idx,u);}
+window.__seek=function(s){render(s);};
+function boot(){render(0);window.__ready=true;}
+if(document.fonts&&document.fonts.ready&&document.fonts.ready.then){document.fonts.ready.then(boot);setTimeout(function(){if(!window.__ready)boot();},1200);}else{boot();}
+if(!window.__recording){var st=null;function tick(ts){if(st==null)st=ts;render(((ts-st)/1000)%DUR);requestAnimationFrame(tick);}requestAnimationFrame(tick);}
+</script></body></html>
+"""
 
 
 # ----------------------------------------------------------------- validators
@@ -371,20 +491,39 @@ def validate_animation(html_path: Path, duration: float = 60.0) -> list[str]:
                 errs.append(f"window.__duration = {dur!r}, expected ~{duration}")
 
             seen = {}
+            boxes = []
             for t in probes:
-                html = page.evaluate(
-                    "t => { window.__seek(t); "
-                    "const s = document.getElementById('stage'); "
-                    "return s ? s.innerHTML : null; }", t)
-                if html is None:
+                res = page.evaluate(
+                    "t => { window.__seek(t);"
+                    " const s = document.getElementById('stage');"
+                    " if (!s) return null;"
+                    " let bb = null; try { bb = s.getBBox(); } catch (e) {}"
+                    " return { html: s.innerHTML,"
+                    "   bx: bb && bb.x, by: bb && bb.y, bw: bb && bb.width, bh: bb && bb.height }; }",
+                    t)
+                if res is None:
                     errs.append("no #stage element after __seek")
                     break
-                if len(html.strip()) < 40:
-                    errs.append(f"#stage nearly empty at t={t:.1f}s "
-                                f"({len(html.strip())} chars)")
-                seen[t] = html
+                if len(res["html"].strip()) < 40:
+                    errs.append(f"#stage nearly empty at t={t:.1f}s")
+                seen[t] = res["html"]
+                if res["bh"]:
+                    boxes.append((t, res["by"], res["bh"]))
             if len(seen) >= 2 and len(set(seen.values())) == 1:
                 errs.append("#stage identical at every probed time - not animating")
+            # framing: content must fill the frame, not hug a corner / the bottom
+            if boxes:
+                max_h = max(bh for _, _, bh in boxes)
+                min_top = min(by for _, by, _ in boxes)
+                max_bot = max(by + bh for _, by, bh in boxes)
+                if max_h < 850:
+                    errs.append(f"composition too small - tallest frame spans only "
+                                f"{max_h:.0f}px of 1920; fill y~200..1700")
+                elif min_top > 780:
+                    errs.append(f"composition sits low - nothing above y={min_top:.0f}; "
+                                f"the upper half is empty, distribute elements top to bottom")
+                elif max_bot < 1200:
+                    errs.append(f"composition sits high - nothing below y={max_bot:.0f}")
             browser.close()
     except Exception as e:  # noqa: BLE001
         errs.append(f"animation validation crashed: {e}")

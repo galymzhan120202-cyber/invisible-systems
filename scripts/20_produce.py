@@ -137,21 +137,9 @@ def author_files(topic: dict, proj: Path, audio: Path, *, verbose: bool) -> dict
 
     print("== author: animation.html ==")
     html_path = proj / "animation.html"
-    html = author.author_animation(topic, plan["storyboard_md"], plan["narration"],
-                                   verbose=verbose)
-    html_path.write_text(html, encoding="utf-8")
-    errs = author.validate_animation(html_path)
-    if errs:
-        print("  animation invalid, one repair try:")
-        for e in errs:
-            print("   -", e)
-        html = author.author_animation(topic, plan["storyboard_md"], plan["narration"],
-                                       repair_error="\n".join(errs), verbose=verbose)
-        html_path.write_text(html, encoding="utf-8")
-        errs = author.validate_animation(html_path)
-        if errs:
-            raise RuntimeError("animation.html still invalid: " + "; ".join(errs))
-    print(f"  wrote animation.html ({html_path.stat().st_size // 1024} KB), contract OK")
+    used_fallback = author.build_animation(topic, plan["storyboard_md"],
+                                           plan["narration"], html_path, verbose=verbose)
+    plan["animation_source"] = "fallback" if used_fallback else "llm"
     return plan
 
 
@@ -225,6 +213,7 @@ def main() -> None:
             plan = author_files(topic, proj, audio, verbose=verbose)
             brief["title_working"] = plan.get("title") or brief["title_working"]
             brief["takeaway"] = plan.get("takeaway", "")
+            brief["animation_source"] = plan.get("animation_source", "llm")
             brief_path.write_text(json.dumps(brief, indent=2, ensure_ascii=False),
                                   encoding="utf-8")
         except SystemExit:
