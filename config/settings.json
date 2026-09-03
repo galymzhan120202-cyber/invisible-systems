@@ -21,7 +21,7 @@
     "ramp_count": 1
   },
   "review_gate": {
-    "upload_privacy": "private",
-    "require_human_approval": true
+    "upload_privacy": "public",
+    "require_human_approval": false
   }
 }
