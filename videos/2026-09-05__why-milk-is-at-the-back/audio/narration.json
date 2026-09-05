@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You're at the supermarket, a stick-figure on a mission. Your cart empty, your focus narrow. You just need milk.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "So you head straight for the back, weaving through aisles of tempting products. Why is it always so far away?",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "Your naive brain thinks it's about refrigeration or heavy lifting. But the real reason is far more subtle, designed for you.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "Milk, bread, eggs — these are 'destination' items. Supermarkets place them at farthest points to maximize your exposure.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "Every step past snacks, drinks, and impulse buys is an opportunity for you to add something extra, increasing their profit.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "Now you see it. That long walk to the dairy aisle isn't a chore; it's a carefully crafted journey through an invisible sales machine.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

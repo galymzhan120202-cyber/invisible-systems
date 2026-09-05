@@ -1,4 +1,3 @@
-{"id": "why-milk-is-at-the-back", "title_working": "Why supermarket milk is at the very back", "system": "store layout as a forced path past high-margin goods", "cluster": "platforms-and-layout", "needs_stats": false, "status": "pending"}
 {"id": "why-flights-are-overbooked", "title_working": "Why your flight was overbooked on purpose", "system": "expected no-shows / yield management", "cluster": "pricing-and-incentives", "needs_stats": false, "status": "pending"}
 {"id": "why-traffic-jams-have-no-cause", "title_working": "Why traffic jams appear with no crash or cause", "system": "phantom jams / reaction-time waves travelling backward", "cluster": "traffic-and-crowds", "needs_stats": false, "status": "pending"}
 {"id": "why-hold-music-exists", "title_working": "Why 'please hold' music exists", "system": "silence reads as a dropped call / perceived wait time", "cluster": "platforms-and-layout", "needs_stats": false, "status": "pending"}
