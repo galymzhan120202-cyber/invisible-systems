@@ -1,0 +1,22 @@
+# Why your flight was overbooked on purpose
+
+*   **System:** Expected no-shows / Yield management
+*   **Narrator:** Bright, energetic adult-female (e.g., AvaNeural)
+*   **Palette:** Dark theme (black canvas, white line art), accent colours: signal blue (system/rules), warm amber (you/desire), coral red (naive/false model).
+*   **Hero Element:** A stick figure representing "YOU", a plane icon, and tickets/boarding passes.
+
+| # | Time | Story beat | Stick-figure scene | Motion / camera / transition | English VO | SFX |
+|---|---|---|---|---|---|---|
+| 1 | 0–10s | **YOU + NEED** - Excited for travel, need to get to destination. | Stick figure (YOU, warm amber outline) standing with luggage, holding a ticket. A plane icon is in the background. | Camera gently pans up from the ticket to YOU, then to the plane. Ticket glows warm amber. | "You've got your ticket, luggage checked, and you're all set for that dream vacation. You just need to get there on time." | `click-soft.mp3` (0.6s - ticket scan), `whoosh.mp3` (3.5s - travel excitement) |
+| 2 | 10–20s | **GO** - Arrive at the gate, encounter a chaotic crowd. | YOU (amber) approaches a gate icon. A large, dense group of stick figures (white) are packed around the gate, forming a queue. | YOU moves towards the crowd, stops as the crowd swells and fills the frame. Camera slightly zooms in on YOU's confused expression. | "But at the gate, it's a madhouse. So many people. A long, slow line, and a growing sense of dread." | `stack-collapse.mp3` (11.2s - crowd appears), `whoosh.mp3` (14.5s - dread builds) |
+| 3 | 20–30s | **SEARCH** - Confusion, naive assumption of a mistake. | YOU (amber) looks at the crowd, then at the plane icon. A thought bubble appears over YOU, showing the plane icon with a "full" symbol (coral red). | YOU's head turns between crowd and plane. The coral red thought bubble pulses slightly, then shrinks away. | "How can this be? Did the airline make a huge mistake? Did they simply sell too many tickets by accident?" | `focus.mp3` (21.0s - on thought), `drop-thud.mp3` (24.8s - wrong idea) |
+| 4 | 30–40s | **FIND** - The true mechanism: airlines predict no-shows. | The plane icon becomes a transparent outline (signal blue). Several stick figures from the crowd subtly fade out and disappear. The remaining stick figures perfectly fill the plane outline. | The plane outline appears. Some white stick figures subtly vanish as if they were no-shows. The remaining stick figures smoothly re-arrange to fit exactly inside the signal blue plane outline. | "No accident. Airlines *intentionally* overbook flights. They use complex data models to predict exactly how many passengers won't show." | `transform.mp3` (31.0s - plane outline), `complete-done.mp3` (34.5s - plane fills), `focus.mp3` (38.0s - on the model) |
+| 5 | 40–50s | **TAKE** - The cost: sometimes predictions are wrong, someone gets bumped. | The plane is now full (signal blue outline, white stick figures inside). YOU (amber) stands outside the plane, looking sad, with a cancelled ticket icon. | The full plane moves slightly to the side. YOU remains outside, isolated. The amber glow on YOU dims slightly. | "The goal is simple: ensure every flight leaves completely full, maximizing profit. Most of the time, their predictions are right." | `stack-collapse.mp3` (41.5s - person left out), `drop-thud.mp3` (44.0s - consequence) |
+| 6 | 50–60s | **RETURN + CHANGE** - Understanding the system, even if it's inconvenient. | YOU (amber) is now boarding a plane (signal blue outline), looking back at the full plane with a knowing look. | YOU walks towards the plane, then turns head to look back, a subtle nod of understanding. The plane (signal blue) is stable. | "But sometimes, everyone shows up. And that's when someone, often you, pays the real price for their invisible system. Now you see it." | `click-soft.mp3` (51.0s - understanding), `whoosh-fast.mp3` (55.0s - new perspective) |
+
+**Continuity map:**
+*   Scene 1 & 2: YOU (amber stick figure) and the plane icon are consistent.
+*   Scene 2 & 3: YOU (amber), the crowd, and the plane icon are consistent.
+*   Scene 3 & 4: The plane icon and the stick figures from the crowd are consistent, transforming into the system explanation.
+*   Scene 4 & 5: The full plane and the concept of individual stick figures are consistent. YOU (amber) reappears.
+*   Scene 5 & 6: YOU (amber) and the plane (now understood as a system) are consistent.

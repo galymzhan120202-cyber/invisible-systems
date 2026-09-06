@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why your flight was overbooked on purpose</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / rules
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want
+var CORAL = "#FF5B5B";              // coral red    -> the naive model / false signal
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+// Custom shape builders for the animation
+function stickFigure(x, y, h, col, sw, op, pose) {
+  op = (op == null ? 1 : op);
+  sw = sw || 10;
+  var headR = h * 0.15;
+  var bodyLen = h * 0.4;
+  var armLen = h * 0.25;
+  var legLen = h * 0.3;
+
+  var g = '<g opacity="' + op + '">';
+  // Head
+  g += dot(x, y - h / 2 + headR, headR, col);
+  // Body
+  g += line(x, y - h / 2 + headR * 2, x, y - h / 2 + headR * 2 + bodyLen, col, sw);
+
+  // Arms (default: slightly bent, hands near hips)
+  var armAngleL = -30, armAngleR = 30;
+  var armY = y - h / 2 + headR * 2 + bodyLen * 0.3;
+  var handXL = x - armLen * Math.cos(armAngleL * Math.PI / 180);
+  var handYL = armY + armLen * Math.sin(armAngleL * Math.PI / 180);
+  var handXR = x + armLen * Math.cos(armAngleR * Math.PI / 180);
+  var handYR = armY + armLen * Math.sin(armAngleR * Math.PI / 180);
+
+  // Legs (default: slightly apart)
+  var legY = y - h / 2 + headR * 2 + bodyLen;
+  var footXL = x - h * 0.1;
+  var footXR = x + h * 0.1;
+  var footY = legY + legLen;
+
+  if (pose === 'sad') {
+    armAngleL = -45; armAngleR = 45;
+    handYL = armY + armLen * Math.sin(armAngleL * Math.PI / 180) + h * 0.05; // Lower hands more
+    handYR = armY + armLen * Math.sin(armAngleR * Math.PI / 180) + h * 0.05;
+    footXL = x - h * 0.05; footXR = x + h * 0.05; // Legs closer
+  } else if (pose === 'confused') {
+    armAngleL = -60; armAngleR = 60; // Arms out slightly
+    handYL = armY + armLen * Math.sin(armAngleL * Math.PI / 180) - h * 0.05;
+    handYR = armY + armLen * Math.sin(armAngleR * Math.PI / 180) - h * 0.05;
+  } else if (pose === 'gaze_left') {
+    g += dot(x - headR * 0.4, y - h / 2 + headR * 0.2, headR * 0.3, WHITE); // Eye dot
+  } else if (pose === 'gaze_right') {
+    g += dot(x + headR * 0.4, y - h / 2 + headR * 0.2, headR * 0.3, WHITE); // Eye dot
+  } else if (pose === 'gaze_up') {
+    g += dot(x, y - h / 2 + headR * 0.2 - headR * 0.4, headR * 0.3, WHITE); // Eye dot
+  } else if (pose === 'gaze_down') {
+    g += dot(x, y - h / 2 + headR * 0.2 + headR * 0.4, headR * 0.3, WHITE); // Eye dot
+  } else if (pose === 'gaze_back') {
+    g += dot(x - headR * 0.4, y - h / 2 + headR * 0.2, headR * 0.3, WHITE); // Eye dot
+    g += line(x, y - h / 2 + headR, x - headR * 0.8, y - h / 2 + headR * 0.5, col, sw); // Neck turn
+  }
+
+  g += line(x, armY, handXL, handYL, col, sw); // Left arm
+  g += line(x, armY, handXR, handYR, col, sw); // Right arm
+  g += line(x, legY, footXL, footY, col, sw);  // Left leg
+  g += line(x, legY, footXR, footY, col, sw);  // Right leg
+
+  g += '</g>';
+  return g;
+}
+
+function luggage(x, y, w, h, col, sw, op) {
+  op = (op == null ? 1 : op);
+  sw = sw || 8;
+  var rad = w * 0.1;
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, rad, col, sw);
+  g += line(x - w * 0.3, y - h / 2, x - w * 0.3, y - h / 2 - h * 0.2, col, sw); // Handle
+  g += line(x + w * 0.3, y - h / 2, x + w * 0.3, y - h / 2 - h * 0.2, col, sw);
+  g += line(x - w * 0.3, y - h / 2 - h * 0.2, x + w * 0.3, y - h / 2 - h * 0.2, col, sw);
+  g += '</g>';
+  return g;
+}
+
+function ticket(x, y, w, h, col, sw, op) {
+  op = (op == null ? 1 : op);
+  sw = sw || 8;
+  var rad = w * 0.08;
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, rad, col, sw);
+  g += line(x + w * 0.2, y - h / 2, x + w * 0.2, y + h / 2, col, sw * 0.5, op * 0.6); // Perforation line
+  g += dot(x + w * 0.2, y - h / 2 + h * 0.1, sw * 0.4, col, op * 0.6); // Hole punch
+  g += dot(x + w * 0.2, y + h / 2 - h * 0.1, sw * 0.4, col, op * 0.6);
+  g += '</g>';
+  return g;
+}
+
+function planeIcon(x, y, size, col, sw, op) {
+  op = (op == null ? 1 : op);
+  sw = sw || 10;
+  var bodyW = size * 0.8;
+  var bodyH = size * 0.25;
+  var tailH = size * 0.15;
+  var wingW = size * 0.4;
+  var wingY = y + bodyH * 0.2;
+
+  var d = "M " + (x - bodyW / 2) + " " + y +
+          " L " + (x + bodyW / 2) + " " + y +
+          " L " + (x + bodyW / 2 + size * 0.1) + " " + (y - bodyH * 0.2) + // Nose tip
+          " L " + (x + bodyW / 2) + " " + (y - bodyH / 2) +
+          " L " + (x - bodyW / 2) + " " + (y - bodyH / 2) +
+          " Z"; // Body outline
+
+  d += " M " + (x + bodyW / 2 - size * 0.1) + " " + (y - bodyH / 2) + // Tail fin
+       " L " + (x + bodyW / 2 - size * 0.1) + " " + (y - bodyH / 2 - tailH) +
+       " L " + (x + bodyW / 2 - size * 0.25) + " " + (y - bodyH / 2 - tailH);
+
+  d += " M " + (x - wingW / 2) + " " + wingY + // Left wing
+       " L " + (x - wingW * 0.8) + " " + (wingY + size * 0.15) +
+       " L " + (x - wingW * 0.8) + " " + (wingY - size * 0.15);
+
+  d += " M " + (x + wingW / 2) + " " + wingY + // Right wing
+       " L " + (x + wingW * 0.8) + " " + (wingY + size * 0.15) +
+       " L " + (x + wingW * 0.8) + " " + (wingY - size * 0.15);
+
+  return pathTag(d, col, sw, op);
+}
+
+function gateIcon(x, y, w, h, col, sw, op) {
+  op = (op == null ? 1 : op);
+  sw = sw || 10;
+  var rad = w * 0.1;
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, rad, col, sw);
+  g += line(x, y - h / 2, x, y - h / 2 - h * 0.2, col, sw); // Gate post
+  g += line(x - w * 0.2, y - h / 2 - h * 0.1, x + w * 0.2, y - h / 2 - h * 0.1, col, sw); // Top bar
+  g += pathTag("M " + (x - w * 0.15) + " " + (y - h / 2 - h * 0.05) +
+                " L " + x + " " + (y - h / 2 - h * 0.15) +
+                " L " + (x + w * 0.15) + " " + (y - h / 2 - h * 0.05), col, sw); // Arrow
+  g += '</g>';
+  return g;
+}
+
+function fullSymbol(x, y, size, col, sw, op) {
+  op = (op == null ? 1 : op);
+  sw = sw || 12;
+  var g = '<g opacity="' + op + '">';
+  g += line(x - size / 2, y - size / 2, x + size / 2, y + size / 2, col, sw);
+  g += line(x - size / 2, y + size / 2, x + size / 2, y - size / 2, col, sw);
+  g += '</g>';
+  return g;
+}
+
+function thoughtBubble(x, y, w, h, col, sw, op) {
+  op = (op == null ? 1 : op);
+  sw = sw || 8;
+  var rad = w * 0.15;
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, rad, col, sw);
+  g += dot(x - w * 0.3, y + h / 2 + 30, 20, col, op);
+  g += dot(x - w * 0.4, y + h / 2 + 60, 10, col, op);
+  g += '</g>';
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.0, 1.05, smooth(u * 0.9));
+  var driftY = lerp(0, -60, smooth(u * 0.9)); // Camera pan up
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  var planeY = lerp(CY - 300, CY - 400, smooth(u));
+  s += planeIcon(CX, planeY, 280, WHITE, 10, 0.4);
+
+  var youX = CX, youY = BOT - 200;
+  var luggageX = youX - 100, luggageY = youY + 40;
+  var ticketX = youX + 60, ticketY = youY - 10;
+  var ticketGlow = 0.5 + 0.5 * Math.sin(u * Math.PI * 4); // Pulsing glow
+  var ticketOp = lerp(0.8, 1, smooth(u));
+
+  s += luggage(luggageX, luggageY, 100, 160, AMBER, 10, 0.9);
+  s += stickFigure(youX, youY, 260, AMBER, 12, 1);
+  s += ticket(ticketX, ticketY, 100, 160, AMBER, 10, ticketOp * ticketGlow);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.12, 0.14); // SFX: stack-collapse.mp3 at 11.2s -> u=0.12
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+
+  var youStart = CX - 300, youEnd = CX - 100;
+  var youX = lerp(youStart, youEnd, easeOut(ramp(u, 0.0, 0.3)));
+  var youY = BOT - 200;
+  var planeY = CY - 400;
+  var gateX = CX + 300, gateY = BOT - 200;
+
+  s += planeIcon(CX, planeY, 280, WHITE, 10, 0.4);
+  s += gateIcon(gateX, gateY, 180, 200, WHITE, 10, 0.9);
+
+  // Crowd of stick figures
+  var crowdDensity = smooth(ramp(u, 0.1, 0.5)); // Crowd swells
+  var crowdX = gateX - 120;
+  var crowdY = gateY;
+  var crowdW = lerp(100, 400, crowdDensity);
+  var crowdH = lerp(200, BOT - TOP - 100, crowdDensity);
+  var numFigures = Math.floor(lerp(5, 30, crowdDensity));
+  var figH = 180;
+
+  for (var i = 0; i < numFigures; i++) {
+    var rx = rnd(i * 10) * crowdW - crowdW / 2;
+    var ry = rnd(i * 10 + 1) * crowdH - crowdH / 2;
+    s += stickFigure(crowdX + rx, crowdY + ry, figH, WHITE, 8, 0.7);
+  }
+
+  var youScale = lerp(1, 1.1, smooth(ramp(u, 0.4, 0.7))); // Zoom in on YOU
+  var youHeadPose = (u > 0.4) ? 'confused' : null;
+  s += '<g transform="translate(' + youX + ' ' + youY + ') scale(' + youScale + ') translate(' + (-youX) + ' ' + (-youY) + ')">';
+  s += stickFigure(youX, youY, 260, AMBER, 12, 1, youHeadPose);
+  s += '</g>';
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var youX = CX - 100, youY = BOT - 200;
+  var planeY = CY - 400;
+  var crowdX = CX + 180, crowdY = BOT - 200;
+  var crowdW = 400, crowdH = BOT - TOP - 100;
+  var numFigures = 30;
+  var figH = 180;
+
+  s += planeIcon(CX, planeY, 280, WHITE, 10, 0.4);
+
+  for (var i = 0; i < numFigures; i++) {
+    var rx = rnd(i * 10) * crowdW - crowdW / 2;
+    var ry = rnd(i * 10 + 1) * crowdH - crowdH / 2;
+    s += stickFigure(crowdX + rx, crowdY + ry, figH, WHITE, 8, 0.7);
+  }
+
+  var youGaze = 'gaze_right'; // Looking at crowd/plane
+  var thoughtBubbleScale = smooth(ramp(u, 0.0, 0.3)) * (1 - smooth(ramp(u, 0.7, 0.9)));
+  var thoughtBubbleOp = thoughtBubbleScale > 0.01 ? 1 : 0;
+  var pulseScale = 1 + 0.05 * Math.sin(u * Math.PI * 10); // SFX: focus.mp3 at 21.0s -> u=0.07
+
+  s += stickFigure(youX, youY, 260, AMBER, 12, 1, youGaze);
+
+  if (thoughtBubbleOp > 0) {
+    var tbX = youX + 180, tbY = youY - 200;
+    s += '<g transform="translate(' + tbX + ' ' + tbY + ') scale(' + thoughtBubbleScale * pulseScale + ') translate(' + (-tbX) + ' ' + (-tbY) + ')">';
+    s += thoughtBubble(tbX, tbY, 200, 180, WHITE, 8, thoughtBubbleOp);
+    s += planeIcon(tbX, tbY - 20, 120, DIM, 8, thoughtBubbleOp * 0.8);
+    s += fullSymbol(tbX, tbY - 20, 80, CORAL, 10, thoughtBubbleOp * 0.9);
+    s += '</g>';
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var planeSize = lerp(280, 500, smooth(ramp(u, 0.0, 0.2))); // Plane grows
+  var planeOp = lerp(0.4, 1.0, smooth(ramp(u, 0.0, 0.2)));
+  var planeStroke = lerp(10, 14, smooth(ramp(u, 0.0, 0.2)));
+  s += planeIcon(CX, CY, planeSize, BLUE, planeStroke, planeOp); // Plane becomes BLUE outline
+
+  var crowdX = CX, crowdY = CY;
+  var crowdW = 400, crowdH = BOT - TOP - 100;
+  var initialNumFigures = 30;
+  var finalNumFigures = 15; // Roughly half for no-shows
+  var figH = 180;
+
+  var fadeOutProgress = smooth(ramp(u, 0.2, 0.5)); // Some figures fade out
+  var rearrangeProgress = smooth(ramp(u, 0.5, 0.9)); // Remaining figures rearrange
+
+  var planeBodyW = planeSize * 0.8;
+  var planeBodyH = planeSize * 0.25;
+  var planeInnerTop = CY - planeBodyH / 2 + planeBodyH * 0.1; // Adjust for plane shape
+  var planeInnerBottom = CY + planeBodyH / 2 - planeBodyH * 0.1;
+  var planeInnerLeft = CX - planeBodyW / 2 + planeBodyW * 0.1;
+  var planeInnerRight = CX + planeBodyW / 2 - planeBodyW * 0.1;
+
+  for (var i = 0; i < initialNumFigures; i++) {
+    var op = 1;
+    if (i >= finalNumFigures) { // These are the "no-shows"
+      op = 1 - fadeOutProgress;
+    }
+    if (op < 0.05) continue;
+
+    var startRx = rnd(i * 10) * crowdW - crowdW / 2;
+    var startRy = rnd(i * 10 + 1) * crowdH - crowdH / 2;
+    var startFigX = crowdX + startRx;
+    var startFigY = crowdY + startRy;
+
+    var endFigX, endFigY;
+    if (i < finalNumFigures) { // These figures move into the plane
+      var seatIdx = i;
+      var seatX = lerp(planeInnerLeft, planeInnerRight, rnd(seatIdx + 20));
+      var seatY = lerp(planeInnerTop, planeInnerBottom, rnd(seatIdx + 21));
+      endFigX = seatX;
+      endFigY = seatY;
+    } else { // No-shows fade out from their original position
+      endFigX = startFigX;
+      endFigY = startFigY;
+    }
+
+    var currentFigX = lerp(startFigX, endFigX, rearrangeProgress);
+    var currentFigY = lerp(startFigY, endFigY, rearrangeProgress);
+
+    s += stickFigure(currentFigX, currentFigY, figH * 0.7, WHITE, 8, op * 0.9);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.9, smooth(u));
+  var driftX = lerp(0, 150, smooth(u)); // Plane moves right
+  s += '<g ' + camera(scale, driftX, 0) + '>';
+
+  var planeSize = 500;
+  s += planeIcon(CX, CY, planeSize, BLUE, 14, 1); // Full BLUE plane outline
+
+  var planeBodyW = planeSize * 0.8;
+  var planeBodyH = planeSize * 0.25;
+  var planeInnerTop = CY - planeBodyH / 2 + planeBodyH * 0.1;
+  var planeInnerBottom = CY + planeBodyH / 2 - planeBodyH * 0.1;
+  var planeInnerLeft = CX - planeBodyW / 2 + planeBodyW * 0.1;
+  var planeInnerRight = CX + planeBodyW / 2 - planeBodyW * 0.1;
+
+  var finalNumFigures = 15;
+  var figH = 180;
+  for (var i = 0; i < finalNumFigures; i++) {
+    var seatIdx = i;
+    var seatX = lerp(planeInnerLeft, planeInnerRight, rnd(seatIdx + 20));
+    var seatY = lerp(planeInnerTop, planeInnerBottom, rnd(seatIdx + 21));
+    s += stickFigure(seatX, seatY, figH * 0.7, WHITE, 8, 0.9); // Figures inside plane
+  }
+
+  var youX = CX - 300 - driftX; // YOU stays relatively in place on screen
+  var youY = BOT - 200;
+  var youOp = lerp(1, 0.6, smooth(ramp(u, 0.0, 0.4))); // YOU dims
+  var youPose = 'sad';
+
+  var ticketX = youX + 60, ticketY = youY - 10;
+  var ticketOp = lerp(0, 1, smooth(ramp(u, 0.2, 0.6))); // Cancelled ticket appears
+  var ticketScale = lerp(0.5, 1, easeOut(ramp(u, 0.2, 0.6)));
+
+  s += stickFigure(youX, youY, 260, AMBER, 12, youOp, youPose);
+  if (ticketOp > 0) {
+    s += '<g transform="translate(' + ticketX + ' ' + ticketY + ') scale(' + ticketScale + ') translate(' + (-ticketX) + ' ' + (-ticketY) + ')">';
+    s += ticket(ticketX, ticketY, 100, 160, CORAL, 10, ticketOp);
+    s += fullSymbol(ticketX, ticketY, 60, CORAL, 8, ticketOp); // "Cancelled" symbol
+    s += '</g>';
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.9, 1.0, smooth(u));
+  var driftX = lerp(150, 0, smooth(u)); // Plane moves back to center
+  s += '<g ' + camera(scale, driftX, 0) + '>';
+
+  var planeSize = 500;
+  s += planeIcon(CX, CY, planeSize, BLUE, 14, 1);
+
+  var planeBodyW = planeSize * 0.8;
+  var planeBodyH = planeSize * 0.25;
+  var planeInnerTop = CY - planeBodyH / 2 + planeBodyH * 0.1;
+  var planeInnerBottom = CY + planeBodyH / 2 - planeBodyH * 0.1;
+  var planeInnerLeft = CX - planeBodyW / 2 + planeBodyW * 0.1;
+  var planeInnerRight = CX + planeBodyW / 2 - planeBodyW * 0.1;
+
+  var finalNumFigures = 15;
+  var figH = 180;
+  for (var i = 0; i < finalNumFigures; i++) {
+    var seatIdx = i;
+    var seatX = lerp(planeInnerLeft, planeInnerRight, rnd(seatIdx + 20));
+    var seatY = lerp(planeInnerTop, planeInnerBottom, rnd(seatIdx + 21));
+    s += stickFigure(seatX, seatY, figH * 0.7, WHITE, 8, 0.9);
+  }
+
+  var youStartWalkX = CX - 300;
+  var youEndWalkX = CX - 100;
+  var walkProgress = smooth(ramp(u, 0.0, 0.4));
+  var youX = lerp(youStartWalkX, youEndWalkX, walkProgress);
+  var youY = BOT - 200;
+  var youOp = lerp(0.6, 1, smooth(ramp(u, 0.0, 0.3))); // YOU's glow returns
+  var youPose = (u > 0.5) ? 'gaze_back' : null; // Looking back with understanding
+
+  s += stickFigure(youX, youY, 260, AMBER, 12, youOp, youPose);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
