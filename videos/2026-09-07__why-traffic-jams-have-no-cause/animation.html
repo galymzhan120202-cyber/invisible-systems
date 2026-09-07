@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why traffic jams appear with no crash or cause</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+var LANE_W = 180;                    // nominal width of a lane at the bottom of perspective
+var LANE_L = CX - LANE_W;            // left lane center
+var LANE_M = CX;                     // middle lane center
+var LANE_R = CX + LANE_W;            // right lane center
+var CAR_Y_BASE = 1400;               // "your" car resting height in portrait view
+var CAR_Y_OVERHEAD = 960;            // "your" car resting height in overhead view
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots/cars
+var BLUE  = "#4C86F0";              // signal blue  -> the system / the wave
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want
+var CORAL = "#FF5B5B";              // coral red    -> frustration / brake lights / question mark
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function questionMark(x, y, size, col, sw, op) {
+  var d = "M " + x + " " + (y - size * 0.5) +
+          " A " + (size * 0.3) + " " + (size * 0.3) + " 0 1 1 " + (x + size * 0.3) + " " + (y - size * 0.1) +
+          " L " + (x + size * 0.1) + " " + (y + size * 0.1) +
+          " L " + (x + size * 0.1) + " " + (y + size * 0.25);
+  return pathTag(d, col, sw, op) + dot(x + size * 0.1, y + size * 0.4, sw * 0.3, col, op);
+}
+
+/* Generic car: wide rounded body + driver head + two wheels + optional brake lights */
+function car(x, y, col, driverLook, brakeLight, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var bodyW = 160, bodyH = 110, bodyR = 25; // Adjusted for 180px height
+  var wheelR = 15;
+  var headR = 22;
+  var strokeW = 10;
+
+  g += rrectStroke(x, y, bodyW, bodyH, bodyR, col, strokeW, op);
+
+  g += dot(x - bodyW * 0.35, y + bodyH * 0.6, wheelR, col, op); // wheels
+  g += dot(x + bodyW * 0.35, y + bodyH * 0.6, wheelR, col, op);
+
+  g += dot(x, y - bodyH * 0.7, headR, col, op); // driver head (y-77, r=22)
+
+  // Driver gaze (simple stick figure arm/head turn)
+  if (driverLook === 'left') {
+    g += line(x, y - bodyH * 0.7, x - headR * 1.2, y - bodyH * 0.5, WHITE, strokeW * 0.7, op);
+  } else if (driverLook === 'right') {
+    g += line(x, y - bodyH * 0.7, x + headR * 1.2, y - bodyH * 0.5, WHITE, strokeW * 0.7, op);
+  } else if (driverLook === 'forward') {
+    // default, no extra lines
+  } else if (driverLook === 'frustrated') {
+    g += line(x, y - bodyH * 0.7, x, y - bodyH * 0.4, WHITE, strokeW * 0.7, op); // body
+    g += line(x - 20, y - bodyH * 0.2, x + 20, y - bodyH * 0.2, WHITE, strokeW * 0.7, op); // arms
+    g += line(x, y - bodyH * 0.7, x - 10, y - bodyH * 0.85, WHITE, strokeW * 0.7, op); // leaning forward
+  }
+
+  // Brake lights (rectangles at the back)
+  if (brakeLight) {
+    g += rrect(x - bodyW * 0.4, y + bodyH * 0.4, 16, 24, 4, CORAL, op * 0.9);
+    g += rrect(x + bodyW * 0.4, y + bodyH * 0.4, 16, 24, 4, CORAL, op * 0.9);
+  }
+
+  g += '</g>';
+  return g;
+}
+
+/* Overhead car: simple rounded rectangle with optional brake lights */
+function overheadCar(x, y, col, brakeLight, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var carW = 80, carH = 130, carR = 12; // Adjusted for better visibility
+  var strokeW = 9;
+
+  g += rrectStroke(x, y, carW, carH, carR, col, strokeW, op);
+
+  // Brake lights (small rectangles at the back)
+  if (brakeLight) {
+    g += rrect(x - carW * 0.2, y + carH * 0.4, carW * 0.4, carH * 0.15, 3, CORAL, op * 0.9);
+    g += rrect(x + carW * 0.2, y + carH * 0.4, carW * 0.4, carH * 0.15, 3, CORAL, op * 0.9);
+  }
+  g += '</g>';
+  return g;
+}
+
+/* Highway lanes: persistent hero element, adapts to perspective/overhead */
+function highwayLanes(perspective, op) {
+  op = (op == null ? 1 : op);
+  var s = '';
+  var sw = 8; // Lane line stroke width
+
+  if (perspective) {
+    var horizonY = TOP + 100; // Where lanes converge
+    var laneWidthAtTop = 60;
+    var laneWidthAtBottom = LANE_W;
+
+    // Left lane
+    s += pathTag("M " + (LANE_L - laneWidthAtBottom/2) + " " + BOT +
+                 " L " + (CX - laneWidthAtTop) + " " + horizonY, WHITE, sw, op);
+    s += pathTag("M " + (LANE_L + laneWidthAtBottom/2) + " " + BOT +
+                 " L " + (CX - laneWidthAtTop/2) + " " + horizonY, WHITE, sw, op);
+
+    // Middle lane
+    s += pathTag("M " + (LANE_M - laneWidthAtBottom/2) + " " + BOT +
+                 " L " + (CX - laneWidthAtTop/2) + " " + horizonY, WHITE, sw, op);
+    s += pathTag("M " + (LANE_M + laneWidthAtBottom/2) + " " + BOT +
+                 " L " + (CX + laneWidthAtTop/2) + " " + horizonY, WHITE, sw, op);
+
+    // Right lane
+    s += pathTag("M " + (LANE_R - laneWidthAtBottom/2) + " " + BOT +
+                 " L " + (CX + laneWidthAtTop/2) + " " + horizonY, WHITE, sw, op);
+    s += pathTag("M " + (LANE_R + laneWidthAtBottom/2) + " " + BOT +
+                 " L " + (CX + laneWidthAtTop) + " " + horizonY, WHITE, sw, op);
+
+  } else { // Overhead view
+    s += line(LANE_L - LANE_W/2, TOP, LANE_L - LANE_W/2, BOT, WHITE, sw, op);
+    s += line(LANE_L + LANE_W/2, TOP, LANE_L + LANE_W/2, BOT, WHITE, sw, op);
+    s += line(LANE_R - LANE_W/2, TOP, LANE_R - LANE_W/2, BOT, WHITE, sw, op);
+    s += line(LANE_R + LANE_W/2, TOP, LANE_R + LANE_W/2, BOT, WHITE, sw, op);
+  }
+  return s;
+}
+
+/* Scrolling dashed road markers — constant motion cue.
+   phase in [0,1) shifts the pattern; speed multiplies visually via phase rate. */
+function laneDashes(x, phase, col, op, perspective) {
+  var g = '', gap = 150, dash = 60, sw = 8;
+  var off = (phase % 1) * gap;
+
+  if (perspective) {
+    var horizonY = TOP + 100;
+    var scaleFactor = function(y) { return lerp(0.1, 1, (y - horizonY) / (BOT - horizonY)); };
+
+    for (var y = TOP - gap + off; y < BOT + gap; y += gap) {
+      var y1 = Math.max(y, horizonY + 10);
+      var y2 = Math.min(y + dash, BOT);
+      if (y2 > y1) {
+        var x_scaled = lerp(CX, x, scaleFactor(y1)); // Dashes are usually between lanes, so x is the lane divider x
+        g += line(x_scaled, y1, x_scaled, y2, col, sw * scaleFactor(y1), op);
+      }
+    }
+  } else { // Overhead view
+    for (var y = TOP - gap + off; y < BOT; y += gap) {
+      var a = Math.max(y, TOP), b = Math.min(y + dash, BOT);
+      if (b > a) g += line(x, a, x, b, col, sw, op);
+    }
+  }
+  return g;
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED: Smooth driving, desire for efficiency. */
+function scene1(u) {
+  var s = '';
+  var cameraShiftX = lerp(0, -100, smooth(u)); // Track car moving right, camera moves left
+  var cameraScale = 1;
+
+  s += '<g ' + camera(cameraScale, cameraShiftX, 0) + '>';
+  s += highwayLanes(true, 0.8);
+
+  // Lane dashes on the dividers
+  s += laneDashes(LANE_L + LANE_W/2, u * 1.5, WHITE, 0.6, true);
+  s += laneDashes(LANE_M + LANE_W/2, u * 1.5 + 0.5, WHITE, 0.6, true);
+
+  // Your amber car, moving right
+  var yourCarX = lerp(LANE_M - 100, LANE_M + 100, u);
+  var yourCarY = CAR_Y_BASE;
+  s += car(yourCarX, yourCarY, AMBER, 'forward', false, 1);
+
+  // Other white cars, moving smoothly
+  var numOtherCars = 6;
+  for (var i = 0; i < numOtherCars; i++) {
+    var lane = (i % 2 === 0) ? LANE_L : LANE_R;
+    var carSpeed = lerp(1.2, 1.8, rnd(i + 10)); // Vary speeds slightly
+    var carX = lerp(lane - 150, lane + 150, (u * carSpeed + rnd(i + 20)) % 1);
+    var carY = CAR_Y_BASE - 300 - i * 200 - u * 50;
+    while (carY < TOP - 100) carY += (BOT - TOP + 200); // Loop cars vertically
+    s += car(carX, carY, WHITE, 'forward', false, 0.8);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO: Sudden, inexplicable stop. */
+function scene2(u) {
+  var s = '';
+  var cameraZoom = lerp(1.0, 1.1, easeIn(ramp(u, 0.1, 0.4)));
+  var cameraShiftY = lerp(0, -60, easeIn(ramp(u, 0.1, 0.4)));
+  var carStopU = ramp(u, 0.1, 0.4); // Car starts stopping at 0.1, fully stopped at 0.4
+  var carFrustrationU = ramp(u, 0.5, 0.9); // Driver gets frustrated after stopping
+
+  s += '<g ' + camera(cameraZoom, 0, cameraShiftY) + '>';
+  s += highwayLanes(true, 0.8);
+
+  s += laneDashes(LANE_L + LANE_W/2, u * 0.5, WHITE, 0.6, true); // Dashes slow down
+  s += laneDashes(LANE_M + LANE_W/2, u * 0.5 + 0.5, WHITE, 0.6, true);
+
+  // Your amber car, slowing down then stopping
+  var yourCarX = LANE_M;
+  var yourCarY = CAR_Y_BASE;
+  var driverLook = carFrustrationU > 0.1 ? 'frustrated' : 'forward';
+  s += car(yourCarX, yourCarY, AMBER, driverLook, false, 1);
+
+  // Other white cars ahead, showing brake lights and stopping
+  var numOtherCars = 4;
+  var stopDistance = 300; // Distance between stopped cars
+  for (var i = 0; i < numOtherCars; i++) {
+    var carY = CAR_Y_BASE - 180 - i * stopDistance; // 180 is approx car height
+    var brakeLight = (carStopU > 0.05 + i * 0.05); // Brake lights activate sequentially
+    s += car(LANE_M, carY, WHITE, 'forward', brakeLight, 0.9);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH: Looking for a physical cause, finding none. */
+function scene3(u) {
+  var s = '';
+  var cameraPanX = lerp(0, 80, smooth(ramp(u, 0.2, 0.4))) - lerp(0, 160, smooth(ramp(u, 0.4, 0.6))); // Pan left then right
+  var cameraPanY = lerp(-60, -80, smooth(u));
+  var qMarkPulse = pulse(u, 0.8, 0.15); // Question mark pulses at the end
+
+  s += '<g ' + camera(1.1, cameraPanX, cameraPanY) + '>';
+  s += highwayLanes(true, 0.8);
+
+  // Dashes are stopped
+  s += laneDashes(LANE_L + LANE_W/2, 0, WHITE, 0.6, true);
+  s += laneDashes(LANE_M + LANE_W/2, 0, WHITE, 0.6, true);
+
+  // Your amber car, looking around
+  var yourCarX = LANE_M;
+  var yourCarY = CAR_Y_BASE;
+  var driverLook = 'frustrated';
+  if (u < 0.4) driverLook = 'left';
+  else if (u < 0.6) driverLook = 'right';
+  else driverLook = 'forward';
+  s += car(yourCarX, yourCarY, AMBER, driverLook, false, 1);
+
+  // Other white cars ahead, stopped
+  var numOtherCars = 4;
+  var stopDistance = 300;
+  for (var i = 0; i < numOtherCars; i++) {
+    var carY = CAR_Y_BASE - 180 - i * stopDistance;
+    s += car(LANE_M, carY, WHITE, 'forward', false, 0.9);
+  }
+
+  // Question mark appears over the road ahead
+  var qMarkY = CAR_Y_BASE - 180 - numOtherCars * stopDistance - 100;
+  var qMarkOp = ramp(u, 0.7, 0.9) * (0.6 + 0.4 * qMarkPulse);
+  if (qMarkOp > 0.05) {
+    s += questionMark(LANE_M, qMarkY, 100, CORAL, 10, qMarkOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND: The tiny, initial trigger. */
+function scene4(u) {
+  var s = '';
+  var cameraScale = lerp(1.1, 0.6, smooth(ramp(u, 0.0, 0.3))); // Zoom out to overhead
+  var cameraShiftY = lerp(-80, 0, smooth(ramp(u, 0.0, 0.3))); // Shift to center vertically
+
+  s += '<g ' + camera(cameraScale, 0, cameraShiftY) + '>';
+  s += highwayLanes(false, 0.8); // Overhead view
+
+  // Line of 5 white cars
+  var numCars = 5;
+  var carSpacing = 160; // Spacing for overhead cars
+  var carStartX = LANE_R + 100; // Start slightly off right for lead car
+  var carBaseY = CAR_Y_OVERHEAD + 200; // Base Y for the line of cars
+
+  var rippleStartU = ramp(u, 0.3, 0.5); // When the ripple starts
+  var rippleProgressU = ramp(u, 0.4, 0.9); // How far the ripple has spread
+
+  for (var i = 0; i < numCars; i++) {
+    var carX = carStartX - i * carSpacing;
+    var carY = carBaseY;
+
+    var brakeActive = false;
+    var brakeDelay = i * 0.08; // Each car brakes slightly later
+    if (u > 0.2 + brakeDelay && u < 0.2 + brakeDelay + 0.3) { // Brake for 0.3s
+      brakeActive = true;
+    }
+
+    s += overheadCar(carX, carY, WHITE, brakeActive, 0.9);
+
+    // Faint signal blue ripple spreading backward
+    var rippleRadius = lerp(0, 200 + i * 50, easeOut(clamp(rippleProgressU - (i * 0.1), 0, 1)));
+    var rippleOp = clamp(0.4 - rippleProgressU + (i * 0.1), 0, 0.3);
+    if (rippleRadius > 5 && rippleOp > 0.05) {
+      s += ring(carX, carY, rippleRadius, BLUE, 8, rippleOp);
+    }
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE: The phantom wave travels backward. */
+function scene5(u) {
+  var s = '';
+  var cameraScale = 0.6; // Overhead view, slightly zoomed out
+  var cameraShiftX = 0;
+  var cameraShiftY = 0;
+
+  s += '<g ' + camera(cameraScale, cameraShiftX, cameraShiftY) + '>';
+  s += highwayLanes(false, 0.8);
+
+  // Line of cars, including your amber car
+  var numCars = 8;
+  var carSpacing = 160;
+  var carStartX = LANE_R + 200; // Start further right
+  var carBaseY = CAR_Y_OVERHEAD + 200;
+
+  var waveSpeed = 1.2; // How fast the wave travels backward
+  var wavePosition = lerp(0, numCars + 2, smooth(u * waveSpeed)); // Wave travels from right to left
+
+  for (var i = 0; i < numCars; i++) {
+    var carX = carStartX - i * carSpacing;
+    var carY = carBaseY;
+
+    var isAmberCar = (i === Math.floor(numCars / 2)); // Amber car is in the middle of the line
+    var carColor = isAmberCar ? AMBER : WHITE;
+
+    var brakeActive = false;
+    // Brake light activates as the wave passes over the car
+    var wavePassesCar = (wavePosition >= i && wavePosition < i + 1.5);
+    if (wavePassesCar) {
+      brakeActive = true;
+    }
+
+    s += overheadCar(carX, carY, carColor, brakeActive, 0.9);
+
+    // Signal blue ripple (the wave)
+    var rippleCenter = carStartX - wavePosition * carSpacing;
+    var rippleRadius = 100;
+    var rippleOp = 0.3;
+    if (Math.abs(carX - rippleCenter) < rippleRadius * 1.5) { // Show ripple near the wave front
+      var dist = Math.abs(carX - rippleCenter) / (rippleRadius * 1.5);
+      rippleOp = (1 - dist) * 0.4;
+      s += ring(carX, carY, rippleRadius * (1 + dist * 0.5), BLUE, 10, rippleOp);
+    }
+  }
+  // Draw the main wave as a broad band
+  var waveX = carStartX - wavePosition * carSpacing;
+  var waveW = 200;
+  var waveH = BOT - TOP;
+  s += rrect(waveX, CY, waveW, waveH, 100, BLUE, 0.15);
+  s += rrectStroke(waveX, CY, waveW, waveH, 100, BLUE, 10, 0.4);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE: The wave dissipates, smooth flow returns. */
+function scene6(u) {
+  var s = '';
+  var cameraScale = lerp(0.6, 1.0, smooth(ramp(u, 0.5, 0.9))); // Zoom back in
+  var cameraShiftY = lerp(0, 0, smooth(ramp(u, 0.5, 0.9)));
+  var cameraShiftX = lerp(0, 0, smooth(ramp(u, 0.5, 0.9)));
+
+  s += '<g ' + camera(cameraScale, cameraShiftX, cameraShiftY) + '>';
+  var perspectiveMode = u > 0.6;
+  s += highwayLanes(perspectiveMode, 0.8);
+
+  // Line of cars, dissipating wave
+  var numCars = 8;
+  var carSpacing = 160;
+  var carStartX = LANE_R + 200;
+  var carBaseY = CAR_Y_OVERHEAD + 200;
+
+  var waveDissipate = ramp(u, 0.0, 0.5); // Wave dissipates
+  var carsResumeMotion = ramp(u, 0.4, 0.9); // Cars start moving again
+
+  // The blue wave continues to travel backward and dissipates
+  var finalWavePosition = numCars + 2 + waveDissipate * 4; // Wave moves further left
+  var waveX = carStartX - finalWavePosition * carSpacing;
+  var waveW = lerp(200, 0, waveDissipate);
+  var waveH = BOT - TOP;
+  if (waveW > 10) {
+    s += rrect(waveX, CY, waveW, waveH, 100, BLUE, 0.15 * (1 - waveDissipate));
+    s += rrectStroke(waveX, CY, waveW, waveH, 100, BLUE, 10, 0.4 * (1 - waveDissipate));
+  }
+
+  for (var i = 0; i < numCars; i++) {
+    var carX = carStartX - i * carSpacing;
+    var carY = carBaseY;
+
+    var isAmberCar = (i === Math.floor(numCars / 2));
+    var carColor = isAmberCar ? AMBER : WHITE;
+
+    var carMotionX = lerp(0, -200, carsResumeMotion * rnd(i + 1)); // Cars move off screen to the left
+    var carMotionY = lerp(0, -300, carsResumeMotion * rnd(i + 2));
+
+    var carOpacity = lerp(0.9, 0.8, carsResumeMotion);
+
+    // Transition from overhead car to perspective car for amber car
+    if (isAmberCar && perspectiveMode) {
+      var yourCarY_perspective = CAR_Y_BASE;
+      var yourCarX_perspective = LANE_M;
+      var transitionX = lerp(carX + carMotionX, yourCarX_perspective, ramp(u, 0.6, 0.9));
+      var transitionY = lerp(carY + carMotionY, yourCarY_perspective, ramp(u, 0.6, 0.9));
+      s += car(transitionX, transitionY, AMBER, 'forward', false, carOpacity);
+    } else if (carColor === WHITE && perspectiveMode) {
+        // Other cars fade out or transition less prominently
+        var fadeOut = ramp(u, 0.6, 0.9);
+        s += car(carX + carMotionX, carY + carMotionY, carColor, 'forward', false, carOpacity * (1 - fadeOut));
+    } else {
+      s += overheadCar(carX + carMotionX, carY + carMotionY, carColor, false, carOpacity);
+    }
+  }
+
+  // Dashes resume motion
+  s += laneDashes(LANE_L + LANE_W/2, u * 1.5 * carsResumeMotion, WHITE, 0.6, perspectiveMode);
+  s += laneDashes(LANE_M + LANE_W/2, u * 1.5 * carsResumeMotion + 0.5, WHITE, 0.6, perspectiveMode);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+# Why traffic jams appear with no crash or cause
+
+**System:** Phantom jams / Reaction-time waves
+**Narrator:** Bright, energetic adult-female (en-US-AvaNeural or en-US-JennyNeural)
+**Palette:** Warm amber (your car), Coral red (frustration, naive search), Signal blue (the system/wave)
+**Hero Element:** The 'YOU' car (amber) and the highway itself, with abstract flow lines that transform into a backward-traveling wave.
+
+| # | Time | Story beat | Stick-figure scene | Motion / camera / transition | English VO | SFX |
+|---|---|---|---|---|---|---|
+| 1 | 0–10s | **YOU + NEED:** Smooth driving, desire for efficiency. | Black canvas. A 3-lane highway with white dashed lines. Your amber stick-figure car is in the middle lane, moving right. Other white stick-figure cars are also moving smoothly. | Camera tracks amber car moving right. Subtle motion lines indicate smooth, fast flow. | You're driving smoothly on the highway, making good time. Your only desire is to keep moving, reaching your destination efficiently. Traffic flows perfectly. | whoosh.mp3 |
+| 2 | 10–20s | **GO:** Sudden, inexplicable stop. | Amber car slows dramatically. Cars ahead (white) show glowing coral red brake lights and come to a complete stop. Stick-figure in amber car leans forward in frustration. | Camera zooms slightly on amber car as it slows and stops. Other cars ahead stop abruptly. | Suddenly, brake lights flash. Cars slow, then stop. You brace for delay, hit a jam. As you crawl, you look for a cause. Where's the accident? | whoosh-fast.mp3, drop-thud.mp3 |
+| 3 | 20–30s | **SEARCH:** Looking for a physical cause, finding none. | Amber car is stopped. Stick-figure in car looks left, then right, then forward, a large coral red question mark icon appears over the road ahead. The road appears clear of any obstructions. | Camera pans slightly to follow the stick-figure's gaze. The road ahead remains empty of visible cause. Coral red question mark pulses briefly. | You scan for a crash, construction, or merge. Nothing. Just a wall of cars, an inexplicable halt. Your mind finds no reason. | focus.mp3 |
+| 4 | 30–40s | **FIND:** The tiny, initial trigger. | Overhead view of a line of 5 white cars on the highway. The lead car (far right) briefly shows a coral red brake light. The car behind it reacts slightly later, also showing a brake light. A faint signal blue ripple begins to spread backward from the first brake. | Camera is static, overhead. The brake lights illuminate sequentially from right to left, with increasing delay. The signal blue ripple starts small and expands backward. | The real cause? A single driver ahead made a tiny brake tap. The next driver reacted later, braking harder. This small delay ripples. | click-soft.mp3, transform.mp3 |
+| 5 | 40–50s | **TAKE:** The phantom wave travels backward. | Overhead view. Amber

@@ -1,0 +1,15 @@
+{
+  "id": "why-traffic-jams-have-no-cause",
+  "slug": "2026-09-07__why-traffic-jams-have-no-cause",
+  "title_working": "Why traffic jams appear with no crash or cause",
+  "system": "phantom jams / reaction-time waves travelling backward",
+  "cluster": "traffic-and-crowds",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-09-07T12:18:12+00:00",
+  "produced_at": "2026-09-07T12:22:09+00:00",
+  "verify": "PASS",
+  "takeaway": "Traffic jams often form not from an accident, but from a cumulative ripple of human reaction times traveling backward through the flow of cars.",
+  "animation_source": "llm"
+}
