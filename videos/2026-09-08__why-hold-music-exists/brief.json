@@ -1,0 +1,15 @@
+{
+  "id": "why-hold-music-exists",
+  "slug": "2026-09-08__why-hold-music-exists",
+  "title_working": "Why 'please hold' music exists",
+  "system": "silence reads as a dropped call / perceived wait time",
+  "cluster": "platforms-and-layout",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-09-08T11:07:57+00:00",
+  "produced_at": "2026-09-08T11:13:32+00:00",
+  "verify": "PASS",
+  "takeaway": "Hold music isn't just noise; it's a clever system that confirms your call is still connected, managing your perception of the wait.",
+  "animation_source": "llm"
+}

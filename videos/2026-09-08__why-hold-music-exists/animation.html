@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why 'please hold' music exists</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue  -> the system / solution
+var AMBER = "#F2A93B";              // warm amber   -> YOU / desire / idea
+var CORAL = "#FF5B5B";              // coral red    -> naive model / failure / frustration
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, fill) {
+  var fillAttr = fill ? 'fill="' + fill + '"' : 'fill="none"';
+  return '<path d="' + d + '" ' + fillAttr + ' stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom builders for this animation ---------- */
+
+// Stick figure helper
+// pose: 0=expectant, 1=anxious, 2=frustrated, 3=confused, 4=aha, 5=relaxed
+function stickFigure(x, y, pose, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = 30;
+  var bodyLen = 100;
+  var armLen = 80;
+  var legLen = 90;
+  var sw = 8;
+
+  // Head
+  g += dot(x, y - headR - bodyLen / 2, headR, col);
+
+  // Body
+  g += line(x, y - bodyLen / 2, x, y + bodyLen / 2, col, sw);
+
+  // Arms & Phone
+  var phoneW = 40, phoneH = 70;
+  var phoneX = x, phoneY = y;
+
+  switch (pose) {
+    case 0: // Expectant: phone to ear, slight tilt
+      g += line(x, y, x - armLen * 0.7, y - armLen * 0.4, col, sw); // Left arm
+      g += line(x, y, x + armLen * 0.3, y - armLen * 0.7, col, sw); // Right arm
+      phoneX = x + armLen * 0.3 + 10; phoneY = y - armLen * 0.7 - 20;
+      g += rrect(phoneX, phoneY, phoneW, phoneH, 8, col);
+      break;
+    case 1: // Anxious: phone slightly away, head tilted
+      g += line(x, y, x - armLen * 0.6, y - armLen * 0.3, col, sw); // Left arm
+      g += line(x, y, x + armLen * 0.5, y - armLen * 0.5, col, sw); // Right arm
+      phoneX = x + armLen * 0.5 + 20; phoneY = y - armLen * 0.5 - 10;
+      g += rrect(phoneX, phoneY, phoneW, phoneH, 8, col);
+      g += line(x - headR * 0.6, y - headR - bodyLen / 2 - 10, x - headR * 0.2, y - headR - bodyLen / 2 - 20, col, sw); // Frown
+      break;
+    case 2: // Frustrated: phone down, slumped
+      g += line(x, y, x - armLen * 0.8, y + armLen * 0.5, col, sw); // Left arm
+      g += line(x, y, x + armLen * 0.8, y + armLen * 0.5, col, sw); // Right arm
+      phoneX = x + armLen * 0.8 - 10; phoneY = y + armLen * 0.5 + 20;
+      g += rrect(phoneX, phoneY, phoneW, phoneH, 8, col);
+      g += line(x - headR * 0.6, y - headR - bodyLen / 2 - 10, x + headR * 0.6, y - headR - bodyLen / 2 - 10, col, sw); // Straight mouth
+      break;
+    case 3: // Confused: phone down, looking up
+      g += line(x, y, x - armLen * 0.7, y + armLen * 0.4, col, sw); // Left arm
+      g += line(x, y, x + armLen * 0.7, y + armLen * 0.4, col, sw); // Right arm
+      phoneX = x + armLen * 0.7 - 10; phoneY = y + armLen * 0.4 + 20;
+      g += rrect(phoneX, phoneY, phoneW, phoneH, 8, col);
+      g += line(x - headR * 0.4, y - headR - bodyLen / 2 - 10, x + headR * 0.4, y - headR - bodyLen / 2 - 10, col, sw); // Straight mouth
+      break;
+    case 4: // Aha: phone to ear, head tilted, lightbulb
+      g += line(x, y, x - armLen * 0.7, y - armLen * 0.4, col, sw); // Left arm
+      g += line(x, y, x + armLen * 0.3, y - armLen * 0.7, col, sw); // Right arm
+      phoneX = x + armLen * 0.3 + 10; phoneY = y - armLen * 0.7 - 20;
+      g += rrect(phoneX, phoneY, phoneW, phoneH, 8, col);
+      g += dot(x, y - headR - bodyLen / 2 - 60, 12, AMBER); // Lightbulb base
+      g += line(x - 8, y - headR - bodyLen / 2 - 70, x + 8, y - headR - bodyLen / 2 - 70, AMBER, sw * 0.8);
+      g += line(x - 8, y - headR - bodyLen / 2 - 85, x + 8, y - headR - bodyLen / 2 - 85, AMBER, sw * 0.8);
+      break;
+    case 5: // Relaxed: phone to ear, casually
+      g += line(x, y, x - armLen * 0.7, y - armLen * 0.4, col, sw); // Left arm
+      g += line(x, y, x + armLen * 0.3, y - armLen * 0.7, col, sw); // Right arm
+      phoneX = x + armLen * 0.3 + 10; phoneY = y - armLen * 0.7 - 20;
+      g += rrect(phoneX, phoneY, phoneW, phoneH, 8, col);
+      g += line(x - headR * 0.6, y - headR - bodyLen / 2 - 10, x + headR * 0.6, y - headR - bodyLen / 2 - 10, col, sw); // Straight mouth
+      break;
+  }
+
+  // Legs
+  g += line(x, y + bodyLen / 2, x - legLen * 0.4, y + bodyLen / 2 + legLen * 0.8, col, sw);
+  g += line(x, y + bodyLen / 2, x + legLen * 0.4, y + bodyLen / 2 + legLen * 0.8, col, sw);
+
+  g += '</g>';
+  return g;
+}
+
+// Sound wave helper
+// type: 0=silent, 1=broken, 2=collapsed, 3=solid, 4=rippling, 5=music
+function soundWave(x, y, h, type, u, col, sw, op) {
+  op = (op == null ? 1 : op);
+  sw = sw == null ? 10 : sw;
+  var g = '<g opacity="' + op + '">';
+  var halfH = h / 2;
+  var waveW = 400;
+
+  switch (type) {
+    case 0: // Silent: simple line, maybe fading
+      g += line(x - waveW / 2, y, x + waveW / 2, y, col, sw, op * (0.8 + 0.2 * Math.sin(u * Math.PI * 2)));
+      break;
+    case 1: // Broken: jagged line or dots
+      var numSegments = 10;
+      for (var i = 0; i < numSegments; i++) {
+        var segX1 = x - waveW / 2 + (i / numSegments) * waveW;
+        var segX2 = x - waveW / 2 + ((i + 0.5) / numSegments) * waveW;
+        var segY = y + Math.sin(u * Math.PI * 4 + i) * 5;
+        g += line(segX1, segY, segX2, segY, col, sw, op);
+      }
+      break;
+    case 2: // Collapsed: small, dense blob
+      g += dot(x, y, lerp(waveW / 4, 30, u), col, op);
+      g += ring(x, y, lerp(waveW / 4, 30, u) + 10, col, sw * 0.5, op * (1 - u));
+      break;
+    case 3: // Solid: tall column
+      g += rrect(x, y, waveW / 2, h, 20, col, op);
+      break;
+    case 4: // Rippling: column morphs into wave
+      var r = lerp(20, 0, smooth(u));
+      var w = lerp(waveW / 2, waveW, smooth(u));
+      var waveAmp = lerp(0, 50, smooth(u));
+      var pathD = "M " + (x - w / 2) + " " + (y + halfH);
+      for (var i = 0; i <= 10; i++) {
+        var px = x - w / 2 + (i / 10) * w;
+        var py = y - halfH + waveAmp * Math.sin(u * Math.PI * 6 + i * Math.PI / 2);
+        pathD += " L " + px + " " + py;
+      }
+      pathD += " L " + (x + w / 2) + " " + (y + halfH) + " Z";
+      g += pathTag(pathD, col, sw, op, col);
+      break;
+    case 5: // Music: continuous wave
+      var waveAmp = 60;
+      var numWaves = 3;
+      var waveLen = waveW / numWaves;
+      var pathD = "M " + (x - waveW / 2) + " " + y;
+      for (var i = 0; i <= numWaves * 2; i++) {
+        var px = x - waveW / 2 + (i / (numWaves * 2)) * waveW;
+        var py = y + waveAmp * Math.sin(u * Math.PI * 4 + i * Math.PI / 2);
+        pathD += " L " + px + " " + py;
+      }
+      g += pathTag(pathD, col, sw, op);
+      // Musical note glyph
+      var noteX = x + waveW / 2 + 80;
+      var noteY = y - 40;
+      g += pathTag("M " + noteX + " " + noteY + " V " + (noteY + 60) + " C " + (noteX + 30) + " " + (noteY + 80) + " " + (noteX + 30) + " " + (noteY + 40) + " " + noteX + " " + (noteY + 40) + " Z", WHITE, 0, op, WHITE);
+      break;
+  }
+  g += '</g>';
+  return g;
+}
+
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+// Stick figure position
+var SF_X = CX + 200;
+var SF_Y = CY + 300;
+var WAVE_X = CX - 150;
+var WAVE_Y = CY - 100;
+var WAVE_H = BOT - TOP - 200;
+
+/* SCENE 1 (0-10): Silence reads as a dropped call / perceived wait time */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  // Background elements (subtle grid/texture)
+  var gridOp = lerp(0.05, 0.1, smooth(u));
+  for (var i = 0; i < 5; i++) {
+    s += line(CX - 400, TOP + i * 300, CX + 400, TOP + i * 300, DIM, 2, gridOp);
+  }
+  for (var i = 0; i < 3; i++) {
+    s += line(CX - 400 + i * 400, TOP, CX - 400 + i * 400, BOT, DIM, 2, gridOp);
+  }
+
+  // Stick figure
+  s += stickFigure(SF_X, SF_Y, 0, AMBER, 1);
+
+  // Sound wave - silent
+  s += soundWave(WAVE_X, WAVE_Y, WAVE_H, 0, u, BLUE, 10, 0.8);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): Call connects, but silence persists. User gets anxious. */
+function scene2(u) {
+  var s = '';
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14);
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+
+  // Background elements (subtle grid/texture)
+  var gridOp = 0.1;
+  for (var i = 0; i < 5; i++) {
+    s += line(CX - 400, TOP + i * 300, CX + 400, TOP + i * 300, DIM, 2, gridOp);
+  }
+  for (var i = 0; i < 3; i++) {
+    s += line(CX - 400 + i * 400, TOP, CX - 400 + i * 400, BOT, DIM, 2, gridOp);
+  }
+
+  // Stick figure - anxious
+  s += stickFigure(SF_X, SF_Y, 1, AMBER, 1);
+
+  // Sound wave - broken, with coral accent
+  s += soundWave(WAVE_X, WAVE_Y, WAVE_H, 1, u, CORAL, 12, 0.9);
+
+  // Question mark thought bubble
+  var bubbleOp = smooth(ramp(u, 0.3, 0.7));
+  if (bubbleOp > 0.05) {
+    var qX = SF_X - 120, qY = SF_Y - 260;
+    s += ring(qX, qY, 30, WHITE, 6, bubbleOp * 0.7);
+    s += line(qX, qY - 10, qX, qY + 10, WHITE, 6, bubbleOp);
+    s += dot(qX, qY + 25, 8, WHITE, bubbleOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): User hangs up, frustrated. The system *was* connected. */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Background elements (subtle grid/texture)
+  var gridOp = lerp(0.1, 0.05, smooth(u));
+  for (var i = 0; i < 5; i++) {
+    s += line(CX - 400, TOP + i * 300, CX + 400, TOP + i * 300, DIM, 2, gridOp);
+  }
+  for (var i = 0; i < 3; i++) {
+    s += line(CX - 400 + i * 400, TOP, CX - 400 + i * 400, BOT, DIM, 2, gridOp);
+  }
+
+  // Stick figure - frustrated
+  s += stickFigure(SF_X, SF_Y, 2, AMBER, 1);
+
+  // Sound wave - collapses into a coral blob
+  s += soundWave(WAVE_X, WAVE_Y, WAVE_H, 2, u, CORAL, 10, 0.9);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): The system's perspective: it *was* working, but silence is bad UX. */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Background elements (subtle grid/texture)
+  var gridOp = lerp(0.05, 0.1, smooth(u));
+  for (var i = 0; i < 5; i++) {
+    s += line(CX - 400, TOP + i * 300, CX + 400, TOP + i * 300, DIM, 2, gridOp);
+  }
+  for (var i = 0; i < 3; i++) {
+    s += line(CX - 400 + i * 400, TOP, CX - 400 + i * 400, BOT, DIM, 2, gridOp);
+  }
+
+  // Stick figure - confused, looking at the wave
+  s += stickFigure(SF_X, SF_Y, 3, AMBER, 1);
+
+  // Sound wave - solid blue block
+  s += soundWave(WAVE_X, WAVE_Y, WAVE_H, 3, u, BLUE, 0, 0.8); // sw=0 for filled rect
+
+  // Small amber question mark near stick figure's head
+  var qOp = ramp(u, 0.2, 0.8);
+  if (qOp > 0.05) {
+    var qX = SF_X - 120, qY = SF_Y - 260;
+    s += line(qX, qY - 10, qX, qY + 10, AMBER, 6, qOp);
+    s += dot(qX, qY + 25, 8, AMBER, qOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): Introducing 'hold music' as a solution. */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.9, smooth(u));
+  s += '<g ' + camera(scale, 0, lerp(0, -50, smooth(u))) + '>';
+
+  // Background elements (subtle grid/texture)
+  var gridOp = lerp(0.1, 0.08, smooth(u));
+  for (var i = 0; i < 5; i++) {
+    s += line(CX - 400, TOP + i * 300, CX + 400, TOP + i * 300, DIM, 2, gridOp);
+  }
+  for (var i = 0; i < 3; i++) {
+    s += line(CX - 400 + i * 400, TOP, CX - 400 + i * 400, BOT, DIM, 2, gridOp);
+  }
+
+  // Stick figure - aha moment
+  s += stickFigure(SF_X, SF_Y, 4, AMBER, 1);
+
+  // Sound wave - rippling, morphing from solid to wave
+  s += soundWave(WAVE_X, WAVE_Y, WAVE_H, 4, u, BLUE, 10, 0.9);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): User is content, call is on hold. */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.9, 1.0, smooth(clamp(u / 0.7, 0, 1)));
+  s += '<g ' + camera(scale, 0, lerp(-50, 0, smooth(u))) + '>';
+
+  // Background elements (subtle grid/texture)
+  var gridOp = lerp(0.08, 0.1, smooth(u));
+  for (var i = 0; i < 5; i++) {
+    s += line(CX - 400, TOP + i * 300, CX + 400, TOP + i * 300, DIM, 2, gridOp);
+  }
+  for (var i = 0; i < 3; i++) {
+    s += line(CX - 400 + i * 400, TOP, CX - 400 + i * 400, BOT, DIM, 2, gridOp);
+  }
+
+  // Stick figure - relaxed
+  s += stickFigure(SF_X, SF_Y, 5, AMBER, 1);
+
+  // Sound wave - music wave
+  s += soundWave(WAVE_X, WAVE_Y, WAVE_H, 5, u, BLUE, 10, 0.9);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() {
+  render(0);
+  window.__ready = true;
+}
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
