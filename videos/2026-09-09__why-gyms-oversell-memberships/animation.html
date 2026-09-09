@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why gyms sell more memberships than they can fit</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots / ghost figures
+var BLUE  = "#4C86F0";              // signal blue  -> the system / capacity
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want
+var CORAL = "#FF5B5B";              // coral red    -> naive model / perceived problem / unavailability
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+// Stick figure helper
+// x, y = base of figure (feet center)
+// h = height of figure (head top to feet)
+// pose: 'stand', 'think', 'scratch', 'nod', 'active'
+function stickFigure(x, y, h, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var sw = h * 0.04; // Stroke width relative to height
+  var headR = h * 0.1;
+  var bodyLen = h * 0.35;
+  var armLen = h * 0.25;
+  var legLen = h * 0.35;
+
+  var headY = y - h + headR;
+  var bodyTopY = headY + headR;
+  var bodyBotY = bodyTopY + bodyLen;
+  var armY = bodyTopY + bodyLen * 0.3;
+  var legY = bodyBotY;
+
+  var g = '<g opacity="' + op + '">';
+  g += dot(x, headY, headR, col); // Head
+
+  // Body
+  g += line(x, bodyTopY, x, bodyBotY, col, sw);
+
+  // Arms
+  if (pose === 'think') {
+    g += line(x, armY, x - armLen * 0.6, armY + armLen * 0.3, col, sw); // Left arm down
+    g += line(x, armY, x + armLen * 0.3, armY + armLen * 0.1, col, sw); // Right arm bent
+    g += line(x + armLen * 0.3, armY + armLen * 0.1, x + armLen * 0.1, armY + armLen * 0.4, col, sw); // Hand to chin
+  } else if (pose === 'scratch') {
+    g += line(x, armY, x - armLen * 0.6, armY + armLen * 0.3, col, sw); // Left arm down
+    g += line(x, armY, x + armLen * 0.1, armY - armLen * 0.1, col, sw); // Right arm up
+    g += line(x + armLen * 0.1, armY - armLen * 0.1, x + armLen * 0.05, headY - headR * 0.5, col, sw); // Hand to head
+  } else if (pose === 'active') {
+    g += line(x, armY, x - armLen * 0.8, armY + armLen * 0.2, col, sw); // Left arm back
+    g += line(x, armY, x + armLen * 0.8, armY - armLen * 0.2, col, sw); // Right arm forward
+  } else { // stand, nod, default
+    g += line(x, armY, x - armLen, armY + armLen * 0.1, col, sw);
+    g += line(x, armY, x + armLen, armY + armLen * 0.1, col, sw);
+  }
+
+  // Legs
+  if (pose === 'active') {
+    g += line(x, legY, x - legLen * 0.4, y, col, sw); // Left leg forward
+    g += line(x, legY, x + legLen * 0.4, y - legLen * 0.1, col, sw); // Right leg back
+  } else {
+    g += line(x, legY, x - legLen * 0.2, y, col, sw);
+    g += line(x, legY, x + legLen * 0.2, y, col, sw);
+  }
+
+  // Head tilt for 'nod'
+  if (pose === 'nod') {
+    g += '<g transform="rotate(8 ' + x + ' ' + headY + ')">';
+    g += dot(x, headY, headR, col); // Re-draw head for tilt effect
+    g += '</g>';
+  }
+
+  g += '</g>';
+  return g;
+}
+
+// Glyphs
+function dollarSign(x, y, s, col, sw, op) {
+  var d = "M " + (x - s * 0.2) + " " + (y - s * 0.4) +
+          " C " + (x - s * 0.4) + " " + (y - s * 0.6) + " " + (x - s * 0.4) + " " + (y - s * 0.1) + " " + x + " " + y +
+          " C " + (x + s * 0.4) + " " + (y + s * 0.1) + " " + (x + s * 0.4) + " " + (y + s * 0.6) + " " + (x + s * 0.2) + " " + (y + s * 0.4);
+  var g = pathTag(d, col, sw, op);
+  g += line(x, y - s * 0.5, x, y + s * 0.5, col, sw * 0.6, op); // Vertical bar
+  return g;
+}
+
+function dumbbell(x, y, s, col, sw, op) {
+  var g = dot(x - s * 0.8, y, s * 0.3, col, op);
+  g += dot(x + s * 0.8, y, s * 0.3, col, op);
+  g += line(x - s * 0.6, y, x + s * 0.6, y, col, sw, op);
+  return g;
+}
+
+function questionMark(x, y, s, col, sw, op) {
+  var d = "M " + (x - s * 0.2) + " " + (y - s * 0.4) +
+          " C " + (x - s * 0.4) + " " + (y - s * 0.8) + " " + (x + s * 0.4) + " " + (y - s * 0.8) + " " + (x + s * 0.4) + " " + (y - s * 0.2) +
+          " C " + (x + s * 0.4) + " " + (y + s * 0.1) + " " + (x + s * 0.1) + " " + (y + s * 0.2) + " " + x + " " + (y + s * 0.3);
+  var g = pathTag(d, col, sw, op);
+  g += dot(x, y + s * 0.6, s * 0.12, col, op);
+  return g;
+}
+
+// Abstract gym machine
+function gymMachine(x, y, w, h, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var g = rrect(x, y, w, h, w * 0.1, col, op);
+  g += line(x - w * 0.3, y - h * 0.3, x + w * 0.3, y - h * 0.3, col, sw, op);
+  g += line(x - w * 0.3, y + h * 0.3, x + w * 0.3, y + h * 0.3, col, sw, op);
+  return g;
+}
+
+// Capacity bar
+function capacityBar(x, y, w, h, fillRatio, fillCol, borderCol, sw, op) {
+  op = (op == null ? 1 : op);
+  var g = rrectStroke(x, y, w, h, h * 0.2, borderCol, sw, op);
+  var fillW = w * clamp(fillRatio, 0, 1);
+  g += '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + fillW + '" height="' + h +
+       '" rx="' + (h * 0.2) + '" fill="' + fillCol + '" opacity="' + op + '"/>';
+  return g;
+}
+
+// Scale for Scene 5
+function balanceScale(x, y, armLen, pivotY, col, sw, tilt, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  // Base
+  g += line(x, y, x, pivotY, col, sw); // Vertical support
+  g += line(x - armLen * 0.3, y, x + armLen * 0.3, y, col, sw); // Base horizontal
+
+  // Arm
+  var armX1 = x - armLen * 0.5;
+  var armX2 = x + armLen * 0.5;
+  var armY1 = pivotY + Math.sin(-tilt) * armLen * 0.5;
+  var armY2 = pivotY + Math.sin(tilt) * armLen * 0.5;
+  g += line(armX1, armY1, armX2, armY2, col, sw); // Balance arm
+
+  // Pans
+  var panR = armLen * 0.2;
+  g += ring(armX1, armY1 + panR * 1.5, panR, col, sw);
+  g += ring(armX2, armY2 + panR * 1.5, panR, col, sw);
+  g += '</g>';
+  return g;
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.0, 1.1, smooth(ramp(u, 0.0, 0.6)));
+  var ty = lerp(0, -50, smooth(ramp(u, 0.0, 0.6)));
+  s += '<g ' + camera(scale, 0, ty) + '>';
+
+  // Gym floor and faint machines
+  var floorY = BOT - 100;
+  s += rrect(CX, floorY, W * 0.8, (BOT - TOP) * 0.6, 60, WHITE, 0.05); // Floor area
+  var machineOp = ramp(u, 0.6, 0.9);
+  s += gymMachine(CX - 200, floorY - 200, 160, 100, WHITE, 8, machineOp * 0.3);
+  s += gymMachine(CX + 200, floorY - 200, 160, 100, WHITE, 8, machineOp * 0.3);
+  s += gymMachine(CX, floorY - 450, 160, 100, WHITE, 8, machineOp * 0.3);
+
+  // YOU stick figure
+  var youH = 220;
+  var youY = floorY - youH / 2;
+  s += stickFigure(CX, youY, youH, AMBER, 'stand', 1);
+
+  // Thought bubbles
+  var bubbleOp = ramp(u, 0.2, 0.8);
+  var bubbleY = youY - youH * 0.8;
+  var bubbleX = CX + 100;
+  var bob = Math.sin(u * Math.PI * 3) * 8;
+  s += ring(bubbleX, bubbleY + bob, 40, AMBER, 5, bubbleOp);
+  s += ring(bubbleX + 60, bubbleY - 20 + bob, 30, AMBER, 5, bubbleOp * 0.8);
+  s += ring(bubbleX + 100, bubbleY - 40 + bob, 20, AMBER, 5, bubbleOp * 0.6);
+
+  var glyphOp = ramp(u, 0.4, 0.9);
+  s += dollarSign(bubbleX, bubbleY + bob, 40, AMBER, 8, glyphOp);
+  s += dumbbell(bubbleX + 80, bubbleY - 30 + bob, 40, AMBER, 8, glyphOp * 0.7);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20s): GO */
+function scene2(u) {
+  var s = '';
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14);
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+
+  var floorY = BOT - 100;
+  s += rrect(CX, floorY, W * 0.8, (BOT - TOP) * 0.6, 60, WHITE, 0.05);
+
+  var youH = 220;
+  var youY = floorY - youH / 2;
+  s += stickFigure(CX, youY, youH, AMBER, 'stand', 1);
+
+  // Crowded gym elements
+  var crowdOp = ramp(u, 0.1, 0.7);
+  var numCrowd = lerp(0, 16, smooth(ramp(u, 0.1, 0.5)));
+  var machineCount = 6;
+  var machineTaken = Math.floor(lerp(0, machineCount, smooth(ramp(u, 0.4, 0.8))));
+
+  for (var i = 0; i < machineCount; i++) {
+    var mx = CX - 300 + (i % 3) * 300 + (i < 3 ? 0 : 150);
+    var my = floorY - 200 - Math.floor(i / 3) * 250;
+    var machineCol = (i < machineTaken) ? CORAL : WHITE;
+    s += gymMachine(mx, my, 160, 100, machineCol, 8, 0.8 * crowdOp);
+  }
+
+  for (var i = 0; i < numCrowd; i++) {
+    var px = CX + Math.sin(rnd(i) * Math.PI * 2) * lerp(100, 400, rnd(i + 10));
+    var py = floorY - 100 - rnd(i + 20) * 400;
+    // Ensure figures are within the visual gym space and not on YOU
+    px = clamp(px, CX - W * 0.3, CX + W * 0.3);
+    py = clamp(py, TOP + youH, floorY - youH / 2);
+
+    s += stickFigure(px, py, 180, AMBER, 'active', crowdOp * 0.8);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30s): SEARCH */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var floorY = BOT - 100;
+  s += rrect(CX, floorY, W * 0.8, (BOT - TOP) * 0.6, 60, WHITE, 0.05);
+
+  var youH = 220;
+  var youY = floorY - youH / 2;
+  s += stickFigure(CX, youY, youH, AMBER, 'scratch', 1); // YOU scratching head
+
+  // Crowded gym elements (faded)
+  var machineCount = 6;
+  for (var i = 0; i < machineCount; i++) {
+    var mx = CX - 300 + (i % 3) * 300 + (i < 3 ? 0 : 150);
+    var my = floorY - 200 - Math.floor(i / 3) * 250;
+    s += gymMachine(mx, my, 160, 100, WHITE, 8, 0.15);
+  }
+  for (var i = 0; i < 10; i++) {
+    var px = CX + Math.sin(rnd(i) * Math.PI * 2) * lerp(100, 400, rnd(i + 10));
+    var py = floorY - 100 - rnd(i + 20) * 400;
+    px = clamp(px, CX - W * 0.3, CX + W * 0.3);
+    py = clamp(py, TOP + youH, floorY - youH / 2);
+    s += stickFigure(px, py, 180, AMBER, 'active', 0.15);
+  }
+
+  // Question marks
+  var qOp = ramp(u, 0.1, 0.6);
+  var bob = Math.sin(u * Math.PI * 3) * 10;
+  s += questionMark(CX - 120, youY - youH * 0.7 + bob, 50, CORAL, 10, qOp);
+  s += questionMark(CX + 100, youY - youH * 0.9 + bob, 40, CORAL, 8, qOp * 0.8);
+
+  // Capacity bars
+  var barY = BOT - 300;
+  var barW = 700, barH = 80;
+  var capacityFill = ramp(u, 0.4, 0.9);
+  s += capacityBar(CX, barY, barW, barH, 1, WHITE, WHITE, 8, 0.5); // Physical capacity outline
+  s += capacityBar(CX, barY, barW, barH, capacityFill * 1.2, CORAL, CORAL, 8, 0.9); // Sold memberships (exceeds)
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40s): FIND */
+function scene4(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.8, smooth(ramp(u, 0.0, 0.4)));
+  var ty = lerp(0, -80, smooth(ramp(u, 0.0, 0.4)));
+  s += '<g ' + camera(scale, 0, ty) + '>';
+
+  var floorY = BOT - 100;
+  var gridOp = ramp(u, 0.1, 0.6);
+  var gridCell = 120;
+  var gridStartX = CX - W * 0.4;
+  var gridEndX = CX + W * 0.4;
+  var gridStartY = TOP + 100;
+  var gridEndY = floorY - 50;
+
+  // Signal blue grid for max capacity
+  for (var x = gridStartX; x <= gridEndX; x += gridCell) {
+    s += line(x, gridStartY, x, gridEndY, BLUE, 4, gridOp * 0.4);
+  }
+  for (var y = gridStartY; y <= gridEndY; y += gridCell) {
+    s += line(gridStartX, y, gridEndX, y, BLUE, 4, gridOp * 0.4);
+  }
+  s += rrectStroke(CX, (gridStartY + gridEndY) / 2, gridEndX - gridStartX, gridEndY - gridStartY, 60, BLUE, 8, gridOp * 0.6);
+
+  // Active amber figures
+  var youH = 220;
+  var youY = floorY - youH / 2;
+  var activeOp = ramp(u, 0.3, 0.8);
+  s += stickFigure(CX - 250, youY - 100, youH, AMBER, 'active', activeOp);
+  s += stickFigure(CX + 100, youY - 300, youH * 0.9, AMBER, 'active', activeOp * 0.8);
+  s += stickFigure(CX + 300, youY - 150, youH * 0.95, AMBER, 'active', activeOp * 0.9);
+
+  // Faded white ghost figures (no-shows)
+  var ghostOp = ramp(u, 0.5, 1.0);
+  var numGhosts = 15;
+  for (var i = 0; i < numGhosts; i++) {
+    var gx = lerp(gridStartX + 50, gridEndX - 50, rnd(i));
+    var gy = lerp(gridStartY + 50, gridEndY - 50, rnd(i + 10));
+    var ghostH = lerp(150, 200, rnd(i + 20));
+    s += stickFigure(gx, gy, ghostH, DIM, 'stand', ghostOp * 0.4);
+  }
+
+  // YOU (less prominent, observing)
+  s += stickFigure(CX, youY, youH, AMBER, 'stand', 0.8);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50s): TAKE */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.9, smooth(ramp(u, 0.0, 0.5)));
+  var ty = lerp(0, -50, smooth(ramp(u, 0.0, 0.5)));
+  s += '<g ' + camera(scale, 0, ty) + '>';
+
+  var youH = 220;
+  var youY = BOT - 200 - youH / 2;
+  s += stickFigure(CX, youY, youH, AMBER, 'stand', 1);
+
+  // Balance scale
+  var scaleX = CX, scaleY = BOT - 400;
+  var armLength = 700;
+  var pivotY = scaleY - 200;
+  var tilt = lerp(0, Math.PI / 10, smooth(ramp(u, 0.1, 0.7)));
+  s += balanceScale(scaleX, scaleY, armLength, pivotY, WHITE, 8, tilt, 1);
+
+  // Figures on scale
+  var panLeftX = scaleX - armLength * 0.5;
+  var panRightX = scaleX + armLength * 0.5;
+  var panLeftY = pivotY + Math.sin(-tilt) * armLength * 0.5 + armLength * 0.2 * 1.5;
+  var panRightY = pivotY + Math.sin(tilt) * armLength * 0.5 + armLength * 0.2 * 1.5;
+
+  // Amber figures (regulars) on left pan
+  var amberFigH = 150;
+  var numAmber = 3;
+  var amberStackOp = ramp(u, 0.2, 0.8);
+  for (var i = 0; i < numAmber; i++) {
+    s += stickFigure(panLeftX + rnd(i) * 40 - 20, panLeftY - i * amberFigH * 0.6, amberFigH, AMBER, 'stand', amberStackOp);
+  }
+
+  // Faded white figures (no-shows) on right pan
+  var ghostFigH = 120;
+  var numGhosts = 12;
+  var ghostStackOp = ramp(u, 0.3, 0.9);
+  for (var i = 0; i < numGhosts; i++) {
+    s += stickFigure(panRightX + rnd(i + 10) * 40 - 20, panRightY - i * ghostFigH * 0.5, ghostFigH, DIM, 'stand', ghostStackOp * 0.4);
+  }
+
+  // Signal blue 'affordable price' tag
+  var tagOp = ramp(u, 0.4, 0.9);
+  var tagW = 180, tagH = 90;
+  s += rrect(panLeftX, panLeftY + 100, tagW, tagH, 20, BLUE, tagOp);
+  s += dollarSign(panLeftX, panLeftY + 100, 50, WHITE, 10, tagOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60s): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.9, 1.0, smooth(ramp(u, 0.0, 0.7)));
+  var ty = lerp(-50, 0, smooth(ramp(u, 0.0, 0.7)));
+  s += '<g ' + camera(scale, 0, ty) + '>';
+
+  var youH = 220;
+  var youY = BOT - 200 - youH / 2;
+  s += stickFigure(CX, youY, youH, AMBER, 'nod', 1); // YOU nodding
+
+  // Moderately busy gym environment
+  var floorY = BOT - 100;
+  s += rrect(CX, floorY, W * 0.8, (BOT - TOP) * 0.6, 60, WHITE, 0.05);
+
+  var machineCount = 6;
+  for (var i = 0; i < machineCount; i++) {
+    var mx = CX - 300 + (i % 3) * 300 + (i < 3 ? 0 : 150);
+    var my = floorY - 200 - Math.floor(i / 3) * 250;
+    s += gymMachine(mx, my, 160, 100, WHITE, 8, 0.2); // Faint machines
+  }
+
+  var numActive = 4;
+  for (var i = 0; i < numActive; i++) {
+    var px = CX + Math.sin(rnd(i) * Math.PI * 2) * lerp(100, 400, rnd(i + 10));
+    var py = floorY - 100 - rnd(i + 20) * 400;
+    px = clamp(px, CX - W * 0.3, CX + W * 0.3);
+    py = clamp(py, TOP + youH, floorY - youH / 2);
+    s += stickFigure(px, py, 180, AMBER, 'active', 0.6); // Active members
+  }
+
+  var numGhosts = 10;
+  for (var i = 0; i < numGhosts; i++) {
+    var gx = lerp(CX - W * 0.35, CX + W * 0.35, rnd(i));
+    var gy = lerp(TOP + 100, floorY - 50, rnd(i + 10));
+    var ghostH = lerp(150, 200, rnd(i + 20));
+    s += stickFigure(gx, gy, ghostH, DIM, 'stand', 0.2); // Faded ghost figures
+  }
+
+  // Subtle signal blue aura around the gym
+  var auraOp = ramp(u, 0.4, 0.9);
+  s += rrect(CX, CY, W, H, 0, BLUE, auraOp * 0.08); // Large rect for full frame aura
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
