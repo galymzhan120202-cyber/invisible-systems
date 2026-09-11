@@ -1,0 +1,15 @@
+{
+  "id": "why-your-queue-is-the-slow-one",
+  "slug": "2026-09-11__why-your-queue-is-the-slow-one",
+  "title_working": "Why every queue you join feels like the slow one",
+  "system": "n lanes means an n-in-1 chance yours is fastest / selection",
+  "cluster": "queues-and-waiting",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "failed",
+  "created_at": "2026-09-11T11:07:50+00:00",
+  "produced_at": "2026-09-11T11:11:49+00:00",
+  "verify": "FAIL",
+  "takeaway": "The feeling that your queue is always the slowest is a trick of perception, not bad luck or a personal curse.",
+  "animation_source": "llm"
+}

@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why every queue you join feels like the slow one</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / the wave
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want
+var CORAL = "#FF5B5B";              // coral red    -> the naive model / false signal
+
+var DUR = 60;
+window.__duration = DUR;
+
+// Specific constants for this animation
+var Q_COUNT = 3; // Number of queues visible in close-up scenes
+var Q_SPACING = 180; // horizontal space between queue centers
+var Q_X = Array.from({length: Q_COUNT}, (_, i) => CX + (i - (Q_COUNT - 1) / 2) * Q_SPACING);
+var YOU_Q_IDX = 1; // Index of YOUR queue (middle one)
+var YOU_POS_Y = BOT - 200; // Y position of YOU stick figure
+var Q_PERSON_R = 15; // Radius of queue person dots
+var Q_LINE_W = 8; // Stroke width for queue lines
+
+var STICK_H = 200; // Total height of stick figure
+var STICK_HEAD_R = 30;
+var STICK_BODY_L = 100;
+var STICK_LIMB_L = 70;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* stick figure: x, y is base of body. pose: 'neutral', 'deciding', 'frustrated', 'observing', 'calm' */
+function stickFigure(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headY = y - STICK_BODY_L - STICK_HEAD_R;
+  g += dot(x, headY, STICK_HEAD_R, col); // Head
+  g += line(x, y - STICK_BODY_L, x, y, col, Q_LINE_W); // Body
+
+  // Arms
+  if (pose === 'deciding') {
+    g += line(x, y - STICK_BODY_L * 0.7, x - STICK_LIMB_L * 0.8, y - STICK_BODY_L * 0.4, col, Q_LINE_W); // Left arm up
+    g += line(x, y - STICK_BODY_L * 0.7, x + STICK_LIMB_L * 0.8, y - STICK_BODY_L * 0.4, col, Q_LINE_W); // Right arm up
+  } else if (pose === 'frustrated') {
+    g += line(x, y - STICK_BODY_L * 0.6, x - STICK_LIMB_L * 0.6, y - STICK_BODY_L * 0.6, col, Q_LINE_W); // Left arm folded
+    g += line(x, y - STICK_BODY_L * 0.6, x + STICK_LIMB_L * 0.6, y - STICK_BODY_L * 0.6, col, Q_LINE_W); // Right arm folded
+  } else if (pose === 'observing' || pose === 'calm') {
+    g += line(x, y - STICK_BODY_L * 0.6, x - STICK_LIMB_L * 0.5, y - STICK_BODY_L * 0.3, col, Q_LINE_W * 0.8); // Arms down
+    g += line(x, y - STICK_BODY_L * 0.6, x + STICK_LIMB_L * 0.5, y - STICK_BODY_L * 0.3, col, Q_LINE_W * 0.8);
+  } else { // neutral
+    g += line(x, y - STICK_BODY_L * 0.7, x - STICK_LIMB_L * 0.4, y - STICK_BODY_L * 0.2, col, Q_LINE_W); // Arms down
+    g += line(x, y - STICK_BODY_L * 0.7, x + STICK_LIMB_L * 0.4, y - STICK_BODY_L * 0.2, col, Q_LINE_W);
+  }
+
+  // Legs
+  g += line(x, y, x - STICK_LIMB_L * 0.4, y + STICK_LIMB_L * 0.6, col, Q_LINE_W);
+  g += line(x, y, x + STICK_LIMB_L * 0.4, y + STICK_LIMB_L * 0.6, col, Q_LINE_W);
+  g += '</g>';
+  return g;
+}
+
+// Simple arrow for thought bubble
+function arrow(x, y, size, col, op) {
+  var d = "M " + (x - size) + " " + (y + size * 0.55) + " L " + x + " " + (y - size * 0.55) + " L " + (x + size) + " " + (y + size * 0.55);
+  return pathTag(d, col, Q_LINE_W + 2, op);
+}
+
+// Simple question mark glyph
+function questionMark(x, y, size, col, op) {
+  var headR = size * 0.4;
+  var d = "M " + x + " " + (y - size * 0.5) +
+          " A " + headR + " " + headR + " 0 1 1 " + (x - headR) + " " + (y - size * 0.5 + headR) +
+          " L " + (x - headR * 0.5) + " " + (y + size * 0.1) +
+          " M " + x + " " + (y + size * 0.35) + " L " + x + " " + (y + size * 0.45);
+  return pathTag(d, col, Q_LINE_W, op);
+}
+
+// Generic queue lines, can be used as background or active
+function queueLines(qXs, y1, y2, col, sw, op) {
+  var g = '';
+  for (var i = 0; i < qXs.length; i++) {
+    g += line(qXs[i], y1, qXs[i], y2, col, sw, op);
+  }
+  return g;
+}
+
+// Scrolling people dots in a queue
+function queuePeople(x, yStart, yEnd, count, speed, col, op, seedOffset) {
+  var g = '';
+  var span = yEnd - yStart;
+  var personGap = span / count;
+  seedOffset = seedOffset || 0;
+  for (var i = 0; i < count; i++) {
+    var y = yEnd - Q_PERSON_R - i * personGap - speed;
+    while (y < yStart - Q_PERSON_R) y += span;
+    while (y > yEnd + Q_PERSON_R) y -= span;
+    g += dot(x, y, Q_PERSON_R, col, op);
+  }
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var camShiftX = Math.sin(u * Math.PI * 0.8) * 60; // Camera pan left/right for deciding
+  var camScale = lerp(1, 1.02, smooth(Math.sin(u * Math.PI * 0.5)));
+  s += '<g ' + camera(camScale, camShiftX, 0) + '>';
+
+  // Queues: 3 parallel lines, white, with grey dots
+  var queueY1 = TOP + 200, queueY2 = YOU_POS_Y - STICK_H * 0.6;
+  s += queueLines(Q_X, queueY1, queueY2, WHITE, Q_LINE_W, 0.8);
+
+  for (var i = 0; i < Q_COUNT; i++) {
+    var qx = Q_X[i];
+    var personCount = 4 + Math.floor(rnd(i + 1) * 3); // Varying number of people
+    var speed = u * (30 + rnd(i + 10) * 20); // Gentle drift
+    s += queuePeople(qx, queueY1, queueY2, personCount, speed, DIM, 0.8, i);
+  }
+
+  // YOU stick figure: deciding pose, head turns
+  var headTurn = lerp(-15, 15, smooth(Math.sin(u * Math.PI * 2))); // Head turn angle
+  var youX = Q_X[YOU_Q_IDX];
+  s += '<g transform="rotate(' + headTurn + ' ' + youX + ' ' + (YOU_POS_Y - STICK_BODY_L - STICK_HEAD_R) + ')">';
+  s += stickFigure(youX, YOU_POS_Y, AMBER, 'deciding', 1);
+  s += '</g>';
+
+  // Thought bubble: fast-moving arrow
+  var arrowY = YOU_POS_Y - STICK_H - 80;
+  var arrowOp = ramp(u, 0.4, 0.8);
+  var arrowPulse = Math.sin(u * Math.PI * 8) * 3;
+  s += arrow(youX, arrowY + arrowPulse, 30, AMBER, arrowOp);
+  s += arrow(youX, arrowY + arrowPulse - 40, 30, AMBER, arrowOp * 0.6);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var camZoom = lerp(1.02, 1.05, easeIn(u));
+  var camShake = Math.sin(u * 30) * 4 * pulse(u, 0.1, 0.1); // Small shake when others surge
+  s += '<g ' + camera(camZoom, camShake, 0) + '>';
+
+  var queueY1 = TOP + 200, queueY2 = YOU_POS_Y - STICK_H * 0.6;
+
+  // YOU's queue: slow dots
+  var youQx = Q_X[YOU_Q_IDX];
+  s += line(youQx, queueY1, youQx, queueY2, WHITE, Q_LINE_W, 0.8);
+  s += queuePeople(youQx, queueY1, queueY2, 5, u * 20, DIM, 0.8, YOU_Q_IDX); // Very slow
+
+  // Other queues: faster dots, lines glow blue
+  for (var i = 0; i < Q_COUNT; i++) {
+    if (i === YOU_Q_IDX) continue;
+    var qx = Q_X[i];
+    var surgeOp = ramp(u, 0.1, 0.4); // Blue glow surge
+    s += line(qx, queueY1, qx, queueY2, BLUE, Q_LINE_W + 6, surgeOp * 0.4); // Glow
+    s += line(qx, queueY1, qx, queueY2, WHITE, Q_LINE_W, 0.8); // Base line
+    s += queuePeople(qx, queueY1, queueY2, 6, u * 180 + rnd(i) * 50, BLUE, 0.9, i); // Fast
+  }
+
+  // YOU stick figure: observing others
+  s += stickFigure(youQx, YOU_POS_Y, AMBER, 'observing', 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var camZoom = lerp(1.05, 1.0, easeOut(u));
+  s += '<g ' + camera(camZoom, 0, 0) + '>';
+
+  var queueY1 = TOP + 200, queueY2 = YOU_POS_Y - STICK_H * 0.6;
+
+  // YOU's queue: coral red, pulsing
+  var youQx = Q_X[YOU_Q_IDX];
+  var coralPulse = 0.5 + 0.5 * Math.sin(u * Math.PI * 6);
+  s += line(youQx, queueY1, youQx, queueY2, CORAL, Q_LINE_W + 4, coralPulse * 0.8);
+
+  // Other queues: fade to dim
+  for (var i = 0; i < Q_COUNT; i++) {
+    if (i === YOU_Q_IDX) continue;
+    var qx = Q_X[i];
+    s += line(qx, queueY1, qx, queueY2, DIM, Q_LINE_W, 0.4);
+    s += queuePeople(qx, queueY1, queueY2, 4, u * 40 + rnd(i) * 30, DIM, 0.3, i);
+  }
+
+  // YOU stick figure: frustrated, arms folded
+  s += stickFigure(youQx, YOU_POS_Y, AMBER, 'frustrated', 1);
+
+  // Question marks above YOU's head
+  var qmY = YOU_POS_Y - STICK_H - 80;
+  var qmOp = ramp(u, 0.3, 0.7);
+  s += questionMark(youQx - 30, qmY, 40, CORAL, qmOp);
+  s += questionMark(youQx + 30, qmY + 20, 40, CORAL, qmOp * 0.7);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  // Camera pull back and rotate to overhead view
+  var camScale = lerp(1.0, 0.3, smooth(u));
+  var camRot = lerp(0, 70, smooth(u)); // Rotate around CX, CY
+  var camTx = lerp(0, -100, smooth(u));
+  var camTy = lerp(0, -400, smooth(u));
+  s += '<g transform="translate(' + (CX + camTx) + ' ' + (CY + camTy) + ') rotate(' + camRot + ' ' + CX + ' ' + CY + ') scale(' + camScale + ') translate(' + (-CX) + ' ' + (-CY) + ')" >';
+
+  // Grid of many parallel lines (queues)
+  var gridQCount = 7;
+  var gridQSpacing = 120;
+  var gridQXs = Array.from({length: gridQCount}, (_, i) => CX + (i - (gridQCount - 1) / 2) * gridQSpacing);
+  var gridQY1 = TOP + 200, gridQY2 = BOT - 200;
+
+  // Blue lines for the system
+  s += queueLines(gridQXs, gridQY1, gridQY2, BLUE, Q_LINE_W * 0.7, 0.2);
+
+  // YOU as a small amber dot in one lane
+  var youGridX = gridQXs[Math.floor(gridQCount / 2)];
+  var youGridY = YOU_POS_Y;
+  s += dot(youGridX, youGridY, Q_PERSON_R * 1.2, AMBER, 1);
+
+  // Many other dots, some slow, some fast
+  for (var i = 0; i < gridQCount; i++) {
+    var qx = gridQXs[i];
+    var speed = (rnd(i + 100) > 0.5 ? 1 : -1) * lerp(20, 200, rnd(i + 200)); // Varying speeds and directions
+    s += queuePeople(qx, gridQY1, gridQY2, 4, u * speed, DIM, 0.7, i);
+  }
+
+  // Selector (coral red) quickly highlights other lanes YOU *could* have been in
+  var selectorOp = ramp(u, 0.5, 0.9);
+  var selectorWidth = gridQSpacing * 0.8;
+  var selectorHeight = gridQY2 - gridQY1;
+  var selectorX = lerp(gridQXs[0], gridQXs[gridQCount - 1], smooth(u * 2 % 1)); // Sweep across lanes
+  s += rrectStroke(selectorX, CY, selectorWidth, selectorHeight, 10, CORAL, Q_LINE_W + 2, selectorOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var camScale = lerp(0.3, 0.9, smooth(u));
+  var camRot = lerp(70, 0, smooth(u));
+  var camTx = lerp(-100, 0, smooth(u));
+  var camTy = lerp(-400, 0, smooth(u));
+  s += '<g transform="translate(' + (CX + camTx) + ' ' + (CY + camTy) + ') rotate(' + camRot + ' ' + CX + ' ' + CY + ') scale(' + camScale + ') translate(' + (-CX) + ' ' + (-CY) + ')" >';
+
+  // Faint blue grid lines in background
+  var gridQCount = 7;
+  var gridQSpacing = 120;
+  var gridQXs = Array.from({length: gridQCount}, (_, i) => CX + (i - (gridQCount - 1) / 2) * gridQSpacing);
+  var gridQY1 = TOP + 200, gridQY2 = BOT - 200;
+  s += queueLines(gridQXs, gridQY1, gridQY2, BLUE, Q_LINE_W * 0.5, 0.08);
+
+  // Coral red blocks for "slow queue" memories
+  var coralStackX = CX - 200;
+  var coralBlockH = 60;
+  var maxCoralBlocks = 10;
+  var coralProg = smooth(ramp(u, 0.05, 0.85)) * maxCoralBlocks;
+  var stackedCoral = Math.floor(coralProg);
+  for (var i = 0; i < maxCoralBlocks; i++) {
+    var blockY = BOT - 100 - i * (coralBlockH + 10);
+    if (i < stackedCoral) {
+      s += rrect(coralStackX, blockY, 150, coralBlockH, 10, CORAL, 0.9);
+    } else {
+      var fp = clamp(coralProg - i, 0, 1);
+      if (fp > 0.01) {
+        var fx = lerp(gridQXs[Math.floor(rnd(i + 1) * gridQCount)], coralStackX, easeOut(fp));
+        var fy = lerp(TOP + 100 + rnd(i + 2) * (gridQY2 - TOP - 100), blockY, easeOut(fp));
+        s += rrect(fx, fy, 150, coralBlockH, 10, CORAL, fp * 0.8);
+      }
+    }
+  }
+
+  // Amber flashes for "fast queue" moments
+  var amberFlashX = CX + 200;
+  var maxAmberFlashes = 3;
+  var amberProg = smooth(ramp(u, 0.15, 0.7)) * maxAmberFlashes;
+  for (var i = 0; i < maxAmberFlashes; i++) {
+    var flashY = BOT - 100 - i * (coralBlockH + 10) - 100; // Higher up
+    var fp = clamp(amberProg - i, 0, 1);
+    if (fp > 0.01) {
+      var flashOp = (1 - fp) * 0.9;
+      s += rrect(amberFlashX, flashY, 120, coralBlockH * 0.8, 8, AMBER, flashOp);
+    }
+  }
+
+  // YOU stick figure: observing stacks, shaking head
+  var youX = CX;
+  var youY = YOU_POS_Y;
+  var headShake = Math.sin(u * Math.PI * 4) * 8 * pulse(u, 0.5, 0.3);
+  s += '<g transform="rotate(' + headShake + ' ' + youX + ' ' + (youY - STICK_BODY_L - STICK_HEAD_R) + ')">';
+  s += stickFigure(youX, youY, AMBER, 'observing', 1);
+  s += '</g>';
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var camScale = lerp(0.9, 1.0, smooth(u));
+  s += '<g ' + camera(camScale, 0, 0) + '>';
+
+  var queueY1 = TOP + 200, queueY2 = YOU_POS_Y - STICK_H * 0.6;
+
+  // All queues (blue) flowing with varying speeds
+  for (var i = 0; i < Q_COUNT; i++) {
+    var qx = Q_X[i];
+    var speed = lerp(50, 200, rnd(i + 10) + u * 0.5) ; // Varying speeds
+    s += line(qx, queueY1, qx, queueY2, BLUE, Q_LINE_W, 0.6);
+    s += queuePeople(qx, queueY1, queueY2, 5, u * speed, WHITE, 0.8, i);
+  }
+
+  // YOU stick figure: calm, subtle smile, observing flow
+  var youX = Q_X[YOU_Q_IDX];
+  var youY = YOU_POS_Y;
+  // Subtle head turn to observe other queues
+  var headTurn = lerp(0, 10, smooth(u)); // Rotate slightly right
+  s += '<g transform="rotate(' + headTurn + ' ' + youX + ' ' + (youY - STICK_BODY_L - STICK_HEAD_R) + ')">';
+  s += stickFigure(youX, youY, AMBER, 'calm', 1);
+  s += '</g>';
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
