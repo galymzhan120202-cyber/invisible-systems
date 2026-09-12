@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why restaurants put the second-cheapest wine in the sweet spot</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / the rule
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want
+var CORAL = "#FF5B5B";              // coral red    -> the naive model / false signal
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+/* stick figure: x, y is base of feet. scale is overall size. */
+function stickFigure(x, y, scale, pose, col, op) {
+  op = (op == null ? 1 : op);
+  var sw = 9 * scale;
+  var headR = 28 * scale;
+  var bodyH = 100 * scale;
+  var armL = 70 * scale;
+  var legL = 90 * scale;
+
+  var g = '<g opacity="' + op + '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round">';
+  
+  // Head
+  g += dot(x, y - legL - bodyH - headR, headR, col);
+
+  // Body
+  g += line(x, y - legL, x, y - legL - bodyH, col);
+
+  // Legs (always slightly apart for stability)
+  g += line(x - 10 * scale, y - legL, x - 25 * scale, y, col);
+  g += line(x + 10 * scale, y - legL, x + 25 * scale, y, col);
+
+  // Arms and pose
+  if (pose === 'hesitant') {
+    g += line(x, y - legL - bodyH * 0.7, x - armL * 0.7, y - legL - bodyH * 0.4, col); // Left arm bent
+    g += line(x, y - legL - bodyH * 0.7, x + armL * 0.7, y - legL - bodyH * 0.4, col); // Right arm bent
+  } else if (pose === 'reaching') {
+    g += line(x, y - legL - bodyH * 0.7, x - armL * 0.4, y - legL - bodyH * 0.2, col); // Left arm slightly down
+    g += line(x, y - legL - bodyH * 0.7, x + armL * 0.8, y - legL - bodyH * 1.0, col); // Right arm reaching up
+  } else if (pose === 'torn') {
+    g += line(x, y - legL - bodyH * 0.7, x - armL * 0.8, y - legL - bodyH * 0.3, col); // Left arm out left
+    g += line(x, y - legL - bodyH * 0.7, x + armL * 0.8, y - legL - bodyH * 0.3, col); // Right arm out right
+  } else if (pose === 'pointing') {
+    g += line(x, y - legL - bodyH * 0.7, x - armL * 0.4, y - legL - bodyH * 0.2, col); // Left arm slightly down
+    g += line(x, y - legL - bodyH * 0.7, x + armL * 0.8, y - legL - bodyH * 0.7, col); // Right arm pointing
+  } else if (pose === 'confident') {
+    g += line(x, y - legL - bodyH * 0.7, x - armL * 0.6, y - legL - bodyH * 0.5, col); // Left arm on hip
+    g += line(x, y - legL - bodyH * 0.7, x + armL * 0.6, y - legL - bodyH * 0.5, col); // Right arm on hip
+  } else { // default: neutral
+    g += line(x, y - legL - bodyH * 0.7, x - armL * 0.4, y - legL - bodyH * 0.4, col);
+    g += line(x, y - legL - bodyH * 0.7, x + armL * 0.4, y - legL - bodyH * 0.4, col);
+  }
+
+  g += '</g>';
+  return g;
+}
+
+/* wine bottle icon: x, y is base center */
+function wineBottle(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var sw = 6 * size / 50; // Scale stroke width with size
+  var bodyW = 40 * size / 50;
+  var bodyH = 80 * size / 50;
+  var neckW = 16 * size / 50;
+  var neckH = 40 * size / 50;
+  var capH = 10 * size / 50;
+
+  var g = '<g opacity="' + op + '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" fill="none">';
+  // Body
+  g += rrect(x, y - bodyH / 2, bodyW, bodyH, 10 * size / 50, col, op);
+  // Neck
+  g += line(x - neckW / 2, y - bodyH, x - neckW / 2, y - bodyH - neckH, col);
+  g += line(x + neckW / 2, y - bodyH, x + neckW / 2, y - bodyH - neckH, col);
+  // Top cap
+  g += line(x - neckW / 2, y - bodyH - neckH, x + neckW / 2, y - bodyH - neckH, col);
+  g += line(x - neckW * 0.7, y - bodyH - neckH - capH, x + neckW * 0.7, y - bodyH - neckH - capH, col);
+  g += line(x - neckW * 0.7, y - bodyH - neckH - capH, x - neckW / 2, y - bodyH - neckH, col);
+  g += line(x + neckW * 0.7, y - bodyH - neckH - capH, x + neckW / 2, y - bodyH - neckH, col);
+  g += '</g>';
+  return g;
+}
+
+/* menu / list / board element */
+function menuElement(x, y, w, h, rad, col, sw, op) {
+  return rrectStroke(x, y, w, h, rad, col, sw, op);
+}
+
+/* menu item dot */
+function menuItem(x, y, r, col, op) {
+  return dot(x, y, r, col, op);
+}
+
+/* thought bubble */
+function thoughtBubble(x, y, w, h, rad, col, op, dir) { // dir: 'left' or 'right' for the tail
+  var tailX = dir === 'left' ? x - w / 2 + 20 : x + w / 2 - 20;
+  var tailY = y + h / 2;
+  var d = 'M ' + (x - w / 2 + rad) + ' ' + (y - h / 2) +
+          ' H ' + (x + w / 2 - rad) +
+          ' A ' + rad + ' ' + rad + ' 0 0 1 ' + (x + w / 2) + ' ' + (y - h / 2 + rad) +
+          ' V ' + (y + h / 2 - rad) +
+          ' A ' + rad + ' ' + rad + ' 0 0 1 ' + (x + w / 2 - rad) + ' ' + (y + h / 2) +
+          ' H ' + (tailX + 15) + ' L ' + tailX + ' ' + (tailY + 20) + ' L ' + (tailX - 15) + ' ' + tailY +
+          ' H ' + (x - w / 2 + rad) +
+          ' A ' + rad + ' ' + rad + ' 0 0 1 ' + (x - w / 2) + ' ' + (y + h / 2 - rad) +
+          ' V ' + (y - h / 2 + rad) +
+          ' A ' + rad + ' ' + rad + ' 0 0 1 ' + (x - w / 2 + rad) + ' ' + (y - h / 2) +
+          ' Z';
+  return '<path d="' + d + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + Menu Introduction */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.98, smooth(u));
+  var driftY = lerp(0, -10, smooth(u));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  var figureY = BOT - 100;
+  var menuX = CX + 180;
+  var menuW = 280;
+  var menuH = 800;
+  var menuY = CY + 100;
+
+  // YOU stick figure (hesitant)
+  s += stickFigure(CX - 200, figureY, 1.0, 'hesitant', WHITE, 1);
+
+  // Wine List (hero element)
+  s += menuElement(menuX, menuY, menuW, menuH, 30, WHITE, 9, 1);
+
+  // Menu items (dots)
+  var itemY = menuY - menuH / 2 + 100;
+  for (var i = 0; i < 5; i++) {
+    var itemOp = 1;
+    if (i === 0) itemOp = lerp(0.3, 1, ramp(u, 0.1, 0.3)); // first item fades in
+    if (i === 4) itemOp = lerp(0.3, 1, ramp(u, 0.2, 0.4)); // last item fades in
+    s += menuItem(menuX, itemY + i * 150, 20, WHITE, itemOp);
+  }
+
+  // Gaze line from YOU to menu
+  var gazeOp = lerp(0, 0.7, ramp(u, 0.2, 0.6));
+  s += line(CX - 200 + 30, figureY - 200, menuX - 100, menuY - 200, DIM, 4, gazeOp);
+  s += line(CX - 200 + 30, figureY - 200, menuX - 100, menuY + 200, DIM, 4, gazeOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): The Price Ladder */
+function scene2(u) {
+  var s = '';
+  var scale = lerp(0.98, 0.95, smooth(u));
+  var driftY = lerp(-10, -30, smooth(u));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  var figureY = BOT - 100;
+  var ladderX = CX + 180;
+  var ladderW = 280;
+  var ladderH = 800;
+  var ladderY = CY + 100;
+
+  // YOU stick figure (looking up)
+  s += stickFigure(CX - 200, figureY, 1.0, 'reaching', WHITE, 1); // "reaching" pose for looking up
+
+  // Wine List morphs into Price Ladder (hero element)
+  var menuRad = lerp(30, 0, smooth(u)); // straighten edges
+  var menuSW = lerp(9, 12, smooth(u)); // thicker lines
+  s += menuElement(ladderX, ladderY, ladderW, ladderH, menuRad, WHITE, menuSW, 1);
+
+  // Ladder rungs / price points
+  var itemY = ladderY - ladderH / 2 + 100;
+  var rungLen = lerp(0, ladderW * 0.7, smooth(u));
+  for (var i = 0; i < 5; i++) {
+    var y = itemY + i * 150;
+    s += line(ladderX - rungLen / 2, y, ladderX + rungLen / 2, y, WHITE, 8, 1);
+    // Wine bottles at price points
+    var bottleScale = lerp(0.0, 0.6, ramp(u, i * 0.1, i * 0.1 + 0.3));
+    s += wineBottle(ladderX + ladderW / 2 + 80, y, 50 * bottleScale, WHITE, 1);
+  }
+
+  // Gaze line from YOU to ladder top
+  s += line(CX - 200 + 30, figureY - 200, ladderX - 100, itemY, DIM, 4, 0.7);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): The "Sweet Spot" (Second-Cheapest) */
+function scene3(u) {
+  var s = '';
+  var scale = lerp(0.95, 0.9, smooth(u));
+  var driftY = lerp(-30, -50, smooth(u));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  var figureY = BOT - 100;
+  var ladderX = CX + 180;
+  var ladderW = 280;
+  var ladderH = 800;
+  var ladderY = CY + 100;
+
+  // YOU stick figure (reaching for sweet spot)
+  var reachX = lerp(CX - 200, ladderX + ladderW / 2 + 20, smooth(ramp(u, 0.2, 0.6)));
+  var reachY = lerp(figureY, ladderY - ladderH / 2 + 100 + 150, smooth(ramp(u, 0.2, 0.6)));
+  s += stickFigure(reachX, reachY, 1.0, 'reaching', AMBER, 1);
+
+  // Price Ladder (hero element)
+  s += menuElement(ladderX, ladderY, ladderW, ladderH, 0, WHITE, 12, 1);
+
+  // Ladder rungs / price points
+  var itemY = ladderY - ladderH / 2 + 100;
+  var rungLen = ladderW * 0.7;
+  var sweetSpotIdx = 1; // Second item from top (0-indexed)
+  var sweetSpotY = itemY + sweetSpotIdx * 150;
+
+  for (var i = 0; i < 5; i++) {
+    var y = itemY + i * 150;
+    var itemCol = WHITE;
+    var bottleOp = 1;
+    var bottleCol = WHITE;
+    var auraOp = 0;
+
+    if (i === sweetSpotIdx) {
+      itemCol = BLUE;
+      bottleCol = BLUE;
+      auraOp = lerp(0, 0.4, ramp(u, 0.1, 0.4));
+      s += ring(ladderX + ladderW / 2 + 80, y, 60, BLUE, 8, auraOp);
+    } else {
+      bottleOp = lerp(1, 0.3, ramp(u, 0.3, 0.6));
+    }
+    s += line(ladderX - rungLen / 2, y, ladderX + rungLen / 2, y, itemCol, 8, 1);
+    s += wineBottle(ladderX + ladderW / 2 + 80, y, 50, bottleCol, bottleOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): Internal Conflict / Choice Heuristic */
+function scene4(u) {
+  var s = '';
+  var scale = lerp(0.9, 0.85, smooth(u));
+  var driftY = lerp(-50, -70, smooth(u));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  var figureY = BOT - 100;
+  var figureX = CX - 100;
+  var sweetSpotY = CY + 100 - 800 / 2 + 100 + 150; // Y of the second item
+
+  // YOU stick figure (torn)
+  s += stickFigure(figureX, figureY, 1.0, 'torn', AMBER, 1);
+
+  // Price Ladder (hero element) - now less prominent
+  var ladderX = CX + 180;
+  var ladderW = 280;
+  var ladderH = 800;
+  var ladderY = CY + 100;
+  s += menuElement(ladderX, ladderY, ladderW, ladderH, 0, WHITE, 12, 0.3);
+
+  // Highlight sweet spot again
+  var itemY = ladderY - ladderH / 2 + 100;
+  var sweetSpotIdx = 1;
+  var currentSweetSpotY = itemY + sweetSpotIdx * 150;
+  s += ring(ladderX + ladderW / 2 + 80, currentSweetSpotY, 60, BLUE, 8, 0.4);
+  s += wineBottle(ladderX + ladderW / 2 + 80, currentSweetSpotY, 50, BLUE, 1);
+
+  // Thought bubbles
+  var bubbleW = 300, bubbleH = 180, bubbleRad = 30;
+  var bubbleOp = lerp(0, 1, ramp(u, 0.1, 0.4));
+
+  // "Too cheap" thought (coral)
+  var coralX = figureX - 220;
+  var coralY = figureY - 400;
+  s += thoughtBubble(coralX, coralY, bubbleW, bubbleH, bubbleRad, CORAL, bubbleOp, 'left');
+  s += line(coralX, coralY + 20, coralX - 80, coralY + 20, WHITE, 8, bubbleOp); // Bar glyph for "cheap"
+
+  // "Too expensive" thought (amber)
+  var amberX = figureX + 220;
+  var amberY = figureY - 400;
+  s += thoughtBubble(amberX, amberY, bubbleW, bubbleH, bubbleRad, AMBER, bubbleOp, 'right');
+  s += dot(amberX, amberY, 30, WHITE, bubbleOp); // Dot glyph for "expensive"
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): The Restaurant's Perspective */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(0.85, 0.7, smooth(u));
+  var driftY = lerp(-70, -100, smooth(u));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  var figureY = BOT - 100;
+  var figureX = CX - 300;
+  var boardX = CX + 100;
+  var boardW = 600;
+  var boardH = 1000;
+  var boardY = CY + 100;
+
+  // YOU stick figure (small, observing)
+  s += stickFigure(figureX, figureY, 0.7, 'hesitant', WHITE, 1);
+
+  // Menu Board (hero element) - large, filled with items
+  var boardRad = lerp(0, 50, smooth(u));
+  s += menuElement(boardX, boardY, boardW, boardH, boardRad, WHITE, 10, 1);
+
+  // Many menu items (dots)
+  var itemStartX = boardX - boardW / 2 + 80;
+  var itemStartY = boardY - boardH / 2 + 80;
+  var sweetSpotIdx = 3; // Example sweet spot on the larger board
+  var sweetSpotY = itemStartY + sweetSpotIdx * 100;
+
+  for (var r = 0; r < 8; r++) { // rows
+    for (var c = 0; c < 3; c++) { // columns
+      var x = itemStartX + c * 200;
+      var y = itemStartY + r * 100;
+      var itemCol = WHITE;
+      if (r === sweetSpotIdx && c === 1) { // Center item in sweet spot row
+        itemCol = BLUE;
+        s += ring(x, y, 30, BLUE, 5, 0.3 + 0.3 * Math.sin(u * Math.PI * 4));
+      }
+      s += menuItem(x, y, 15, itemCol, 1);
+    }
+  }
+
+  // Blue hand (system) pointing to the sweet spot
+  var handX = boardX - boardW / 2 - 100;
+  var handY = sweetSpotY;
+  var handOp = lerp(0, 1, ramp(u, 0.3, 0.6));
+  // Arm
+  s += line(handX - 80, handY + 100, handX, handY, BLUE, 10, handOp);
+  // Finger pointing
+  s += line(handX, handY, handX + 80, handY - 20, BLUE, 10, handOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): The Takeaway / Empowerment */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.7, 1.0, smooth(u));
+  var driftY = lerp(-100, 0, smooth(u));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  var figureY = BOT - 100;
+  var figureX = CX - 200;
+  var menuX = CX + 180;
+  var menuW = 280;
+  var menuH = 800;
+  var menuY = CY + 100;
+
+  // YOU stick figure (confident, pointing)
+  s += stickFigure(figureX, figureY, 1.0, 'confident', AMBER, 1);
+  var pointOp = lerp(0, 1, ramp(u, 0.2, 0.5));
+  s += line(figureX, figureY - 200, menuX - 100, menuY - 100, AMBER, 7, pointOp);
+
+
+  // Menu (hero element) - now clear, understood
+  var menuRad = lerp(50, 30, smooth(u));
+  s += menuElement(menuX, menuY, menuW, menuH, menuRad, WHITE, 9, 1);
+
+  // Menu items (dots)
+  var itemY = menuY - menuH / 2 + 100;
+  var sweetSpotIdx = 1; // Second item from top
+  var sweetSpotY = itemY + sweetSpotIdx * 150;
+
+  for (var i = 0; i < 5; i++) {
+    var y = itemY + i * 150;
+    var itemCol = WHITE;
+    if (i === sweetSpotIdx) {
+      itemCol = BLUE; // Sweet spot highlighted, but now understood
+      s += ring(menuX, y, 30, BLUE, 5, 0.5);
+    }
+    s += menuItem(menuX, y, 20, itemCol, 1);
+  }
+
+  // Wine bottle icon (understood)
+  var bottleScale = lerp(0.7, 1.0, smooth(u));
+  var bottleX = menuX + menuW / 2 + 80;
+  var bottleY = sweetSpotY;
+  s += wineBottle(bottleX, bottleY, 50 * bottleScale, BLUE, 1);
+
+  // Final pulse on the sweet spot
+  var pulseOp = pulse(u, 0.8, 0.15) * 0.8;
+  if (pulseOp > 0.02) {
+    s += ring(menuX, sweetSpotY, 40 + pulseOp * 20, BLUE, 6, pulseOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable at u=1
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() {
+  render(0);
+  window.__ready = true; // Set __ready AFTER initial render
+}
+
+// Ensure fonts are loaded or fallback after a timeout
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else {
+  boot();
+}
+
+// Playback loop for browser preview, but only if not recording
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
