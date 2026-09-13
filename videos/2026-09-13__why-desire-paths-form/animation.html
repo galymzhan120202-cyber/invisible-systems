@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why sidewalks form desire paths across the grass</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var BLACK = "#000000";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue  -> emergent path / system
+var AMBER = "#F2A93B";              // warm amber   -> YOU / individual choice
+var CORAL = "#FF5B5B";              // coral red    -> naive assumption / resistance
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, dash) {
+  var dashAttr = dash ? ' stroke-dasharray="' + dash + '"' : '';
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round"' + dashAttr + ' opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* stick figure: x, y is base of body. u is walk cycle phase [0,1]. lookDir: -1 left, 0 forward, 1 right */
+function stickFigure(x, y, col, u, lookDir, op) {
+  op = (op == null ? 1 : op);
+  var headR = 28;
+  var bodyH = 80;
+  var armL = 50;
+  var legL = 60;
+  var legSwing = Math.sin(u * Math.PI * 2) * 20; // degrees
+  var armSwing = Math.sin(u * Math.PI * 2 + Math.PI) * 20; // opposite to legs
+
+  var g = '<g opacity="' + op + '">';
+  // Head
+  g += dot(x, y - bodyH - headR, headR, col);
+
+  // Body
+  g += line(x, y - bodyH, x, y, col, 10);
+
+  // Arms
+  var armX1 = x, armY1 = y - bodyH * 0.7;
+  g += line(armX1, armY1, armX1 - armL * Math.sin(armSwing * Math.PI / 180), armY1 + armL * Math.cos(armSwing * Math.PI / 180), col, 8);
+  g += line(armX1, armY1, armX1 + armL * Math.sin(armSwing * Math.PI / 180), armY1 + armL * Math.cos(armSwing * Math.PI / 180), col, 8);
+
+  // Legs
+  var legX1 = x, legY1 = y;
+  g += line(legX1, legY1, legX1 - legL * Math.sin(legSwing * Math.PI / 180), legY1 + legL * Math.cos(legSwing * Math.PI / 180), col, 10);
+  g += line(legX1, legY1, legX1 + legL * Math.sin(legSwing * Math.PI / 180), legY1 + legL * Math.cos(legSwing * Math.PI / 180), col, 10);
+
+  // Gaze (simple line from head)
+  var gazeX = x + lookDir * headR * 0.6;
+  var gazeY = y - bodyH - headR * 0.8;
+  g += line(x, y - bodyH - headR, gazeX, gazeY, WHITE, 7);
+
+  g += '</g>';
+  return g;
+}
+
+/* The winding paved path (hero element) */
+function pavedPath(u, op) {
+  op = (op == null ? 1 : op);
+  var pathWidth = 100;
+  var pathCurveFactor = lerp(0.8, 1.0, smooth(u)); // slight morph over time
+  var d = "M " + (CX + 200) + " " + BOT +
+          " Q " + (CX + 200 * pathCurveFactor) + " " + (CY + 100) +
+          " " + (CX - 300) + " " + TOP;
+  return pathTag(d, WHITE, pathWidth, op);
+}
+
+/* The dashed shortcut line (hero element) */
+function dashedShortcut(op) {
+  op = (op == null ? 1 : op);
+  var d = "M " + (CX + 100) + " " + (BOT - 100) + " L " + (CX - 100) + " " + (TOP + 100);
+  return pathTag(d, WHITE, 8, op, "40 40"); // dash pattern
+}
+
+/* The emerging desire path (hero element) */
+function desirePath(u, op, sw) {
+  op = (op == null ? 1 : op);
+  sw = (sw == null ? 60 : sw);
+  var d = "M " + (CX + 100) + " " + (BOT - 100) +
+          " L " + (CX - 100) + " " + (TOP + 100);
+  return pathTag(d, BLUE, sw, op);
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var stickX = lerp(CX + 150, CX + 100, smooth(u));
+  var stickY = lerp(BOT - 100, CY + 100, smooth(u));
+  var walkU = u * 2; // Slower walk
+  var pathOp = 1;
+  var dashOp = ramp(u, 0.3, 0.7); // Dashed line appears
+  var bubbleOp = ramp(u, 0.6, 0.8) * (1 - ramp(u, 0.85, 0.95)); // Thought bubble appears then pops
+
+  s += pavedPath(u, pathOp);
+  s += dashedShortcut(dashOp * 0.4); // Faint dashed line
+
+  // Stick figure on path
+  s += stickFigure(stickX, stickY, AMBER, walkU, 0);
+
+  // Thought bubble with clock icon
+  if (bubbleOp > 0.01) {
+    var bubbleX = stickX + 100;
+    var bubbleY = stickY - 200;
+    s += ring(bubbleX, bubbleY, 40, AMBER, 5, bubbleOp);
+    s += line(bubbleX, bubbleY, bubbleX, bubbleY - 25, AMBER, 5, bubbleOp); // Clock hand 1
+    s += line(bubbleX, bubbleY, bubbleX + 18, bubbleY + 18, AMBER, 5, bubbleOp); // Clock hand 2
+  }
+
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var hop = smooth(ramp(u, 0.2, 0.4)); // When stick figure steps off
+  var pavedPathOp = lerp(1, 0.6, smooth(u));
+  var dashOp = lerp(0.4, 0.8, smooth(u)); // Dashed line becomes more prominent as they walk on it
+  var walkU = u * 3; // Faster walk
+
+  s += pavedPath(u, pavedPathOp);
+  s += dashedShortcut(dashOp);
+
+  // Stick figure steps off path
+  var stickFigX, stickFigY;
+  if (hop < 0.01) { // On paved path
+    stickFigX = CX + 100;
+    stickFigY = CY + 100;
+  } else if (hop < 0.99) { // Stepping off
+    stickFigX = lerp(CX + 100, CX + 50, easeOut(hop));
+    stickFigY = lerp(CY + 100, CY + 50, easeOut(hop));
+    // Small jump effect
+    var jumpY = Math.sin(hop * Math.PI) * 30;
+    stickFigY -= jumpY;
+  } else { // On grass
+    stickFigX = CX + 50;
+    stickFigY = CY + 50;
+  }
+
+  s += stickFigure(stickFigX, stickFigY, AMBER, walkU, -1); // Looks left (back at path)
+
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var pavedPathOp = lerp(0.6, 0.4, smooth(u));
+  var dashOp = lerp(0.8, 0.2, smooth(u)); // Dashed line fades
+  var coralOp = ramp(u, 0.2, 0.5) * (1 - ramp(u, 0.7, 0.9)); // Coral outline highlights then fades
+
+  s += pavedPath(u, pavedPathOp);
+  s += dashedShortcut(dashOp);
+
+  // Coral red outline of intended path
+  if (coralOp > 0.01) {
+    var pathWidth = 100;
+    var d = "M " + (CX + 200) + " " + BOT +
+            " Q " + (CX + 200) + " " + (CY + 100) +
+            " " + (CX - 300) + " " + TOP;
+    s += pathTag(d, CORAL, pathWidth * 1.1, coralOp * 0.2); // Faint glow
+    s += pathTag(d, CORAL, pathWidth * 0.4, coralOp); // Solid line
+  }
+
+  // Stick figure stands in grass
+  s += stickFigure(CX + 50, CY + 50, AMBER, 0, 0); // Not walking, looking forward
+
+  // Question marks (using dots)
+  var qOp = ramp(u, 0.4, 0.7);
+  if (qOp > 0.01) {
+    var qX = CX + 50;
+    var qY = CY - 100;
+    var bounce = Math.sin(u * Math.PI * 4) * 8;
+    s += dot(qX, qY - 40 + bounce, 12, AMBER, qOp); // Top dot
+    s += dot(qX - 20, qY + 10 + bounce, 12, AMBER, qOp); // Bottom left
+    s += dot(qX + 20, qY + 10 + bounce, 12, AMBER, qOp); // Bottom right
+  }
+
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.5, smooth(u)); // Zoom out for aerial view
+  var camY = lerp(0, -CY/2, smooth(u));
+  s += '<g ' + camera(scale, 0, camY) + '>';
+
+  s += pavedPath(u, 0.3); // Paved path remains, but less prominent
+
+  // Grass area for dots
+  var grassX1 = CX - 300, grassX2 = CX + 300;
+  var grassY1 = CY - 400, grassY2 = CY + 400;
+  s += rrect((grassX1 + grassX2) / 2, (grassY1 + grassY2) / 2, grassX2 - grassX1, grassY2 - grassY1, 20, BLACK, 1);
+
+  // Hundreds of tiny amber dots flowing
+  var numDots = 200;
+  var flowSpeed = lerp(0.5, 2.0, smooth(u));
+  var flowOffset = u * flowSpeed * 200; // Animation phase for dots
+
+  for (var i = 0; i < numDots; i++) {
+    var startY = BOT - 100 - (i * 100 + rnd(i) * 50 + flowOffset) % (BOT - TOP + 200);
+    var startX = lerp(CX + 100, CX - 100, (startY - TOP) / (BOT - TOP));
+    var dotY = startY;
+    var dotX = startX;
+
+    // Simulate movement across the shortcut path
+    var pathRatio = (dotY - (TOP + 100)) / ((BOT - 100) - (TOP + 100));
+    var targetX = lerp(CX + 100, CX - 100, pathRatio);
+    var currentX = lerp(dotX, targetX, 0.8); // Dots converge towards the line
+
+    if (dotY > TOP && dotY < BOT) {
+      s += dot(currentX, dotY, 8, AMBER, 0.7);
+    }
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(0.5, 1.0, smooth(u)); // Zoom back in
+  var camY = lerp(-CY/2, 0, smooth(u));
+  s += '<g ' + camera(scale, 0, camY) + '>';
+
+  s += pavedPath(u, 0.3);
+
+  // Fading amber dots from previous scene
+  var dotFade = (1 - ramp(u, 0.0, 0.3));
+  var numDots = 200;
+  var flowSpeed = 2.0;
+  var flowOffset = 1.0 * flowSpeed * 200; // End phase of dot animation
+  for (var i = 0; i < numDots; i++) {
+    var startY = BOT - 100 - (i * 100 + rnd(i) * 50 + flowOffset) % (BOT - TOP + 200);
+    var startX = lerp(CX + 100, CX - 100, (startY - TOP) / (BOT - TOP));
+    var pathRatio = (startY - (TOP + 100)) / ((BOT - 100) - (TOP + 100));
+    var targetX = lerp(CX + 100, CX - 100, pathRatio);
+    var currentX = lerp(startX, targetX, 0.8);
+
+    if (startY > TOP && startY < BOT) {
+      s += dot(currentX, startY, 8, AMBER, 0.7 * dotFade);
+    }
+  }
+
+  // Blue desire path appears and solidifies
+  var pathSolidify = ramp(u, 0.2, 0.8);
+  var pathWidth = lerp(10, 60, pathSolidify);
+  var pathOp = lerp(0.1, 1.0, pathSolidify);
+  s += desirePath(u, pathOp, pathWidth);
+
+  // Stick figure walks on nascent blue line
+  var stickX = lerp(CX + 80, CX - 80, smooth(u));
+  var stickY = lerp(BOT - 150, TOP + 150, smooth(u));
+  var walkU = u * 2;
+  s += stickFigure(stickX, stickY, AMBER, walkU, 0);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.9, smooth(u)); // Slight pull back
+  s += '<g ' + camera(scale, 0, 0) + '>';
+
+  // Paved path
+  s += pavedPath(u, 0.4);
+
+  // Solid blue desire path
+  s += desirePath(u, 1.0, 60);
+
+  // Stick figure walks confidently on blue path
+  var stickX = lerp(CX + 80, CX - 80, smooth(u));
+  var stickY = lerp(BOT - 150, TOP + 150, smooth(u));
+  var walkU = u * 2;
+  s += stickFigure(stickX, stickY, AMBER, walkU, 0); // Looking forward
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

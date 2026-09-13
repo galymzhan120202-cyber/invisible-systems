@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why 'limited time offer' never really ends</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary elements
+var BLUE  = "#4C86F0";              // signal blue  -> the system / the rule revealed
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want
+var CORAL = "#FF5B5B";              // coral red    -> naive/wrong model, false urgency
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* stick figure (x, y = feet center) */
+function stickFigure(x, y, scale, col, op, headAngle, armAngleL, armAngleR, bodyLean) {
+  scale = scale == null ? 1 : scale;
+  col = col == null ? WHITE : col;
+  op = op == null ? 1 : op;
+  headAngle = headAngle == null ? 0 : headAngle; // radians
+  armAngleL = armAngleL == null ? Math.PI * 0.75 : armAngleL;
+  armAngleR = armAngleR == null ? Math.PI * 0.25 : armAngleR;
+  bodyLean = bodyLean == null ? 0 : bodyLean; // radians
+
+  var sw = 8 * scale;
+  var headR = 20 * scale;
+  var bodyH = 80 * scale;
+  var legH = 60 * scale;
+  var armH = 50 * scale;
+
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ') rotate(' + (bodyLean * 180 / Math.PI) + ') scale(' + scale + ')">';
+
+  // Legs (from 0,0 which is feet center, up to body base)
+  g += line(-20 * scale, 0, 0, -legH, col, sw);
+  g += line(20 * scale, 0, 0, -legH, col, sw);
+
+  // Body (from body base up to neck)
+  var bodyBaseY = -legH;
+  var neckY = -legH - bodyH;
+  g += line(0, bodyBaseY, 0, neckY, col, sw);
+
+  // Head (above neck)
+  g += dot(0, neckY - headR, headR, col);
+
+  // Arms (start from upper body)
+  var armStartX = 0;
+  var armStartY = neckY + bodyH * 0.3; // Roughly shoulder height
+  g += line(armStartX, armStartY, armStartX + armH * Math.cos(armAngleL), armStartY + armH * Math.sin(armAngleL), col, sw);
+  g += line(armStartX, armStartY, armStartX + armH * Math.cos(armAngleR), armStartY + armH * Math.sin(armAngleR), col, sw);
+
+  g += '</g>';
+  return g;
+}
+
+/* Product Box (x,y = center) */
+function productBox(x, y, w, h, col, op) {
+  return rrect(x, y, w, h, 16, col, op);
+}
+
+/* Offer Tag (x,y = center of tag, w,h = tag dimensions, clockPhase = 0-1 for clock hands) */
+function offerTag(x, y, w, h, col, op, clockPhase) {
+  var g = '';
+  g += rrect(x, y, w, h, 12, col, op);
+
+  // Clock glyph (circle with two hands)
+  var clockR = Math.min(w, h) * 0.25;
+  var clockX = x + w * 0.28; // Offset to right of tag center
+  var clockY = y;
+  g += ring(clockX, clockY, clockR, WHITE, 4, op);
+
+  var hHandLen = clockR * 0.6;
+  var mHandLen = clockR * 0.9;
+
+  var angle = clockPhase * Math.PI * 2; // Full circle for 0-1 phase
+  var hourAngle = angle * 0.5; // Hour hand moves slower
+  var minuteAngle = angle;
+
+  g += line(clockX, clockY, clockX + hHandLen * Math.sin(hourAngle), clockY - hHandLen * Math.cos(hourAngle), WHITE, 4, op);
+  g += line(clockX, clockY, clockX + mHandLen * Math.sin(minuteAngle), clockY - mHandLen * Math.cos(minuteAngle), WHITE, 4, op);
+
+  return g;
+}
+
+/* Price Tag (x,y = center, w,h = tag dimensions, col, op, symbol = 'up' or 'down' arrow or 'dot') */
+function priceTag(x, y, w, h, col, op, symbol) {
+  var g = '';
+  g += rrect(x, y, w, h, 8, col, op);
+  var arrowSize = Math.min(w, h) * 0.25;
+  if (symbol === 'up') {
+    g += line(x - arrowSize, y + arrowSize * 0.5, x, y - arrowSize * 0.5, WHITE, 6, op);
+    g += line(x + arrowSize, y + arrowSize * 0.5, x, y - arrowSize * 0.5, WHITE, 6, op);
+  } else if (symbol === 'down') {
+    g += line(x - arrowSize, y - arrowSize * 0.5, x, y + arrowSize * 0.5, WHITE, 6, op);
+    g += line(x + arrowSize, y - arrowSize * 0.5, x, y + arrowSize * 0.5, WHITE, 6, op);
+  } else if (symbol === 'dot') {
+    g += dot(x, y, arrowSize * 0.6, WHITE, op);
+  }
+  return g;
+}
+
+/* System Frame (x,y = center, w,h = frame dimensions, col, sw, op) */
+function systemFrame(x, y, w, h, col, sw, op) {
+  return rrectStroke(x, y, w, h, 20, col, sw, op);
+}
+
+/* Flowing dots for system animation */
+function flowingDots(x, y, w, h, count, speed, phase, col, op) {
+  var g = '';
+  var startY = y - h / 2;
+  var endY = y + h / 2;
+  var startX = x - w / 2;
+  var endX = x + w / 2;
+  var dotR = 8;
+  for (var i = 0; i < count; i++) {
+    var p = ((phase * speed + rnd(i)) % 1);
+    var dx = lerp(startX, endX, p);
+    var dy = lerp(startY, endY, p);
+    g += dot(dx, dy, dotR, col, op * (1 - Math.abs(p - 0.5) * 1.5)); // Fade at ends
+  }
+  return g;
+}
+
+/* Eye glyph (x,y = center, r = radius, col, op) */
+function eyeGlyph(x, y, r, col, op) {
+  var g = '';
+  g += ring(x, y, r, col, 8, op);
+  g += dot(x, y, r * 0.4, col, op);
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + The Offer */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  var prodW = 400, prodH = 500;
+  var prodY = CY + 100;
+  var tagW = 480, tagH = 160;
+  var tagY = prodY - prodH / 2 - tagH / 2 - 80;
+
+  // Product Box (Amber)
+  s += productBox(CX, prodY, prodW, prodH, AMBER, 1);
+
+  // Offer Tag (Coral Red) with clock
+  var clockPhase = u * 0.9; // Clock moves almost to full
+  s += offerTag(CX, tagY, tagW, tagH, CORAL, 1, clockPhase);
+
+  // Stick figure
+  var figX = CX + 300;
+  var figY = BOT - 180;
+  var armL = lerp(Math.PI * 0.75, Math.PI * 0.6, smooth(u)); // Arm points to offer
+  var armR = lerp(Math.PI * 0.25, Math.PI * 0.3, smooth(u));
+  var headAng = lerp(0, -0.2, smooth(u));
+  s += stickFigure(figX, figY, 1.2, WHITE, 1, headAng, armL, armR);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): The Urgency Loop */
+function scene2(u) {
+  var s = '';
+  var scale = lerp(1.0, 1.02, smooth(u * 0.9));
+  var driftY = lerp(0, -10, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  var prodW = 400, prodH = 500;
+  var prodY = CY + 100;
+  var tagW = 480, tagH = 160;
+  var tagY = prodY - prodH / 2 - tagH / 2 - 80;
+
+  // Product Box (Amber)
+  s += productBox(CX, prodY, prodW, prodH, AMBER, 1);
+
+  // Ghost offer tags
+  for (var i = 0; i < 3; i++) {
+    var ghostU = (u * 0.5 + i * 0.33 + rnd(i)) % 1;
+    var ghostOp = (1 - ghostU) * 0.3;
+    var ghostScale = lerp(1, 1.2, easeOut(ghostU));
+    s += rrect(CX, tagY + lerp(0, 100, easeOut(ghostU)), tagW * ghostScale, tagH * ghostScale, DIM, ghostOp);
+  }
+
+  // Current Offer Tag (Coral Red)
+  var resetPhase = ramp(u, 0.0, 0.2); // Clock rapidly resets
+  var clockPhase = lerp(0.9, 0.0, easeIn(resetPhase));
+  var tagOp = lerp(0.5, 1, ramp(u, 0.1, 0.3));
+  s += offerTag(CX, tagY, tagW, tagH, CORAL, tagOp, clockPhase);
+
+  // Stick figure
+  var figX = CX + 300;
+  var figY = BOT - 180;
+  var headShake = Math.sin(u * Math.PI * 8) * 0.1 * pulse(u, 0.5, 0.3);
+  s += stickFigure(figX, figY, 1.2, WHITE, 1, headShake, Math.PI * 0.75, Math.PI * 0.25);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): The System Revealed */
+function scene3(u) {
+  var s = '';
+  var scale = lerp(1.02, 0.98, smooth(u * 0.9));
+  var driftY = lerp(-10, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  var prodW = 400, prodH = 500;
+  var prodY = CY + 100;
+  var tagW = 480, tagH = 160;
+  var tagY = prodY - prodH / 2 - tagH / 2 - 80;
+
+  // Morph Offer Tag to System Frame
+  var frameW = lerp(tagW, prodW + 120, smooth(u));
+  var frameH = lerp(tagH, prodH + 200, smooth(u));
+  var frameY = lerp(tagY, prodY - 50, smooth(u));
+  var frameColTransition = smooth(ramp(u, 0.2, 0.5)); // 0=coral, 1=blue
+  var frameCoralOp = 1 - frameColTransition;
+  var frameBlueOp = frameColTransition;
+
+  // Fading coral tag
+  s += rrect(CX, tagY, tagW, tagH, CORAL, frameCoralOp);
+  // Growing blue frame
+  s += systemFrame(CX, frameY, frameW, frameH, BLUE, 12, frameBlueOp);
+
+  // Product Box (Amber)
+  s += productBox(CX, prodY, prodW, prodH, AMBER, 1);
+
+  // Flowing offers (blue dots)
+  var flowOp = smooth(ramp(u, 0.5, 0.8));
+  s += flowingDots(CX - frameW / 2 + 30, frameY, 0, frameH, 5, 2, u, BLUE, flowOp); // Left edge
+  s += flowingDots(CX + frameW / 2 - 30, frameY, 0, frameH, 5, 2, u + 0.5, BLUE, flowOp); // Right edge
+  s += flowingDots(CX, frameY - frameH / 2 + 30, frameW, 0, 5, 2, u + 0.25, BLUE, flowOp); // Top edge
+  s += flowingDots(CX, frameY + frameH / 2 - 30, frameW, 0, 5, 2, u + 0.75, BLUE, flowOp); // Bottom edge
+
+  // Stick figure with lightbulb moment
+  var figX = CX + 300;
+  var figY = BOT - 180;
+  var headTilt = lerp(0, -0.4, smooth(ramp(u, 0.6, 0.9)));
+  s += stickFigure(figX, figY, 1.2, WHITE, 1, headTilt, Math.PI * 0.75, Math.PI * 0.25);
+  var bulbOp = smooth(ramp(u, 0.8, 1.0));
+  s += dot(figX, figY - 200, 18, BLUE, bulbOp); // Lightbulb/insight dot
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): Reference Price Manipulation */
+function scene4(u) {
+  var s = '';
+  var scale = lerp(0.98, 1.0, smooth(u * 0.9));
+  var driftY = lerp(0, -20, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  var prodW = 400, prodH = 500;
+  var prodY = CY + 100;
+  var frameW = prodW + 120, frameH = prodH + 200;
+  var frameY = prodY - 50;
+
+  // System Frame (Blue)
+  s += systemFrame(CX, frameY, frameW, frameH, BLUE, 12, 1);
+
+  // Product Box (Amber)
+  s += productBox(CX, prodY, prodW, prodH, AMBER, 1);
+
+  // Original Price Tag (Coral Red, higher)
+  var origTagY = frameY - frameH / 2 - 100;
+  var origTagOp = smooth(ramp(u, 0.0, 0.2));
+  var origTagShake = Math.sin(u * Math.PI * 12) * 5 * pulse(u, 0.5, 0.3);
+  s += priceTag(CX + origTagShake, origTagY, 200, 80, CORAL, origTagOp, 'up');
+
+  // Sale Price Tag (Amber, lower)
+  var saleTagY = frameY + frameH / 2 + 100;
+  var saleTagOp = smooth(ramp(u, 0.2, 0.4));
+  s += priceTag(CX, saleTagY, 200, 80, AMBER, saleTagOp, 'down');
+
+  // Line connecting prices, showing "discount"
+  var discountLineOp = Math.min(origTagOp, saleTagOp);
+  s += line(CX, origTagY + 40, CX, saleTagY - 40, WHITE, 6, discountLineOp);
+
+  // Stick figure
+  var figX = CX + 300;
+  var figY = BOT - 180;
+  var armL = lerp(Math.PI * 0.75, Math.PI * 0.5, smooth(ramp(u, 0.3, 0.6))); // Pointing to original price
+  var headShake = Math.sin(u * Math.PI * 10) * 0.05 * pulse(u, 0.7, 0.2);
+  s += stickFigure(figX, figY, 1.2, WHITE, 1, headShake, armL, Math.PI * 0.25);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): The Perpetual Cycle */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.9, smooth(u * 0.9));
+  var driftY = lerp(-20, 50, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  var prodW = 400, prodH = 500;
+  var prodY = CY + 100;
+  var frameW = prodW + 120, frameH = prodH + 200;
+  var frameY = prodY - 50;
+
+  // System Frame (Blue)
+  s += systemFrame(CX, frameY, frameW, frameH, BLUE, 12, 1);
+
+  // Product Box (Amber)
+  s += productBox(CX, prodY, prodW, prodH, AMBER, 1);
+
+  // Multiple fleeting "Offer Tags" (coral red) and "Original Price Tags" (coral red)
+  var tagCount = 8;
+  for (var i = 0; i < tagCount; i++) {
+    var tagU = (u * 0.8 + rnd(i) * 0.4) % 1;
+    var tagOp = (1 - tagU) * 0.6;
+    var tagSize = lerp(1, 0.7, easeOut(tagU));
+    var tagOffX = Math.sin(rnd(i + 10) * Math.PI * 2) * 300;
+    var tagOffY = lerp(-400, 600, tagU) + rnd(i + 20) * 100 - 50;
+    var tagType = i % 2 === 0 ? 'clock' : 'up';
+
+    if (tagType === 'clock') {
+      s += offerTag(CX + tagOffX, CY + tagOffY, 180 * tagSize, 60 * tagSize, CORAL, tagOp, tagU * 0.9);
+    } else {
+      s += priceTag(CX + tagOffX, CY + tagOffY, 140 * tagSize, 50 * tagSize, CORAL, tagOp, 'up');
+    }
+  }
+
+  // Stick figure, overwhelmed/shrinking
+  var figX = CX + 300;
+  var figY = BOT - 180;
+  var figScale = lerp(1.2, 0.9, smooth(u));
+  var headDown = lerp(0, 0.6, smooth(u));
+  var armIn = lerp(Math.PI * 0.75, Math.PI * 0.9, smooth(u));
+  var armInR = lerp(Math.PI * 0.25, Math.PI * 0.1, smooth(u));
+  s += stickFigure(figX, figY, figScale, WHITE, 1, headDown, armIn, armInR);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): Breaking the Spell */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.9, 1.0, smooth(u * 0.9));
+  var driftY = lerp(50, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  var prodW = 400, prodH = 500;
+  var prodY = CY + 100;
+  var frameW = prodW + 120, frameH = prodH + 200;
+  var frameY = prodY - 50;
+
+  // Coral elements recede and fade
+  var coralFade = 1 - smooth(ramp(u, 0.0, 0.4));
+  for (var i = 0; i < 4; i++) {
+    var tagU = (u * 0.5 + rnd(i) * 0.2) % 1;
+    var tagOp = (1 - tagU) * coralFade * 0.5;
+    var tagSize = lerp(0.7, 0.5, easeOut(tagU));
+    var tagOffX = Math.sin(rnd(i + 10) * Math.PI * 2) * 400;
+    var tagOffY = lerp(-200, 800, tagU) + rnd(i + 20) * 100;
+    s += rrect(CX + tagOffX, CY + tagOffY, 180 * tagSize, 60 * tagSize, CORAL, tagOp);
+  }
+
+  // System Frame (Blue) simplifies
+  var frameSw = lerp(12, 8, smooth(u));
+  s += systemFrame(CX, frameY, frameW, frameH, BLUE, frameSw, 1);
+
+  // Product Box (Amber)
+  s += productBox(CX, prodY, prodW, prodH, AMBER, 1);
+
+  // Stick figure moves away, calm, with insight glyph
+  var figX = lerp(CX + 300, CX - 300, smooth(ramp(u, 0.2, 0.6)));
+  var figY = BOT - 180;
+  var figScale = lerp(0.9, 1.1, smooth(ramp(u, 0.2, 0.6)));
+  var headUp = lerp(0.6, 0, smooth(ramp(u, 0.2, 0.6)));
+  var armRelax = lerp(Math.PI * 0.9, Math.PI * 0.75, smooth(ramp(u, 0.2, 0.6)));
+  var armRelaxR = lerp(Math.PI * 0.1, Math.PI * 0.25, smooth(ramp(u, 0.2, 0.6)));
+  s += stickFigure(figX, figY, figScale, WHITE, 1, headUp, armRelax, armRelaxR);
+
+  var eyeOp = smooth(ramp(u, 0.7, 0.9));
+  s += eyeGlyph(figX, figY - 200, 24, BLUE, eyeOp); // Eye/understanding glyph
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
