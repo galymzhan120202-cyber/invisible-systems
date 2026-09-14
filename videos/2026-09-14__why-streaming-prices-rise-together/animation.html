@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why streaming services keep raising prices together</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var BLUE  = "#4C86F0";              // signal blue  -> the system / rules
+var AMBER = "#F2A93B";              // warm amber   -> YOU / desire
+var CORAL = "#FF5B5B";              // coral red    -> naive / wrong model
+var DIM   = "#8A93A6";              // muted grey (not explicitly requested for this story, but good to have)
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* stick figure: x, y = center of body, scale = overall size, pose = string, col = color, op = opacity */
+function stickFigure(x, y, scale, pose, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ') scale(' + scale + ')">';
+  var sw = 10 / scale; // Adjust stroke width for scale
+
+  // Head
+  g += dot(0, -80, 40, col); // Head
+
+  // Body
+  g += line(0, -40, 0, 40, col, sw);
+
+  // Arms
+  if (pose === 'sitting' || pose === 'concerned' || pose === 'understanding') {
+    g += line(-30, -10, -60, 20, col, sw); // Left arm
+    g += line(30, -10, 60, 20, col, sw);  // Right arm
+  } else if (pose === 'detective') {
+    g += line(-30, -10, -70, 0, col, sw); // Left arm (holding glass)
+    g += line(30, -10, 70, 0, col, sw);  // Right arm (holding glass)
+  } else if (pose === 'wallet') {
+    g += line(-30, -10, -70, 0, col, sw); // Left arm (holding wallet)
+    g += line(30, -10, 60, 20, col, sw);  // Right arm
+  } else { // 'regular'
+    g += line(-30, -10, -60, 0, col, sw); // Left arm
+    g += line(30, -10, 60, 0, col, sw);  // Right arm
+  }
+
+  // Legs (sitting)
+  if (pose === 'sitting' || pose === 'concerned' || pose === 'understanding' || pose === 'wallet') {
+    g += line(-20, 40, -50, 80, col, sw); // Left leg
+    g += line(20, 40, 50, 80, col, sw);  // Right leg
+  } else { // Standing
+    g += line(-20, 40, -20, 100, col, sw); // Left leg
+    g += line(20, 40, 20, 100, col, sw);  // Right leg
+  }
+
+  // Pose-specific details
+  if (pose === 'concerned') {
+    g += line(-20, -90, -5, -95, WHITE, sw * 0.7); // Eyebrow furrow
+    g += line(20, -90, 5, -95, WHITE, sw * 0.7);
+    g += line(-10, -70, 10, -70, WHITE, sw * 0.7); // Straight mouth
+  } else if (pose === 'detective') {
+    // Hat
+    g += line(-50, -110, 50, -110, col, sw);
+    g += line(-40, -110, -30, -140, col, sw);
+    g += line(40, -110, 30, -140, col, sw);
+    g += pathTag("M -30 -140 C -10 -150, 10 -150, 30 -140", col, sw);
+    // Magnifying glass
+    g += ring(90, -20, 30, col, sw);
+    g += line(90 + 21, -20 + 21, 130, 20, col, sw);
+  } else if (pose === 'understanding') {
+    g += line(-15, -70, 15, -70, WHITE, sw * 0.7); // Straight mouth
+    g += line(-10, -90, 10, -90, WHITE, sw * 0.7); // Straight eyebrows
+  } else { // Default happy/neutral
+    g += line(-15, -70, 15, -70, WHITE, sw * 0.7); // Straight mouth
+    g += line(-10, -90, 10, -90, WHITE, sw * 0.7); // Straight eyebrows
+  }
+
+  g += '</g>';
+  return g;
+}
+
+/* streaming service icon: x, y = center, size = overall size, type = 'N', 'D', 'H', 'P', col = color, op = opacity */
+function streamingIcon(x, y, size, type, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ') scale(' + (size / 100) + ')">';
+  var sw = 8 / (size / 100); // Adjust stroke width for scale
+
+  if (type === 'N') { // Netflix-like N
+    g += pathTag("M -30 -40 L -30 40 L 30 -40 L 30 40", col, sw);
+  } else if (type === 'D') { // Disney-like D
+    g += pathTag("M -30 40 L -30 -20 A 30 30 0 0 1 0 -40 A 30 30 0 0 1 30 -20 L 30 40", col, sw);
+  } else if (type === 'H') { // Hulu-like H
+    g += pathTag("M -30 -40 L -30 40 M 30 -40 L 30 40 M -30 0 L 30 0", col, sw);
+  } else if (type === 'P') { // Prime-like P
+    g += pathTag("M -30 40 L -30 -40 L 0 -40 A 30 30 0 0 1 0 0 L -30 0", col, sw);
+  }
+  g += '</g>';
+  return g;
+}
+
+/* simple couch */
+function couch(x, y, width, height, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y + height * 0.1, width, height * 0.8, 20, col, op); // Seat
+  g += rrect(x - width * 0.45, y - height * 0.2, width * 0.1, height * 0.5, 10, col, op); // Left armrest
+  g += rrect(x + width * 0.45, y - height * 0.2, width * 0.1, height * 0.5, 10, col, op); // Right armrest
+  g += rrect(x, y - height * 0.4, width * 0.8, height * 0.2, 15, col, op); // Backrest
+  g += '</g>';
+  return g;
+}
+
+/* simple remote */
+function remote(x, y, width, height, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, width, height, 8, col, op);
+  g += dot(x, y - height * 0.2, width * 0.15, WHITE, op);
+  g += dot(x - width * 0.15, y + height * 0.1, width * 0.08, WHITE, op);
+  g += dot(x + width * 0.15, y + height * 0.1, width * 0.08, WHITE, op);
+  g += dot(x, y + height * 0.25, width * 0.08, WHITE, op);
+  g += '</g>';
+  return g;
+}
+
+/* plus sign */
+function plusSign(x, y, size, col, sw, op) {
+  sw = sw == null ? 10 : sw;
+  return line(x - size / 2, y, x + size / 2, y, col, sw, op) +
+         line(x, y - size / 2, x, y + size / 2, col, sw, op);
+}
+
+/* cross sign */
+function crossSign(x, y, size, col, sw, op) {
+  sw = sw == null ? 12 : sw;
+  return line(x - size / 2, y - size / 2, x + size / 2, y + size / 2, col, sw, op) +
+         line(x + size / 2, y - size / 2, x - size / 2, y + size / 2, col, sw, op);
+}
+
+/* thought bubble */
+function thoughtBubble(x, y, w, h, col, sw, op) {
+  var d = "M " + x + " " + y + " C " + (x + w * 0.6) + " " + (y - h * 0.2) + " " + (x + w * 0.6) + " " + (y - h * 0.8) + " " + x + " " + (y - h) +
+          " C " + (x - w * 0.6) + " " + (y - h * 0.8) + " " + (x - w * 0.6) + " " + (y - h * 0.2) + " " + x + " " + y;
+  return pathTag(d, col, sw, op);
+}
+
+/* jagged line */
+function jaggedLine(x1, y1, x2, y2, segments, amplitude, col, sw, op) {
+  var d = "M " + x1 + " " + y1;
+  var dx = (x2 - x1) / segments;
+  var dy = (y2 - y1) / segments;
+  for (var i = 1; i <= segments; i++) {
+    var cx = x1 + i * dx;
+    var cy = y1 + i * dy;
+    var offset = (i % 2 === 0 ? 1 : -1) * amplitude;
+    var perpX = -dy; // Perpendicular vector component
+    var perpY = dx;
+    var len = Math.sqrt(perpX * perpX + perpY * perpY);
+    if (len > 0) {
+      perpX /= len;
+      perpY /= len;
+    }
+    d += " L " + (cx + perpX * offset) + " " + (cy + perpY * offset);
+  }
+  return pathTag(d, col, sw, op);
+}
+
+/* eye icon for observation */
+function eyeIcon(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ') scale(' + (size / 100) + ')">';
+  var sw = 8 / (size / 100);
+  g += pathTag("M -40 0 C -20 -30, 20 -30, 40 0 C 20 30, -20 30, -40 0 Z", col, sw); // Outer eye shape
+  g += dot(0, 0, 15, col); // Pupil
+  g += '</g>';
+  return g;
+}
+
+/* lightbulb icon */
+function lightbulbIcon(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ') scale(' + (size / 100) + ')">';
+  var sw = 8 / (size / 100);
+  g += pathTag("M -20 0 A 20 20 0 0 0 0 -40 A 20 20 0 0 0 20 0 L 20 20 A 20 20 0 0 1 -20 20 Z", col, sw); // Bulb body
+  g += rrect(0, 30, 20, 10, 5, col, sw); // Base
+  g += line(-10, -50, 10, -50, col, sw * 0.6); // Filament top
+  g += line(-10, -60, 10, -60, col, sw * 0.6); // Filament bottom
+  g += '</g>';
+  return g;
+}
+
+/* wallet icon */
+function wallet(x, y, width, height, fillCol, strokeCol, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, width, height, 10, fillCol, op);
+  g += rrectStroke(x, y, width, height, 10, strokeCol, 8, op);
+  g += line(x - width * 0.3, y - height * 0.1, x + width * 0.3, y - height * 0.1, strokeCol, 4, op); // Divider
+  g += line(x - width * 0.3, y + height * 0.2, x + width * 0.3, y + height * 0.2, strokeCol, 4, op); // Divider
+  g += dot(x + width * 0.4, y, 6, strokeCol, op); // Clasp dot
+  g += '</g>';
+  return g;
+}
+
+/* price umbrella */
+function priceUmbrella(x, y, width, height, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var handleX = x;
+  var handleY = y + height * 0.7;
+  g += pathTag("M " + (x - width / 2) + " " + y +
+               " A " + (width / 2) + " " + (height * 0.8) + " 0 0 1 " + (x + width / 2) + " " + y,
+               col, sw); // Umbrella top
+  g += line(x, y, handleX, handleY, col, sw); // Handle stick
+  g += pathTag("M " + handleX + " " + handleY + " A 15 15 0 0 0 " + (handleX + 15) + " " + (handleY + 15), col, sw); // Handle curve
+  g += '</g>';
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+var ICON_Y = CY - 200;
+var ICON_X_N = CX - 280, ICON_X_D = CX, ICON_X_H = CX + 280;
+var ICON_SIZE = 120;
+var YOU_Y = CY + 400;
+var YOU_SCALE = 1.8;
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var couchW = 700, couchH = 200;
+  var couchY = YOU_Y + 100;
+
+  // Couch
+  s += couch(CX, couchY, couchW, couchH, WHITE, 0.8);
+
+  // YOU
+  var bob = Math.sin(u * Math.PI * 2) * 4;
+  s += stickFigure(CX, YOU_Y + bob, YOU_SCALE, 'sitting', AMBER);
+
+  // Remote in hand
+  var remoteX = CX + 60, remoteY = YOU_Y + 10 + bob;
+  s += remote(remoteX, remoteY, 40, 100, WHITE, 1);
+
+  // Streaming icons
+  var iconOp = easeOut(ramp(u, 0.1, 0.5));
+  s += streamingIcon(ICON_X_N, ICON_Y, ICON_SIZE, 'N', WHITE, iconOp);
+  s += streamingIcon(ICON_X_D, ICON_Y, ICON_SIZE, 'D', WHITE, iconOp);
+  s += streamingIcon(ICON_X_H, ICON_Y, ICON_SIZE, 'H', WHITE, iconOp);
+
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var couchW = 700, couchH = 200;
+  var couchY = YOU_Y + 100;
+  s += couch(CX, couchY, couchW, couchH, WHITE, 0.8);
+
+  // YOU
+  var headTilt = lerp(0, 8, smooth(ramp(u, 0.4, 0.8)));
+  s += '<g transform="rotate(' + headTilt + ' ' + CX + ' ' + (YOU_Y - 80 * YOU_SCALE) + ')">';
+  s += stickFigure(CX, YOU_Y, YOU_SCALE, 'concerned', AMBER);
+  s += '</g>';
+
+  // Streaming icons and price rises
+  var riseN = smooth(ramp(u, 0.0, 0.2));
+  var riseD = smooth(ramp(u, 0.3, 0.5));
+  var riseH = smooth(ramp(u, 0.6, 0.8));
+
+  var iconY_N = ICON_Y - riseN * 80;
+  var iconY_D = ICON_Y - riseD * 80;
+  var iconY_H = ICON_Y - riseH * 80;
+
+  s += streamingIcon(ICON_X_N, iconY_N, ICON_SIZE, 'N', WHITE);
+  s += streamingIcon(ICON_X_D, iconY_D, ICON_SIZE, 'D', WHITE);
+  s += streamingIcon(ICON_X_H, iconY_H, ICON_SIZE, 'H', WHITE);
+
+  var plusSize = lerp(0, 40, easeOut(ramp(u, 0.1, 0.2)));
+  if (plusSize > 0) s += plusSign(ICON_X_N + 80, iconY_N - 20, plusSize, BLUE, 8);
+  plusSize = lerp(0, 40, easeOut(ramp(u, 0.4, 0.5)));
+  if (plusSize > 0) s += plusSign(ICON_X_D + 80, iconY_D - 20, plusSize, BLUE, 8);
+  plusSize = lerp(0, 40, easeOut(ramp(u, 0.7, 0.8)));
+  if (plusSize > 0) s += plusSign(ICON_X_H + 80, iconY_H - 20, plusSize, BLUE, 8);
+
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH — suspecting collusion */
+function scene3(u) {
+  var s = '';
+  var couchW = 700, couchH = 200;
+  var couchY = YOU_Y + 100;
+  s += couch(CX, couchY, couchW, couchH, WHITE, 0.8 * (1 - smooth(ramp(u, 0.0, 0.2))));
+
+  // YOU transforms to detective
+  var detectiveU = smooth(ramp(u, 0.0, 0.2));
+  var youX = lerp(CX, CX + 100, detectiveU);
+  var youY = lerp(YOU_Y, YOU_Y - 50, detectiveU);
+  var youScale = lerp(YOU_SCALE, YOU_SCALE * 1.1, detectiveU);
+  s += stickFigure(youX, youY, youScale, 'detective', AMBER);
+
+  // Icons huddle
+  var huddleU = smooth(ramp(u, 0.2, 0.5));
+  var iconN_X = lerp(ICON_X_N, CX - 120, huddleU);
+  var iconD_X = lerp(ICON_X_D, CX, huddleU);
+  var iconH_X = lerp(ICON_X_H, CX + 120, huddleU);
+  var iconY_huddle = ICON_Y - 80; // All are at higher price level
+
+  s += streamingIcon(iconN_X, iconY_huddle, ICON_SIZE, 'N', WHITE);
+  s += streamingIcon(iconD_X, iconY_huddle, ICON_SIZE, 'D', WHITE);
+  s += streamingIcon(iconH_X, iconY_huddle, ICON_SIZE, 'H', WHITE);
+
+  // Jagged coral red lines + thought bubbles
+  var linesU = smooth(ramp(u, 0.4, 0.7));
+  if (linesU > 0.02) {
+    s += jaggedLine(iconN_X + 60, iconY_huddle, iconD_X - 60, iconY_huddle, 3, 15, CORAL, 8, linesU);
+    s += jaggedLine(iconD_X + 60, iconY_huddle, iconH_X - 60, iconY_huddle, 3, 15, CORAL, 8, linesU);
+    s += thoughtBubble(iconN_X, iconY_huddle - 100, 100, 100, WHITE, 4, linesU);
+    s += plusSign(iconN_X, iconY_huddle - 150, 40, CORAL, 8, linesU);
+    s += thoughtBubble(iconD_X, iconY_huddle - 100, 100, 100, WHITE, 4, linesU);
+    s += plusSign(iconD_X, iconY_huddle - 150, 40, CORAL, 8, linesU);
+    s += thoughtBubble(iconH_X, iconY_huddle - 100, 100, 100, WHITE, 4, linesU);
+    s += plusSign(iconH_X, iconY_huddle - 150, 40, CORAL, 8, linesU);
+  }
+
+  // Large coral red X
+  var crossU = smooth(ramp(u, 0.75, 0.95));
+  if (crossU > 0.02) {
+    s += crossSign(CX, ICON_Y - 100, 300, CORAL, 12, crossU);
+  }
+
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND — tacit coordination through observation */
+function scene4(u) {
+  var s = '';
+  var couchW = 700, couchH = 200;
+  var couchY = YOU_Y + 100;
+  s += couch(CX, couchY, couchW, couchH, WHITE, 0.8 * (1 - smooth(ramp(u, 0.0, 0.2))));
+
+  // YOU transforms back to regular
+  var transformU = smooth(ramp(u, 0.0, 0.2));
+  var youX = lerp(CX + 100, CX, transformU);
+  var youY = lerp(YOU_Y - 50, YOU_Y, transformU);
+  var youScale = lerp(YOU_SCALE * 1.1, YOU_SCALE, transformU);
+  s += stickFigure(youX, youY, youScale, 'regular', AMBER);
+
+  // Icons spread out
+  var spreadU = smooth(ramp(u, 0.0, 0.2));
+  var iconN_X = lerp(CX - 120, ICON_X_N, spreadU);
+  var iconD_X = lerp(CX, ICON_X_D, spreadU);
+  var iconH_X = lerp(CX + 120, ICON_X_H, spreadU);
+  var iconY_base = ICON_Y - 80; // All start at higher price level
+
+  // N raises its price first
+  var riseN = smooth(ramp(u, 0.1, 0.3));
+  var iconY_N = iconY_base - riseN * 40;
+  s += streamingIcon(iconN_X, iconY_N, ICON_SIZE, 'N', WHITE);
+  if (riseN > 0.02) s += plusSign(iconN_X + 80, iconY_N - 20, 40, BLUE, 8, riseN);
+
+  // D and H observe N
+  var observeU = smooth(ramp(u, 0.2, 0.4));
+  if (observeU > 0.02) {
+    s += eyeIcon(iconD_X - 60, iconY_base - 50, 60, BLUE, observeU);
+    s += eyeIcon(iconH_X - 60, iconY_base - 50, 60, BLUE, observeU);
+    s += line(iconN_X + 60, iconY_N - 20, iconD_X - 60, iconY_base - 50, BLUE, 4, observeU); // Arrow N to D
+  }
+
+  // D raises its price
+  var riseD = smooth(ramp(u, 0.4, 0.6));
+  var iconY_D = iconY_base - riseD * 40;
+  s += streamingIcon(iconD_X, iconY_D, ICON_SIZE, 'D', WHITE);
+  if (riseD > 0.02) s += plusSign(iconD_X + 80, iconY_D - 20, 40, BLUE, 8, riseD);
+
+  // H observes D
+  var observeDU = smooth(ramp(u, 0.5, 0.7));
+  if (observeDU > 0.02) {
+    s += line(iconD_X + 60, iconY_D - 20, iconH_X - 60, iconY_base - 50, BLUE, 4, observeDU); // Arrow D to H
+  }
+
+  // H raises its price
+  var riseH = smooth(ramp(u, 0.7, 0.9));
+  var iconY_H = iconY_base - riseH * 40;
+  s += streamingIcon(iconH_X, iconY_H, ICON_SIZE, 'H', WHITE);
+  if (riseH > 0.02) s += plusSign(iconH_X + 80, iconY_H - 20, 40, BLUE, 8, riseH);
+
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE — the cost of the "price umbrella." */
+function scene5(u) {
+  var s = '';
+  var couchW = 700, couchH = 200;
+  var couchY = YOU_Y + 100;
+  s += couch(CX, couchY, couchW, couchH, WHITE, 0.8 * (1 - smooth(ramp(u, 0.0, 0.2))));
+
+  // YOU looks at wallet
+  var youX = lerp(CX, CX - 200, smooth(ramp(u, 0.0, 0.2)));
+  var youY = lerp(YOU_Y, YOU_Y + 50, smooth(ramp(u, 0.0, 0.2)));
+  s += stickFigure(youX, youY, YOU_SCALE, 'wallet', AMBER);
+
+  // Wallet shrinks
+  var walletShrink = smooth(ramp(u, 0.4, 0.8));
+  var walletW = lerp(180, 100, walletShrink);
+  var walletH = lerp(120, 70, walletShrink);
+  var walletX = youX + 100, walletY = youY + 50;
+  s += wallet(walletX, walletY, walletW, walletH, AMBER, WHITE, 1);
+
+  // Icons at higher price level
+  var iconY_final = ICON_Y - 120;
+  s += streamingIcon(ICON_X_N, iconY_final, ICON_SIZE, 'N', WHITE);
+  s += plusSign(ICON_X_N + 80, iconY_final - 20, 40, BLUE, 8);
+  s += streamingIcon(ICON_X_D, iconY_final, ICON_SIZE, 'D', WHITE);
+  s += plusSign(ICON_X_D + 80, iconY_final - 20, 40, BLUE, 8);
+  s += streamingIcon(ICON_X_H, iconY_final, ICON_SIZE, 'H', WHITE);
+  s += plusSign(ICON_X_H + 80, iconY_final - 20, 40, BLUE, 8);
+
+  // Price umbrella
+  var umbrellaGrow = smooth(ramp(u, 0.2, 0.6));
+  var umbrellaW = lerp(0, W * 0.8, umbrellaGrow);
+  var umbrellaH = lerp(0, H * 0.4, umbrellaGrow);
+  var umbrellaY = lerp(CY - 400, TOP + 100, umbrellaGrow);
+  s += priceUmbrella(CX, umbrellaY, umbrellaW, umbrellaH, BLUE, 10, umbrellaGrow);
+
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE — new understanding */
+function scene6(u) {
+  var s = '';
+  var couchW = 700, couchH = 200;
+  var couchY = YOU_Y + 100;
+  s += couch(CX, couchY, couchW, couchH, WHITE, 0.8);
+
+  // YOU back on couch, understanding
+  var youX = lerp(CX - 200, CX, smooth(ramp(u, 0.0, 0.2)));
+  var youY = lerp(YOU_Y + 50, YOU_Y, smooth(ramp(u, 0.0, 0.2)));
+  s += stickFigure(youX, youY, YOU_SCALE, 'understanding', AMBER);
+
+  // Icons and umbrella remain
+  var iconY_final = ICON_Y - 120;
+  s += streamingIcon(ICON_X_N, iconY_final, ICON_SIZE, 'N', WHITE);
+  s += plusSign(ICON_X_N + 80, iconY_final - 20, 40, BLUE, 8);
+  s += streamingIcon(ICON_X_D, iconY_final, ICON_SIZE, 'D', WHITE);
+  s += plusSign(ICON_X_D + 80, iconY_final - 20, 40, BLUE, 8);
+  s += streamingIcon(ICON_X_H, iconY_final, ICON_SIZE, 'H', WHITE);
+  s += plusSign(ICON_X_H + 80, iconY_final - 20, 40, BLUE, 8);
+
+  var umbrellaW = W * 0.8;
+  var umbrellaH = H * 0.4;
+  var umbrellaY = TOP + 100;
+  s += priceUmbrella(CX, umbrellaY, umbrellaW, umbrellaH, BLUE, 10, 1);
+
+  // Lightbulb thought bubble
+  var lightbulbU = smooth(ramp(u, 0.5, 0.8));
+  if (lightbulbU > 0.02) {
+    s += thoughtBubble(CX + 100, YOU_Y - 100, 100, 100, WHITE, 4, lightbulbU);
+    s += lightbulbIcon(CX + 100, YOU_Y - 150, 60, BLUE, lightbulbU);
+  }
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

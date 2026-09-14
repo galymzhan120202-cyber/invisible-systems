@@ -1,0 +1,544 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why open-plan offices got quiet, not loud</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / observation
+var AMBER = "#F2A93B";              // warm amber   -> YOU / desire
+var CORAL = "#FF5B5B";              // coral red    -> naive model / awkwardness
+
+var DUR = 60;
+window.__duration = DUR;
+
+// Office layout constants
+var OFFICE_FLOOR_Y = 1500;
+var FIGURE_H = 200; // Stick figure height
+var DESK_W = 200, DESK_H = 80;
+var SCREEN_W = 120, SCREEN_H = 70;
+var HEADPHONE_R = 20;
+
+// Figure positions
+var YOU_START_X = 200;
+var YOU_CENTER_X = CX - 100;
+var YOU_OBSERVE_X = CX + 300;
+var YOU_OBSERVE_Y = CY + 100;
+
+var OTHER_FIGURE_POSITIONS = [
+  {x: CX - 300, y: OFFICE_FLOOR_Y - 200},
+  {x: CX + 100, y: OFFICE_FLOOR_Y - 200},
+  {x: CX - 100, y: OFFICE_FLOOR_Y},
+  {x: CX + 300, y: OFFICE_FLOOR_Y},
+  {x: CX - 300, y: OFFICE_FLOOR_Y + 200},
+  {x: CX + 100, y: OFFICE_FLOOR_Y + 200}
+];
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* Custom shape builders for the office animation */
+function stickFigure(x, y, h, col, op, pose, handOut) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var sw = 8;
+  var headR = h * 0.12;
+  var bodyLen = h * 0.4;
+  var armLen = h * 0.3;
+  var legLen = h * 0.3;
+
+  var headY = y - h / 2 + headR;
+  var bodyStartY = headY + headR + sw / 2;
+  var bodyEndY = bodyStartY + bodyLen;
+  var legStartY = bodyEndY;
+  var legEndY = legStartY + legLen;
+
+  // Default positions (standing)
+  var headCx = x, headCy = headY;
+  var arm1X1 = x, arm1Y1 = bodyStartY + bodyLen * 0.2;
+  var arm1X2 = x + armLen * 0.7, arm1Y2 = arm1Y1 + armLen * 0.7;
+  var arm2X1 = x, arm2Y1 = arm1Y1;
+  var arm2X2 = x - armLen * 0.7, arm2Y2 = arm1Y1 + armLen * 0.7;
+  var leg1X1 = x, leg1Y1 = legStartY;
+  var leg1X2 = x + legLen * 0.3, leg1Y2 = legEndY;
+  var leg2X1 = x, leg2Y1 = legStartY;
+  var leg2X2 = x - legLen * 0.3, leg2Y2 = legEndY;
+
+  switch (pose) {
+    case "seated":
+      bodyEndY = bodyStartY + bodyLen * 0.6;
+      legStartY = bodyEndY;
+      leg1X1 = x + 10; leg1Y1 = legStartY; leg1X2 = x + 10 + legLen * 0.4; leg1Y2 = legStartY + legLen * 0.3;
+      leg2X1 = x - 10; leg2Y1 = legStartY; leg2X2 = x - 10 - legLen * 0.4; leg2Y2 = legStartY + legLen * 0.3;
+      arm1Y1 = bodyStartY + bodyLen * 0.1; arm1Y2 = arm1Y1 + armLen * 0.3;
+      arm2Y1 = arm1Y1; arm2Y2 = arm1Y1 + armLen * 0.3;
+      break;
+    case "gesturing":
+      arm1X2 = x + armLen * 0.8; arm1Y2 = arm1Y1 - armLen * 0.5; // Arm raised
+      break;
+    case "looking_up":
+      headCy -= headR * 0.2; // Head tilted slightly up
+      break;
+    case "observing":
+      headCy -= headR * 0.2; // Head tilted slightly up
+      arm1X2 = x + armLen * 0.6; arm1Y2 = bodyStartY + bodyLen * 0.3; // Arms crossed
+      arm2X2 = x - armLen * 0.6; arm2Y2 = bodyStartY + bodyLen * 0.3;
+      break;
+  }
+
+  g += dot(headCx, headCy, headR, col); // Head
+  g += line(x, bodyStartY, x, bodyEndY, col, sw); // Body
+  g += line(arm1X1, arm1Y1, arm1X2, arm1Y2, col, sw); // Arm 1
+  g += line(arm2X1, arm2Y1, arm2X2, arm2Y2, col, sw); // Arm 2
+  g += line(leg1X1, leg1Y1, leg1X2, leg1Y2, col, sw); // Leg 1
+  g += line(leg2X1, leg2Y1, leg2X2, leg2Y2, col, sw); // Leg 2
+
+  if (handOut) {
+    g += line(arm1X2, arm1Y2, arm1X2 + h * 0.1, arm1Y2, col, sw); // Hand reaching out
+  }
+
+  g += '</g>';
+  return g;
+}
+
+function desk(x, y, w, h, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 8, col, op); // Desk surface
+  g += line(x - w / 2 + 10, y + h / 2, x - w / 2 + 10, y + h / 2 + 60, col, 8, op); // Left leg
+  g += line(x + w / 2 - 10, y + h / 2, x + w / 2 - 10, y + h / 2 + 60, col, 8, op); // Right leg
+  g += '</g>';
+  return g;
+}
+
+function screen(x, y, w, h, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 6, col, op); // Screen
+  g += line(x, y + h / 2, x, y + h / 2 + 10, col, 6, op); // Stand
+  g += '</g>';
+  return g;
+}
+
+function headphones(x, y, r, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var d = "M " + (x - r) + " " + y + " A " + r + " " + r + " 0 0 1 " + (x + r) + " " + y;
+  return pathTag(d, col, sw, op);
+}
+
+function ideaBubble(x, y, r, col, op) {
+  return dot(x, y, r, col, op);
+}
+
+function questionMark(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var sw = 8;
+  var d = "M " + x + " " + (y - size * 0.4) + " A " + (size * 0.4) + " " + (size * 0.4) + " 0 1 1 " + (x - size * 0.4) + " " + (y - size * 0.1);
+  d += " L " + (x - size * 0.2) + " " + (y + size * 0.2);
+  return pathTag(d, col, sw, op) + dot(x, y + size * 0.4, sw / 2, col, op);
+}
+
+function speechBubble(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var sw = 8;
+  var r = size * 0.4;
+  var tailX = x + r * 0.8;
+  var tailY = y + r * 0.8;
+  var d = "M " + (x - r) + " " + y + " A " + r + " " + r + " 0 0 1 " + x + " " + (y - r) +
+          " A " + r + " " + r + " 0 0 1 " + (x + r) + " " + y +
+          " A " + r + " " + r + " 0 0 1 " + x + " " + (y + r) +
+          " L " + (tailX + 10) + " " + tailY + " L " + (tailX - 10) + " " + tailY + " Z";
+  return pathTag(d, col, sw, op) + '<path d="' + d + '" fill="' + col + '" opacity="' + (op * 0.15) + '"/>';
+}
+
+function officeBlueprint(op, solid) {
+  op = (op == null ? 1 : op);
+  var sw = solid ? 7 : 2;
+  var col = solid ? WHITE : WHITE;
+  var g = '<g opacity="' + op + '">';
+  // Outer walls
+  g += rrectStroke(CX, CY, 900, 1500, 40, col, sw, op);
+  // Internal desk areas (simplified)
+  g += rrectStroke(CX - 200, OFFICE_FLOOR_Y - 200, DESK_W + 40, DESK_H + 40, 10, col, sw * 0.6, op * 0.6);
+  g += rrectStroke(CX + 200, OFFICE_FLOOR_Y - 200, DESK_W + 40, DESK_H + 40, 10, col, sw * 0.6, op * 0.6);
+  g += rrectStroke(CX - 100, OFFICE_FLOOR_Y, DESK_W + 40, DESK_H + 40, 10, col, sw * 0.6, op * 0.6);
+  g += rrectStroke(CX + 300, OFFICE_FLOOR_Y, DESK_W + 40, DESK_H + 40, 10, col, sw * 0.6, op * 0.6);
+  g += rrectStroke(CX - 200, OFFICE_FLOOR_Y + 200, DESK_W + 40, DESK_H + 40, 10, col, sw * 0.6, op * 0.6);
+  g += rrectStroke(CX + 200, OFFICE_FLOOR_Y + 200, DESK_W + 40, DESK_H + 40, 10, col, sw * 0.6, op * 0.6);
+  g += '</g>';
+  return g;
+}
+
+function observationDome(op, pulseFactor) {
+  op = (op == null ? 1 : op);
+  pulseFactor = pulseFactor || 0;
+  var sw = 10;
+  var r = 700 + pulseFactor * 20;
+  var domeY = CY - 200;
+  var d = "M " + (CX - r) + " " + domeY + " A " + r + " " + r + " 0 0 1 " + (CX + r) + " " + domeY;
+  var gridOpacity = op * 0.15;
+  var g = '<g opacity="' + op + '">';
+  g += pathTag(d, BLUE, sw, op * 0.8); // Main dome arc
+  // Grid lines
+  for (var i = -3; i <= 3; i++) {
+    var x = CX + i * 150;
+    if (Math.abs(x - CX) < r) {
+      var yOffset = Math.sqrt(r * r - (x - CX) * (x - CX));
+      g += line(x, domeY, x, domeY + yOffset * 0.8, BLUE, 4, gridOpacity);
+    }
+  }
+  for (var j = 0; j < 4; j++) {
+    var y = domeY + j * 150;
+    if (y < domeY + r * 0.8) {
+      var xOffset = Math.sqrt(r * r - (y - domeY) * (y - domeY));
+      g += line(CX - xOffset, y, CX + xOffset, y, BLUE, 4, gridOpacity);
+    }
+  }
+  g += '</g>';
+  return g;
+}
+
+function personalBubble(x, y, r, col, op) {
+  op = (op == null ? 1 : op);
+  return ring(x, y, r, col, 6, op) + dot(x, y, r, col, op * 0.08); // Transparent fill
+}
+
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.95, smooth(u));
+  var driftY = lerp(0, -50, smooth(u));
+  var driftX = lerp(0, 30, smooth(u));
+  s += '<g ' + camera(scale, driftX, driftY) + '>';
+
+  // Office blueprint
+  s += officeBlueprint(lerp(0.3, 0.6, smooth(u)), false);
+
+  // YOU stick figure
+  var youX = YOU_CENTER_X - 100;
+  var youY = OFFICE_FLOOR_Y + 100;
+  s += stickFigure(youX, youY, FIGURE_H, AMBER, 1, "standing");
+
+  // Idea bubbles / collaboration lines
+  var numIdeas = 4;
+  for (var i = 0; i < numIdeas; i++) {
+    var p = (u * 0.8 + rnd(i * 10) * 0.2) % 1;
+    var opacity = (1 - p) * 0.8;
+    var targetX = youX + lerp(100, 300, rnd(i + 1));
+    var targetY = youY - lerp(150, 400, rnd(i + 2));
+    var bubbleR = lerp(8, 20, easeOut(p));
+    if (p > 0.1) {
+      s += line(youX, youY - FIGURE_H * 0.4, targetX, targetY, AMBER, 4, opacity * 0.3);
+      s += ideaBubble(targetX, targetY - bubbleR, bubbleR, AMBER, opacity);
+    }
+  }
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var scale = 0.95;
+  var youX = lerp(YOU_START_X, YOU_CENTER_X, easeOut(ramp(u, 0.1, 0.4)));
+  var youY = OFFICE_FLOOR_Y + 100;
+
+  s += '<g ' + camera(scale, 0, -50) + '>';
+
+  // Office blueprint solidifies
+  s += officeBlueprint(1, true);
+
+  // Other figures
+  OTHER_FIGURE_POSITIONS.forEach((pos, i) => {
+    s += desk(pos.x, pos.y, DESK_W, DESK_H, WHITE, 1);
+    s += screen(pos.x, pos.y - DESK_H / 2 - SCREEN_H / 2 + 10, SCREEN_W, SCREEN_H, WHITE, 1);
+    s += stickFigure(pos.x, pos.y + 20, FIGURE_H, WHITE, 1, "seated");
+    s += headphones(pos.x, pos.y + 20 - FIGURE_H * 0.45, HEADPHONE_R, WHITE, 7, 1);
+
+    // Faint expanding grey circle from headphones
+    var pulsePhase = (u * 1.5 + rnd(i * 5)) % 1;
+    var pulseOp = (1 - pulsePhase) * 0.3;
+    var pulseR = lerp(HEADPHONE_R * 1.5, HEADPHONE_R * 4, easeOut(pulsePhase));
+    s += ring(pos.x, pos.y + 20 - FIGURE_H * 0.45, pulseR, DIM, 4, pulseOp);
+  });
+
+  // YOU stick figure walks in
+  s += stickFigure(youX, youY, FIGURE_H, AMBER, 1, "standing");
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var scale = 0.95;
+  var youX = YOU_CENTER_X;
+  var youY = OFFICE_FLOOR_Y + 100;
+
+  // YOU approaches another figure
+  var targetFigureIdx = 2; // Figure at CX - 100, OFFICE_FLOOR_Y
+  var targetX = OTHER_FIGURE_POSITIONS[targetFigureIdx].x;
+  var targetY = OTHER_FIGURE_POSITIONS[targetFigureIdx].y + 20;
+
+  var approach = ramp(u, 0.0, 0.4);
+  var youCurrentX = lerp(youX, targetX + 100, approach);
+  var youCurrentY = lerp(youY, targetY + 80, approach);
+
+  s += '<g ' + camera(scale, 0, -50) + '>';
+  s += officeBlueprint(1, true);
+
+  // Other figures
+  OTHER_FIGURE_POSITIONS.forEach((pos, i) => {
+    s += desk(pos.x, pos.y, DESK_W, DESK_H, WHITE, 1);
+    s += screen(pos.x, pos.y - DESK_H / 2 - SCREEN_H / 2 + 10, SCREEN_W, SCREEN_H, WHITE, 1);
+    s += stickFigure(pos.x, pos.y + 20, FIGURE_H, WHITE, 1, "seated");
+    s += headphones(pos.x, pos.y + 20 - FIGURE_H * 0.45, HEADPHONE_R, WHITE, 7, 1);
+
+    // Faint expanding grey circle from headphones (persists)
+    var pulsePhase = (u * 1.5 + rnd(i * 5)) % 1;
+    var pulseOp = (1 - pulsePhase) * 0.3;
+    var pulseR = lerp(HEADPHONE_R * 1.5, HEADPHONE_R * 4, easeOut(pulsePhase));
+    s += ring(pos.x, pos.y + 20 - FIGURE_H * 0.45, pulseR, DIM, 4, pulseOp);
+  });
+
+  // YOU stick figure
+  var youPose = "standing";
+  var questionOp = ramp(u, 0.1, 0.3) * (1 - ramp(u, 0.5, 0.7));
+  if (approach > 0.5) youPose = "gesturing";
+  s += stickFigure(youCurrentX, youCurrentY, FIGURE_H, AMBER, 1, youPose);
+
+  // Question mark above YOU's head
+  if (questionOp > 0.01) {
+    s += questionMark(youCurrentX, youCurrentY - FIGURE_H * 0.6, 60, CORAL, questionOp);
+  }
+
+  // Small coral red disruption ripple / speech bubble
+  var disruptionPhase = ramp(u, 0.4, 0.6);
+  if (disruptionPhase > 0.01 && disruptionPhase < 1) {
+    var bubbleX = youCurrentX + 50;
+    var bubbleY = youCurrentY - FIGURE_H * 0.5;
+    var bubbleSize = lerp(20, 50, easeOut(disruptionPhase));
+    var bubbleOp = (1 - disruptionPhase) * 0.8;
+    s += speechBubble(bubbleX, bubbleY, bubbleSize, CORAL, bubbleOp);
+
+    // Ripple absorbed by target's sound circle
+    var targetHeadY = targetY - FIGURE_H * 0.45;
+    var absorptionPhase = ramp(u, 0.5, 0.7);
+    if (absorptionPhase > 0.01) {
+      var absorbR = lerp(0, HEADPHONE_R * 2, easeOut(absorptionPhase));
+      s += ring(targetX, targetHeadY, absorbR, CORAL, 6, (1 - absorptionPhase) * 0.7);
+    }
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var scale = 0.95;
+  var youX = YOU_CENTER_X;
+  var youY = OFFICE_FLOOR_Y + 100;
+
+  s += '<g ' + camera(scale, 0, -50) + '>';
+  s += officeBlueprint(lerp(1, 0.3, smooth(u)), true); // Blueprint fades slightly
+
+  // Other figures
+  OTHER_FIGURE_POSITIONS.forEach((pos, i) => {
+    s += desk(pos.x, pos.y, DESK_W, DESK_H, WHITE, 1);
+    s += screen(pos.x, pos.y - DESK_H / 2 - SCREEN_H / 2 + 10, SCREEN_W, SCREEN_H, WHITE, 1);
+    s += stickFigure(pos.x, pos.y + 20, FIGURE_H, WHITE, 1, "seated");
+    // Headphones and sound circles fade
+    s += headphones(pos.x, pos.y + 20 - FIGURE_H * 0.45, HEADPHONE_R, WHITE, 7, 1 - smooth(u));
+  });
+
+  // YOU stick figure
+  s += stickFigure(youX, youY, FIGURE_H, AMBER, 1, "standing");
+
+  // Signal blue observation dome appears
+  var domeOp = ramp(u, 0.1, 0.6);
+  var pulseFactor = Math.sin(u * Math.PI * 4) * 0.5 * pulse(u, 0.5, 0.4);
+  s += observationDome(domeOp, pulseFactor);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(0.95, 0.85, smooth(u));
+  var driftY = lerp(-50, 0, smooth(u));
+
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+  s += officeBlueprint(0.3, true);
+
+  // Signal blue observation dome persists
+  s += observationDome(1, Math.sin(u * Math.PI * 2) * 0.5);
+
+  // Individual figures enclosed in amber personal bubbles
+  var bubbleForm = ramp(u, 0.1, 0.6);
+  var handOut = ramp(u, 0.6, 0.8);
+
+  OTHER_FIGURE_POSITIONS.forEach((pos, i) => {
+    s += desk(pos.x, pos.y, DESK_W, DESK_H, WHITE, 1);
+    s += screen(pos.x, pos.y - DESK_H / 2 - SCREEN_H / 2 + 10, SCREEN_W, SCREEN_H, WHITE, 1);
+    s += stickFigure(pos.x, pos.y + 20, FIGURE_H, WHITE, 1, "seated");
+
+    var bubbleR = lerp(0, FIGURE_H * 0.8, easeOut(bubbleForm));
+    s += personalBubble(pos.x, pos.y + 20 + FIGURE_H * 0.1, bubbleR, AMBER, bubbleForm * 0.8);
+  });
+
+  // YOU stick figure
+  var youX = YOU_CENTER_X;
+  var youY = OFFICE_FLOOR_Y + 100;
+  s += stickFigure(youX, youY, FIGURE_H, AMBER, 1, "standing", handOut > 0.1);
+
+  var youBubbleR = lerp(0, FIGURE_H * 0.8, easeOut(bubbleForm));
+  s += personalBubble(youX, youY + FIGURE_H * 0.1, youBubbleR, AMBER, bubbleForm * 0.8);
+
+  // Hand hitting bubble animation
+  if (handOut > 0.1) {
+    var hitX = youX + FIGURE_H * 0.1 * handOut;
+    var hitY = youY - FIGURE_H * 0.1 * handOut;
+    s += dot(hitX, hitY, 10, AMBER, handOut);
+    s += ring(hitX, hitY, 15 + handOut * 10, AMBER, 4, (1 - handOut) * 0.6);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.85, 0.7, smooth(u));
+  var driftY = lerp(0, -100, smooth(u));
+  var driftX = lerp(0, -100, smooth(u));
+
+  s += '<g ' + camera(scale, driftX, driftY) + '>';
+
+  s += officeBlueprint(0.3, true);
+  s += observationDome(1, 0); // Dome stable
+
+  // Other figures in amber bubbles
+  OTHER_FIGURE_POSITIONS.forEach((pos, i) => {
+    s += desk(pos.x, pos.y, DESK_W, DESK_H, WHITE, 1);
+    s += screen(pos.x, pos.y - DESK_H / 2 - SCREEN_H / 2 + 10, SCREEN_W, SCREEN_H, WHITE, 1);
+    s += stickFigure(pos.x, pos.y + 20, FIGURE_H, WHITE, 1, "seated");
+    s += personalBubble(pos.x, pos.y + 20 + FIGURE_H * 0.1, FIGURE_H * 0.8, AMBER, 0.8);
+  });
+
+  // YOU stick figure outside, observing
+  var youX = lerp(YOU_CENTER_X, YOU_OBSERVE_X, easeOut(u));
+  var youY = lerp(OFFICE_FLOOR_Y + 100, YOU_OBSERVE_Y, easeOut(u));
+  var youPose = "standing";
+  if (u > 0.5) youPose = "observing";
+  s += stickFigure(youX, youY, FIGURE_H, AMBER, 1, youPose);
+
+  // Small nod animation
+  if (u > 0.6) {
+    var nodPhase = ramp(u, 0.6, 0.9);
+    var nodY = youY - FIGURE_H * 0.4;
+    s += line(youX, nodY, youX + 20, nodY + 10, WHITE, 7, nodPhase); // Simple checkmark-like nod
+  }
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

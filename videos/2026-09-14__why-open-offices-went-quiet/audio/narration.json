@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "Remember the hype for open-plan offices? They promised vibrant collaboration, spontaneous ideas, a truly connected workspace. You imagined lively conversations filling the air.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "But stepping in, it felt different. No lively chatter. Instead, a silent sea of heads, focused on screens, often behind headphones. A profound hush had fallen.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "You wondered why. Was everyone just shy, or deeply focused? You tried a quick question, but the response felt muted, a small disruption in the quiet.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "The truth: everyone was watching everyone else. With no walls, every sound, every call is public. A powerful norm of quietness emerged, enforced by collective gaze.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "The cost? The very spontaneity and connection promised vanished. People became silent islands, creating personal soundproof bubbles to avoid disturbing this fragile peace.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "Now you see it: not shyness, but a system of mutual observation shaping behavior. The open office is quiet by an emergent social contract, not by original design.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]
