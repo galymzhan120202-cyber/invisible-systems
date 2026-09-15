@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why elevators seem to skip your floor</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / logic
+var AMBER = "#F2A93B";              // warm amber   -> YOU / your desire
+var CORAL = "#FF5B5B";              // coral red    -> frustration / naive model
+
+var DUR = 60;
+window.__duration = DUR;
+
+// Elevator specific constants
+var FLOOR_COUNT = 10; // Number of visible floors for wide view
+var FLOOR_Y_SPACING = (BOT - TOP) / (FLOOR_COUNT - 1); // Spacing between floors
+var ELEV_SHAFT_W = 200;
+var ELEV_CAR_W = 160;
+var ELEV_CAR_H = 260;
+var ELEV_X = CX - ELEV_SHAFT_W / 2; // Left shaft position (center of shaft)
+var ELEV_X2 = CX + ELEV_SHAFT_W / 2; // Right shaft position (center of shaft)
+var STICK_H = 180;
+var STICK_W = 100;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+// Custom glyphs
+function upArrow(x, y, size, col, sw, op) {
+  var d = "M " + x + " " + (y + size / 2) + " L " + x + " " + (y - size / 2) + " M " + (x - size / 2) + " " + (y - size / 8) + " L " + x + " " + (y - size / 2) + " L " + (x + size / 2) + " " + (y - size / 8);
+  return pathTag(d, col, sw, op);
+}
+function downArrow(x, y, size, col, sw, op) {
+  var d = "M " + x + " " + (y - size / 2) + " L " + x + " " + (y + size / 2) + " M " + (x - size / 2) + " " + (y + size / 8) + " L " + x + " " + (y + size / 2) + " L " + (x + size / 2) + " " + (y + size / 8);
+  return pathTag(d, col, sw, op);
+}
+function crossMark(x, y, size, col, sw, op) {
+  var d = "M " + (x - size / 2) + " " + (y - size / 2) + " L " + (x + size / 2) + " " + (y + size / 2) +
+          " M " + (x + size / 2) + " " + (y - size / 2) + " L " + (x - size / 2) + " " + (y + size / 2);
+  return pathTag(d, col, sw, op);
+}
+
+// Hero elements
+function stickFigure(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = 26;
+  var bodyH = 80;
+  var armL = 40;
+  var legL = 50;
+  var sw = 9;
+
+  // Head
+  g += dot(x, y - STICK_H / 2 + headR, headR, col);
+  // Body
+  g += line(x, y - STICK_H / 2 + headR * 2, x, y - STICK_H / 2 + headR * 2 + bodyH, col, sw);
+  // Arms
+  var armY = y - STICK_H / 2 + headR * 2 + bodyH / 3;
+  if (pose === 'press') {
+    g += line(x, armY, x + armL * 0.8, armY - armL * 0.8, col, sw); // Right arm up
+    g += line(x, armY, x - armL, armY, col, sw); // Left arm neutral
+  } else if (pose === 'dejected') {
+    g += line(x, armY, x + armL * 0.8, armY + armL * 0.5, col, sw);
+    g += line(x, armY, x - armL * 0.8, armY + armL * 0.5, col, sw);
+  } else if (pose === 'confused' || pose === 'angry') {
+    g += line(x, armY, x + armL * 0.6, armY - armL * 0.3, col, sw);
+    g += line(x, armY, x - armL * 0.6, armY - armL * 0.3, col, sw);
+  } else if (pose === 'nods') {
+    g += line(x, armY, x + armL * 0.7, armY + armL * 0.2, col, sw);
+    g += line(x, armY, x - armL * 0.7, armY + armL * 0.2, col, sw);
+  } else { // idle or default
+    g += line(x, armY, x + armL, armY + armL * 0.2, col, sw);
+    g += line(x, armY, x - armL, armY + armL * 0.2, col, sw);
+  }
+  // Legs
+  var legY = y - STICK_H / 2 + headR * 2 + bodyH + 10;
+  g += line(x, legY, x - STICK_W / 3, legY + legL, col, sw);
+  g += line(x, legY, x + STICK_W / 3, legY + legL, col, sw);
+
+  // Expression (eyes/mouth)
+  var eyeY = y - STICK_H / 2 + headR - 10;
+  var mouthY = y - STICK_H / 2 + headR + 10;
+  var eyeR = 4;
+  var mouthW = 16;
+  var mouthH = 6;
+  if (pose === 'dejected') {
+    g += dot(x - 10, eyeY, eyeR, col);
+    g += dot(x + 10, eyeY, eyeR, col);
+    g += pathTag("M " + (x - mouthW / 2) + " " + (mouthY + mouthH / 2) + " Q " + x + " " + (mouthY - mouthH) + " " + (x + mouthW / 2) + " " + (mouthY + mouthH / 2), col, sw * 0.6); // Sad mouth
+  } else if (pose === 'confused') {
+    g += line(x - 10, eyeY - 5, x - 5, eyeY + 5, col, sw * 0.6); // Left eyebrow up
+    g += line(x + 5, eyeY + 5, x + 10, eyeY - 5, col, sw * 0.6); // Right eyebrow down
+    g += rrect(x, mouthY, mouthW, mouthH, 2, col); // Straight mouth
+  } else if (pose === 'angry') {
+    g += line(x - 10, eyeY + 5, x - 5, eyeY - 5, col, sw * 0.6); // Angry eyebrows
+    g += line(x + 5, eyeY - 5, x + 10, eyeY + 5, col, sw * 0.6);
+    g += pathTag("M " + (x - mouthW / 2) + " " + (mouthY + mouthH / 2) + " Q " + x + " " + (mouthY + mouthH * 2) + " " + (x + mouthW / 2) + " " + (mouthY + mouthH / 2), col, sw * 0.6); // Angry mouth
+  } else if (pose === 'nods') {
+    g += dot(x - 10, eyeY, eyeR, col);
+    g += dot(x + 10, eyeY, eyeR, col);
+    g += pathTag("M " + (x - mouthW / 2) + " " + (mouthY - mouthH / 2) + " Q " + x + " " + (mouthY + mouthH) + " " + (x + mouthW / 2) + " " + (mouthY - mouthH / 2), col, sw * 0.6); // Slight smile
+  } else { // idle, press
+    g += dot(x - 10, eyeY, eyeR, col);
+    g += dot(x + 10, eyeY, eyeR, col);
+    g += rrect(x, mouthY, mouthW, mouthH, 2, col); // Straight mouth
+  }
+
+  g += '</g>';
+  return g;
+}
+
+function elevatorCar(x, y, w, h, col, doorOpen, arrowDir, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  // Car body
+  g += rrectStroke(x, y, w, h, 10, col, 10);
+
+  // Door (two halves)
+  var doorW = w * 0.8;
+  var doorH = h * 0.8;
+  var doorX1 = x - doorW / 2;
+  var doorX2 = x + doorW / 2;
+  var doorY = y;
+  var openOffset = doorOpen ? doorW / 2 : 0;
+
+  g += rrect(doorX1 - openOffset / 2, doorY, doorW / 2, doorH, 0, col); // Left door
+  g += rrect(doorX2 + openOffset / 2, doorY, doorW / 2, doorH, 0, col); // Right door
+
+  // Arrow indicator
+  var arrowSize = 36;
+  var arrowY = y - h / 2 + 30;
+  if (arrowDir === 'up') {
+    g += upArrow(x, arrowY, arrowSize, WHITE, 8);
+  } else if (arrowDir === 'down') {
+    g += downArrow(x, arrowY, arrowSize, WHITE, 8);
+  }
+  g += '</g>';
+  return g;
+}
+
+function buildingFloors(mainFloorY, numFloors, highlightFloorIdx, systemLinesOp, op) {
+  op = (op == null ? 1 : op);
+  var s = '<g opacity="' + op + '">';
+  var sw = 8;
+
+  // Main floor where the stick figure is
+  s += line(CX - 300, mainFloorY, CX - ELEV_SHAFT_W / 2 - 20, mainFloorY, WHITE, sw);
+  s += line(CX + 300, mainFloorY, CX + ELEV_SHAFT_W / 2 + 20, mainFloorY, WHITE, sw);
+
+  // Elevator shaft outline
+  s += rrectStroke(ELEV_X, CY, ELEV_SHAFT_W, BOT - TOP, 20, WHITE, sw * 0.8, 0.2);
+  s += rrectStroke(ELEV_X2, CY, ELEV_SHAFT_W, BOT - TOP, 20, WHITE, sw * 0.8, 0.2);
+
+  // Other floors
+  for (var i = 0; i < numFloors; i++) {
+    var y = TOP + i * FLOOR_Y_SPACING;
+    if (Math.abs(y - mainFloorY) > 50) { // Don't draw over the main floor line
+      s += line(CX - 300, y, CX - ELEV_SHAFT_W / 2 - 20, y, WHITE, sw * 0.6, 0.15);
+      s += line(CX + 300, y, CX + ELEV_SHAFT_W / 2 + 20, y, WHITE, sw * 0.6, 0.15);
+    }
+    // Floor number indicator (dots instead of numbers)
+    if (i !== highlightFloorIdx) { // Don't draw dots for the main floor, it's implied by the stick figure
+      for (var j = 0; j <= i; j++) {
+        s += dot(CX - 350 + j * 16, y, 4, DIM, 0.4);
+      }
+    }
+  }
+
+  // System lines (subtle blue connections)
+  if (systemLinesOp > 0) {
+    var sysSW = lerp(2, 6, systemLinesOp);
+    var sysOp = lerp(0.05, 0.3, systemLinesOp);
+    var shaftMidX1 = ELEV_X;
+    var shaftMidX2 = ELEV_X2;
+
+    // Vertical lines in shafts
+    s += line(shaftMidX1, TOP, shaftMidX1, BOT, BLUE, sysSW, sysOp * 0.6);
+    s += line(shaftMidX2, TOP, shaftMidX2, BOT, BLUE, sysSW, sysOp * 0.6);
+
+    // Horizontal connections between shafts and "brain"
+    var brainX = CX;
+    var brainY = TOP + 50;
+    s += dot(brainX, brainY, 12, BLUE, sysOp * 0.8); // "brain" node
+    s += ring(brainX, brainY, 18, BLUE, sysSW * 0.8, sysOp * 0.8);
+
+    for (var i = 0; i < numFloors; i++) {
+      var y = TOP + i * FLOOR_Y_SPACING;
+      s += line(shaftMidX1, y, brainX - 20, brainY, BLUE, sysSW * 0.5, sysOp * 0.4);
+      s += line(shaftMidX2, y, brainX + 20, brainY, BLUE, sysSW * 0.5, sysOp * 0.4);
+    }
+  }
+
+  s += '</g>';
+  return s;
+}
+
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+// Main stick figure position and floor
+var STICK_X = CX - 220;
+var STICK_FLOOR_Y = CY + 200; // A comfortable height for the main action
+var STICK_Y = STICK_FLOOR_Y - STICK_H / 2 - 10; // Adjust for figure height
+
+// Elevator door position
+var ELEV_DOOR_X = CX - ELEV_SHAFT_W / 2; // Center of the left shaft
+var ELEV_DOOR_Y = STICK_FLOOR_Y;
+
+// Button position
+var BUTTON_X = STICK_X + 100;
+var BUTTON_Y = STICK_FLOOR_Y - 40;
+var BUTTON_R = 24;
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  s += buildingFloors(STICK_FLOOR_Y, 4, 2, 0); // 4 floors visible, 2nd from top is main
+  s += elevatorCar(ELEV_DOOR_X, ELEV_DOOR_Y, ELEV_CAR_W, ELEV_CAR_H, WHITE, false, 'none', 1);
+
+  var buttonPress = ramp(u, 0.3, 0.5);
+  var buttonGlow = buttonPress > 0 ? (0.5 + 0.5 * Math.sin(u * 10)) : 0;
+
+  s += ring(BUTTON_X, BUTTON_Y, BUTTON_R, AMBER, 8, 0.2 + buttonGlow * 0.8);
+  s += upArrow(BUTTON_X, BUTTON_Y, BUTTON_R * 0.8, AMBER, 8, 0.8 + buttonGlow * 0.2);
+
+  s += stickFigure(STICK_X, STICK_Y, AMBER, buttonPress > 0.01 ? 'press' : 'idle', 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14);
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+
+  s += buildingFloors(STICK_FLOOR_Y, 4, 2, 0);
+
+  var doorOpen = ramp(u, 0.2, 0.4);
+  var carDown = ramp(u, 0.5, 0.9);
+  var elevY = lerp(ELEV_DOOR_Y, ELEV_DOOR_Y + FLOOR_Y_SPACING * 1.5, easeIn(carDown));
+  var carOp = lerp(1, 0, ramp(u, 0.8, 1.0));
+
+  s += elevatorCar(ELEV_DOOR_X, elevY, ELEV_CAR_W, ELEV_CAR_H, WHITE, doorOpen > 0.01, 'down', carOp);
+
+  // Inner figures (dim grey)
+  if (doorOpen > 0.01 && doorOpen < 0.99) {
+    var innerFigOp = doorOpen * (1 - carDown);
+    s += stickFigure(ELEV_DOOR_X - 40, ELEV_DOOR_Y + 20, DIM, 'idle', innerFigOp * 0.8);
+    s += stickFigure(ELEV_DOOR_X + 40, ELEV_DOOR_Y + 20, DIM, 'idle', innerFigOp * 0.8);
+  }
+
+  s += ring(BUTTON_X, BUTTON_Y, BUTTON_R, AMBER, 8, 0.2);
+  s += upArrow(BUTTON_X, BUTTON_Y, BUTTON_R * 0.8, AMBER, 8, 0.8);
+
+  s += stickFigure(STICK_X, STICK_Y, AMBER, carDown > 0.01 ? 'dejected' : 'idle', 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  s += buildingFloors(STICK_FLOOR_Y, 4, 2, 0);
+
+  var carPass = ramp(u, 0.3, 0.7);
+  var elevY = lerp(BOT + ELEV_CAR_H / 2, TOP - ELEV_CAR_H / 2, smooth(carPass));
+  var elevOp = 1 - pulse(carPass, 0.5, 0.6); // Fade in/out as it passes
+  var carColor = CORAL;
+  var carSW = 10;
+  var carX = ELEV_DOOR_X;
+
+  // Motion streaks for fast car
+  if (carPass > 0.01 && carPass < 0.99) {
+    var streakOp = Math.min(1, Math.sin(carPass * Math.PI * 2) * 2);
+    s += line(carX, elevY - ELEV_CAR_H / 2 - 30, carX, elevY + ELEV_CAR_H / 2 + 30, carColor, carSW * 0.6, streakOp * 0.4);
+  }
+
+  s += rrectStroke(carX, elevY, ELEV_CAR_W, ELEV_CAR_H, 10, carColor, carSW, elevOp);
+
+  s += ring(BUTTON_X, BUTTON_Y, BUTTON_R, AMBER, 8, 0.2);
+  s += upArrow(BUTTON_X, BUTTON_Y, BUTTON_R * 0.8, AMBER, 8, 0.8);
+
+  var pose = 'idle';
+  if (carPass > 0.2 && carPass < 0.5) pose = 'confused';
+  if (carPass > 0.5 && carPass < 0.8) pose = 'angry';
+  s += stickFigure(STICK_X, STICK_Y, AMBER, pose, 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var zoom = lerp(1.0, 0.5, smooth(ramp(u, 0.0, 0.4)));
+  var panY = lerp(0, CY - STICK_FLOOR_Y, smooth(ramp(u, 0.0, 0.4)));
+  s += '<g ' + camera(zoom, 0, panY) + '>';
+
+  var systemLinesOp = ramp(u, 0.4, 0.8);
+  s += buildingFloors(STICK_FLOOR_Y, FLOOR_COUNT, 7, systemLinesOp); // More floors, system lines appear
+
+  // Multiple elevator cars showing paths
+  var shaftMidX1 = ELEV_X;
+  var shaftMidX2 = ELEV_X2;
+
+  // Car 1 (left shaft)
+  var car1Y = lerp(BOT - ELEV_CAR_H / 2, TOP + ELEV_CAR_H / 2, (u * 0.8 + rnd(1)) % 1);
+  s += elevatorCar(shaftMidX1, car1Y, ELEV_CAR_W, ELEV_CAR_H, WHITE, false, 'up', 0.8);
+
+  // Car 2 (right shaft)
+  var car2Y = lerp(TOP + ELEV_CAR_H / 2, BOT - ELEV_CAR_H / 2, (u * 0.6 + rnd(2)) % 1);
+  s += elevatorCar(shaftMidX2, car2Y, ELEV_CAR_W, ELEV_CAR_H, WHITE, false, 'down', 0.8);
+
+  // Car 3 (left shaft, another one)
+  var car3Y = lerp(BOT - ELEV_CAR_H / 2 - 200, TOP + ELEV_CAR_H / 2 - 200, (u * 0.9 + rnd(3)) % 1);
+  s += elevatorCar(shaftMidX1, car3Y, ELEV_CAR_W, ELEV_CAR_H, WHITE, false, 'up', 0.8);
+
+  s += ring(BUTTON_X, BUTTON_Y, BUTTON_R, AMBER, 8, 0.2 * (1 - systemLinesOp));
+  s += upArrow(BUTTON_X, BUTTON_Y, BUTTON_R * 0.8, AMBER, 8, 0.8 * (1 - systemLinesOp));
+
+  s += stickFigure(STICK_X, STICK_Y, AMBER, 'idle', 1 - systemLinesOp * 0.5); // Stick figure fades slightly
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var zoom = lerp(0.5, 1.0, smooth(ramp(u, 0.6, 1.0)));
+  var panY = lerp(CY - STICK_FLOOR_Y, 0, smooth(ramp(u, 0.6, 1.0)));
+  s += '<g ' + camera(zoom, 0, panY) + '>';
+
+  var systemLinesOp = lerp(1, 0.2, smooth(ramp(u, 0.8, 1.0)));
+  s += buildingFloors(STICK_FLOOR_Y, FLOOR_COUNT, 7, systemLinesOp);
+
+  var crossAppear = ramp(u, 0.1, 0.3);
+  s += ring(BUTTON_X, BUTTON_Y, BUTTON_R, AMBER, 8, 0.2);
+  s += upArrow(BUTTON_X, BUTTON_Y, BUTTON_R * 0.8, AMBER, 8, 0.8);
+  s += crossMark(BUTTON_X, BUTTON_Y, BUTTON_R * 1.5, CORAL, 10, crossAppear);
+
+  // The "skipped" elevator with its blue path
+  var skippedElevX = ELEV_DOOR_X;
+  var skippedElevY = lerp(STICK_FLOOR_Y - ELEV_CAR_H * 0.6, STICK_FLOOR_Y + FLOOR_Y_SPACING * 2, smooth(ramp(u, 0.3, 0.7)));
+  var skippedElevOp = (1 - crossAppear) * (1 - ramp(u, 0.8, 1.0));
+  s += elevatorCar(skippedElevX, skippedElevY, ELEV_CAR_W, ELEV_CAR_H, BLUE, false, 'down', skippedElevOp * 0.8);
+
+  // Illustrate the path of the skipped elevator
+  var pathOp = ramp(u, 0.4, 0.8);
+  var pathD = "M " + skippedElevX + " " + (STICK_FLOOR_Y - ELEV_CAR_H * 0.6 - 50);
+  pathD += " L " + skippedElevX + " " + (STICK_FLOOR_Y + FLOOR_Y_SPACING * 0.5); // Passes current floor
+  pathD += " L " + (skippedElevX + 30) + " " + (STICK_FLOOR_Y + FLOOR_Y_SPACING * 1.2); // Slight detour
+  pathD += " L " + skippedElevX + " " + (STICK_FLOOR_Y + FLOOR_Y_SPACING * 2 + 50); // Continues down
+  s += pathTag(pathD, BLUE, 6, pathOp * 0.5);
+
+  s += stickFigure(STICK_X, STICK_Y, AMBER, 'idle', 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var systemLinesFade = lerp(0.2, 0, smooth(ramp(u, 0.6, 0.9)));
+  s += buildingFloors(STICK_FLOOR_Y, 4, 2, systemLinesFade);
+
+  s += ring(BUTTON_X, BUTTON_Y, BUTTON_R, AMBER, 8, 0.2);
+  s += upArrow(BUTTON_X, BUTTON_Y, BUTTON_R * 0.8, AMBER, 8, 0.8);
+
+  var elevArrive = ramp(u, 0.4, 0.6);
+  var elevY = lerp(STICK_FLOOR_Y - FLOOR_Y_SPACING * 1.5, STICK_FLOOR_Y, easeOut(elevArrive));
+  s += elevatorCar(ELEV_DOOR_X, elevY, ELEV_CAR_W, ELEV_CAR_H, WHITE, false, 'up', 1);
+
+  var pose = 'idle';
+  if (elevArrive > 0.8) pose = 'nods';
+  s += stickFigure(STICK_X, STICK_Y, AMBER, pose, 1);
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

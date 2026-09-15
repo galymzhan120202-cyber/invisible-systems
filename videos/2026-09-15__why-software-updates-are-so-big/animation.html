@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Software Updates Are So Huge</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / the wave
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want
+var CORAL = "#FF5B5B";              // coral red    -> the naive model / false signal
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+// Stick figure: x, y is base of feet.
+function stickFigure(x, y, scale, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g transform="translate(' + x + ' ' + y + ') scale(' + scale + ')" opacity="' + op + '">';
+  var sw = 7 / scale; // Stroke width scales inversely to maintain visual thickness
+  var headR = 17 / scale;
+  var bodyH = 80 / scale;
+  var armL = 50 / scale;
+  var legL = 60 / scale;
+
+  g += dot(0, -headR - bodyH - 10, headR, col); // Head
+  g += line(0, -headR - bodyH, 0, -headR, col, sw); // Body
+
+  if (pose === 'tap') {
+    g += line(0, -headR - bodyH * 0.7, -armL * 0.7, -headR - bodyH * 0.5, col, sw); // Left arm
+    g += line(0, -headR - bodyH * 0.7, armL * 0.4, -headR - bodyH * 0.8, col, sw); // Right arm (bent for tap)
+    g += line(0, -headR, -legL * 0.4, legL * 0.6, col, sw); // Left leg
+    g += line(0, -headR, legL * 0.4, legL * 0.6, col, sw); // Right leg
+  } else if (pose === 'point') {
+    g += line(0, -headR - bodyH * 0.7, -armL * 0.7, -headR - bodyH * 0.5, col, sw); // Left arm
+    g += line(0, -headR - bodyH * 0.7, armL * 0.8, -headR - bodyH * 0.9, col, sw); // Right arm (pointing up-right)
+    g += line(0, -headR, -legL * 0.4, legL * 0.6, col, sw); // Left leg
+    g += line(0, -headR, legL * 0.4, legL * 0.6, col, sw); // Right leg
+  } else if (pose === 'understand') {
+    g += line(0, -headR - bodyH * 0.7, -armL * 0.6, -headR - bodyH * 0.4, col, sw); // Left arm
+    g += line(0, -headR - bodyH * 0.7, armL * 0.6, -headR - bodyH * 0.4, col, sw); // Right arm
+    g += line(0, -headR, -legL * 0.4, legL * 0.6, col, sw); // Left leg
+    g += line(0, -headR, legL * 0.4, legL * 0.6, col, sw); // Right leg
+    // Gaze line for understanding (like a thoughtful look)
+    g += line(0, -headR - bodyH - 10, -headR * 0.8, -headR - bodyH - 10 + headR * 0.5, WHITE, sw * 0.8);
+  } else { // Default standing
+    g += line(0, -headR - bodyH * 0.7, -armL, -headR - bodyH * 0.5, col, sw); // Left arm
+    g += line(0, -headR - bodyH * 0.7, armL, -headR - bodyH * 0.5, col, sw); // Right arm
+    g += line(0, -headR, -legL * 0.4, legL * 0.6, col, sw); // Left leg
+    g += line(0, -headR, legL * 0.4, legL * 0.6, col, sw); // Right leg
+  }
+  g += '</g>';
+  return g;
+}
+
+// Phone: x, y is center.
+function phone(x, y, w, h, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 20, col, 0.9); // Phone body
+  g += rrect(x, y - h * 0.1, w * 0.7, h * 0.7, 10, WHITE, 1); // Screen
+  g += dot(x, y + h * 0.4, 8, DIM); // Home button
+  g += '</g>';
+  return g;
+}
+
+// Download bar: x, y is center of bar.
+function downloadBar(x, y, w, h, progress, col, op) {
+  op = (op == null ? 1 : op);
+  var fillW = w * progress;
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, 8, col, 4, 0.7); // Outline
+  g += '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + fillW + '" height="' + h + '" rx="8" fill="' + col + '" opacity="0.9"/>';
+  g += '</g>';
+  return g;
+}
+
+// Bug icon: x, y is center.
+function bugIcon(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var sw = size / 5;
+  var r = size / 3;
+  var g = '<g opacity="' + op + '">';
+  g += dot(x, y, r, col); // Body
+  g += line(x - r, y - r, x - r * 1.5, y - r * 1.5, col, sw); // Legs
+  g += line(x + r, y - r, x + r * 1.5, y - r * 1.5, col, sw);
+  g += line(x - r, y + r, x - r * 1.5, y + r * 1.5, col, sw);
+  g += line(x + r, y + r, x + r * 1.5, y + r * 1.5, col, sw);
+  g += '</g>';
+  return g;
+}
+
+// Software block: x, y is center.
+function softwareBlock(x, y, w, h, fillCol, strokeCol, sw, rx, ry, op) {
+  op = (op == null ? 1 : op);
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rx + '" ry="' + ry + '" fill="' + fillCol + '" stroke="' + strokeCol +
+         '" stroke-width="' + sw + '" opacity="' + op + '"/>';
+}
+
+// Stack of software blocks. baseY is the bottom edge of the lowest block.
+// blocks: array of {fillCol, strokeCol, content (optional 'bug' or 'feature'), op (optional)}
+function softwareStack(x, baseY, blockW, blockH, blocks, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var sw = 6;
+  var rx = 12, ry = 12;
+
+  for (var i = 0; i < blocks.length; i++) {
+    var block = blocks[i];
+    // Calculate center Y for each block, stacking upwards from baseY
+    var blockY = (baseY - blockH / 2) - i * blockH;
+    var currentOp = block.op == null ? 1 : block.op;
+
+    g += softwareBlock(x, blockY, blockW, blockH, block.fillCol, block.strokeCol, sw, rx, ry, currentOp);
+    if (block.content === 'bug') {
+      g += bugIcon(x, blockY, blockH * 0.3, CORAL, currentOp);
+    } else if (block.content === 'feature') {
+      // Simple plus sign for feature
+      g += line(x - blockH * 0.15, blockY, x + blockH * 0.15, blockY, WHITE, sw, currentOp);
+      g += line(x, blockY - blockH * 0.15, x, blockY + blockH * 0.15, WHITE, sw, currentOp);
+    }
+  }
+  g += '</g>';
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += stickFigure(CX - 150, BOT - 100, 1, AMBER, 'tap', 1);
+  s += phone(CX + 150, CY - 100, 200, 360, DIM, 1);
+  s += downloadBar(CX + 150, CY + 100, 160, 40, easeOut(u), CORAL, 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += stickFigure(CX - 150, BOT - 100, 1, AMBER, 'point', 1);
+  s += bugIcon(CX + 150, CY - 100, 30, CORAL, 1);
+  // Imagined patch block floats up and fades out
+  var patchY = lerp(CY - 200, CY - 300, smooth(u));
+  var patchOp = lerp(1, 0, smooth(u));
+  s += softwareBlock(CX + 150, patchY, 80, 40, CORAL, CORAL, 4, 8, 8, patchOp);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var baseY = BOT - 100; // Bottom edge of the lowest block
+  var blockH = 120;
+  var blockW = 400;
+  var numBlocks = 5;
+  var blocks = [];
+
+  // Stack builds from bottom up
+  for (var i = 0; i < numBlocks; i++) {
+    blocks.push({
+      fillCol: BLUE,
+      strokeCol: BLUE,
+      op: ramp(u, i * 0.15, i * 0.15 + 0.3) // Fade in each block sequentially
+    });
+  }
+  // Bug in the second block from the bottom (index 1)
+  blocks[1].content = 'bug';
+  // Bug blink effect
+  if (blocks[1].op > 0) blocks[1].op *= (0.7 + 0.3 * Math.sin(u * Math.PI * 8));
+
+  var ty = lerp(0, -100, smooth(u)); // Camera pans up
+  s += '<g ' + camera(1.0, 0, ty) + '>';
+  s += softwareStack(CX, baseY, blockW, blockH, blocks, 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var baseY = BOT - 100; // Bottom edge of the lowest block
+  var blockH = 120;
+  var blockW = 400;
+  var numBlocks = 5;
+  var blocks = [];
+
+  for (var i = 0; i < numBlocks; i++) {
+    blocks.push({ fillCol: BLUE, strokeCol: BLUE });
+  }
+  blocks[1].content = 'bug'; // Bug in the second block from the bottom
+
+  // Highlight the bug block
+  var bugBlockY = (baseY - blockH / 2) - 1 * blockH; // Center Y of the bug's block
+  var highlightOp = pulse(u, 0.5, 0.4); // Pulsing highlight
+  s += rrectStroke(CX, bugBlockY, blockW + 20, blockH + 20, 15, CORAL, 8, highlightOp);
+
+  // Ripples emanating from the bug block
+  for (var r = 0; r < 3; r++) {
+    var rippleU = (u * 1.5 - r * 0.2) % 1; // Staggered ripples
+    if (rippleU > 0 && rippleU < 1) {
+      s += ring(CX, bugBlockY, lerp(blockH * 0.4, blockH * 1.2, smooth(rippleU)), BLUE, 8, 1 - smooth(rippleU));
+    }
+  }
+
+  var scale = lerp(1, 1.1, smooth(u)); // Camera zooms slightly
+  s += '<g ' + camera(scale, 0, 0) + '>';
+  s += softwareStack(CX, baseY, blockW, blockH, blocks, 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var baseY = BOT - 100; // Bottom edge of the lowest block
+  var blockH = 120;
+  var blockW = 400;
+  var numBaseBlocks = 5;
+  var blocks = [];
+
+  for (var i = 0; i < numBaseBlocks; i++) {
+    blocks.push({ fillCol: BLUE, strokeCol: BLUE });
+  }
+  blocks[1].content = 'bug'; // Bug persists
+
+  // New amber feature block added on top
+  var newBlockOp = ramp(u, 0.1, 0.3);
+  blocks.push({ fillCol: AMBER, strokeCol: AMBER, content: 'feature', op: newBlockOp });
+
+  // Stack expansion and camera pull back
+  var stackScale = lerp(1, 0.8, smooth(ramp(u, 0.4, 0.9)));
+  var stackTy = lerp(0, 100, smooth(ramp(u, 0.4, 0.9)));
+
+  s += '<g ' + camera(stackScale, 0, stackTy) + '>';
+  s += softwareStack(CX, baseY, blockW, blockH, blocks, 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var baseY = BOT - 100; // Bottom edge of the lowest block
+  var blockH = 120;
+  var blockW = 400;
+  var numBlocks = 6; // 5 blue + 1 amber
+  var blocks = [];
+
+  for (var i = 0; i < 5; i++) {
+    blocks.push({ fillCol: BLUE, strokeCol: BLUE });
+  }
+  blocks[1].content = 'bug'; // Bug persists
+  blocks.push({ fillCol: AMBER, strokeCol: AMBER, content: 'feature' }); // Feature persists
+
+  // Camera pulls back to show the full, expanded stack
+  var scale = lerp(0.8, 1, smooth(u));
+  var ty = lerp(100, 0, smooth(u));
+
+  s += '<g ' + camera(scale, 0, ty) + '>';
+  s += softwareStack(CX, baseY, blockW, blockH, blocks, 1);
+  s += stickFigure(CX - 300, BOT - 100, 1, AMBER, 'understand', 1);
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

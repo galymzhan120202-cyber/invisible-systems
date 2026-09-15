@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You just checked into your hotel, tired and ready to relax. Your first thought? Get online, check messages, or unwind with streaming.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "You check networks and see 'Premium Hotel Wi-Fi'. The price tag makes your jaw drop; it costs far more than your home internet.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "Why this outrageous cost? Pure greed? Hidden infrastructure? You might even consider finding a weaker, free signal elsewhere.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "The invisible system is price discrimination. Hotels know *who* needs fast, reliable internet most — like business travelers on expense accounts.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "They segment guests. A family needing multiple devices, or someone with an urgent deadline, will pay a premium. You're trapped by your necessity.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "So, it's not the hotel's raw cost, but *your* situation. Next time, you'll recognize this invisible pricing system, and perhaps plan, or simply understand.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

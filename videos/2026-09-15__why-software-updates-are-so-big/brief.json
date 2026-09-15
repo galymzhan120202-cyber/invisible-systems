@@ -1,0 +1,15 @@
+{
+  "id": "why-software-updates-are-so-big",
+  "slug": "2026-09-15__why-software-updates-are-so-big",
+  "title_working": "Why Software Updates Are So Huge",
+  "system": "cumulative feature addition and backward compatibility constraints",
+  "cluster": "platforms-and-algorithms",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "failed",
+  "created_at": "2026-09-15T11:47:57+00:00",
+  "produced_at": "2026-09-15T11:53:49+00:00",
+  "verify": "FAIL",
+  "takeaway": "You now understand that a 'small fix' often requires re-packaging and re-delivering large parts of a complex software system to ensure compatibility.",
+  "animation_source": "llm"
+}

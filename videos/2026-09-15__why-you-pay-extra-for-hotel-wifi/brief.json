@@ -1,0 +1,15 @@
+{
+  "id": "why-you-pay-extra-for-hotel-wifi",
+  "slug": "2026-09-15__why-you-pay-extra-for-hotel-wifi",
+  "title_working": "Why Hotel WiFi Costs So Much",
+  "system": "price discrimination based on perceived need",
+  "cluster": "pricing-and-incentives",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-09-15T11:40:06+00:00",
+  "produced_at": "2026-09-15T11:47:53+00:00",
+  "verify": "PASS",
+  "takeaway": "Hotels charge high prices for WiFi by segmenting guests based on their perceived urgency and willingness to pay, not just the service's cost.",
+  "animation_source": "fallback"
+}

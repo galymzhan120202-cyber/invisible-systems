@@ -1,0 +1,15 @@
+{
+  "id": "why-elevators-skip-your-floor",
+  "slug": "2026-09-15__why-elevators-skip-your-floor",
+  "title_working": "Why elevators seem to skip your floor",
+  "system": "collective-control scheduling / throughput over first-come order",
+  "cluster": "queues-and-waiting",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-09-15T11:36:24+00:00",
+  "produced_at": "2026-09-15T11:40:01+00:00",
+  "verify": "PASS",
+  "takeaway": "Elevators prioritize overall building efficiency, not just the first person to press a button, which can lead to individual frustration.",
+  "animation_source": "llm"
+}
