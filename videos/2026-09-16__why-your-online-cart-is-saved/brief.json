@@ -1,0 +1,15 @@
+{
+  "id": "why-your-online-cart-is-saved",
+  "slug": "2026-09-16__why-your-online-cart-is-saved",
+  "title_working": "Why Your Online Cart Stays Saved — Invisible Systems",
+  "system": "persistent session management and abandonment recovery",
+  "cluster": "platforms-and-algorithms",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "failed",
+  "created_at": "2026-09-16T11:23:15+00:00",
+  "produced_at": "2026-09-16T11:32:57+00:00",
+  "verify": "FAIL",
+  "takeaway": "Your online shopping cart stays saved because of server-side session management, a strategic system to encourage your return and purchase.",
+  "animation_source": "llm"
+}

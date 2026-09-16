@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Your Online Cart Stays Saved</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / session
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want
+var CORAL = "#FF5B5B";              // coral red    -> naive model / false signal
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+/* stick figure: x, y is bottom-center of body */
+function stickFigure(x, y, scale, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ') scale(' + scale + ')">';
+  var sw = 10 / scale; // Adjust stroke width for scale
+
+  // Default pose: standing, arms down, looking forward
+  var headY = -120;
+  var bodyH = 80;
+  var armL_start = {x: -20, y: -80}, armL_end = {x: -30, y: -20};
+  var armR_start = {x: 20, y: -80}, armR_end = {x: 30, y: -20};
+  var legL_start = {x: -15, y: 0}, legL_end = {x: -15, y: 70};
+  var legR_start = {x: 15, y: 0}, legR_end = {x: 15, y: 70};
+
+  if (pose === 'sitting' || pose === 'computer' || pose === 'thumbs_up') {
+    headY = -80;
+    bodyH = 50;
+    legL_start = {x: -15, y: 0}; legL_end = {x: -40, y: 20}; // bent forward
+    legR_start = {x: 15, y: 0}; legR_end = {x: 40, y: 20};
+  }
+  if (pose === 'computer') {
+    armL_start = {x: -20, y: -40}; armL_end = {x: -50, y: -10}; // on keyboard
+    armR_start = {x: 20, y: -40}; armR_end = {x: 50, y: -10};
+  } else if (pose === 'turn_right') {
+    headY = -80;
+    bodyH = 50;
+    armL_start = {x: -20, y: -40}; armL_end = {x: -40, y: -20};
+    armR_start = {x: 20, y: -40}; armR_end = {x: 50, y: -10};
+    legL_start = {x: -15, y: 0}; legL_end = {x: -40, y: 20};
+    legR_start = {x: 15, y: 0}; legR_end = {x: 40, y: 20};
+    g += '<g transform="rotate(20)">'; // Body slightly turns
+    g += '<g transform="translate(0 ' + headY + ') rotate(20)">'; // Head turns right
+    g += dot(0, 0, 20, col); // Head
+    g += '</g>';
+    g += line(0, 0, 0, -bodyH, col, sw); // Body
+    g += line(armL_start.x, armL_start.y, armL_end.x, armL_end.y, col, sw); // Left arm
+    g += line(armR_start.x, armR_start.y, armR_end.x, armR_end.y, col, sw); // Right arm
+    g += line(legL_start.x, legL_start.y, legL_end.x, legL_end.y, col, sw); // Left leg
+    g += line(legR_start.x, legR_start.y, legR_end.x, legR_end.y, col, sw); // Right leg
+    g += '</g>';
+    g += '</g>';
+    return g;
+  } else if (pose === 'exit_right') {
+    headY = -80;
+    bodyH = 50;
+    armL_start = {x: -20, y: -40}; armL_end = {x: -40, y: -20};
+    armR_start = {x: 20, y: -40}; armR_end = {x: 50, y: -10};
+    legL_start = {x: -15, y: 0}; legL_end = {x: -40, y: 20};
+    legR_start = {x: 15, y: 0}; legR_end = {x: 40, y: 20};
+    g += '<g transform="rotate(30)">'; // Body turns more
+    g += '<g transform="translate(0 ' + headY + ') rotate(30)">'; // Head turns more
+    g += dot(0, 0, 20, col); // Head
+    g += '</g>';
+    g += line(0, 0, 0, -bodyH, col, sw); // Body
+    g += line(armL_start.x, armL_start.y, armL_end.x, armL_end.y, col, sw); // Left arm
+    g += line(armR_start.x, armR_start.y, armR_end.x, armR_end.y, col, sw); // Right arm
+    g += line(legL_start.x, legL_start.y, legL_end.x, legL_end.y, col, sw); // Left leg
+    g += line(legR_start.x, legR_start.y, legR_end.x, legR_end.y, col, sw); // Right leg
+    g += '</g>';
+    g += '</g>';
+    return g;
+  } else if (pose === 'thumbs_up') {
+    armL_start = {x: -20, y: -40}; armL_end = {x: -40, y: -20};
+    armR_start = {x: 20, y: -40}; armR_end = {x: 20, y: -80}; // Arm up
+    g += dot(20, -90, 8, col); // Thumb
+  }
+
+  g += '<g transform="rotate(0)">'; // Default body rotation
+  g += line(0, 0, 0, -bodyH, col, sw); // Body
+  g += line(armL_start.x, armL_start.y, armL_end.x, armL_end.y, col, sw); // Left arm
+  g += line(armR_start.x, armR_start.y, armR_end.x, armR_end.y, col, sw); // Right arm
+  g += line(legL_start.x, legL_start.y, legL_end.x, legL_end.y, col, sw); // Left leg
+  g += line(legR_start.x, legR_start.y, legR_end.x, legR_end.y, col, sw); // Right leg
+  g += '</g>';
+  g += '<g transform="translate(0 ' + headY + ') rotate(0)">'; // Default head rotation
+  g += dot(0, 0, 20, col); // Head
+  g += '</g>';
+  g += '</g>';
+  return g;
+}
+
+function computer(x, y, w, h, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  // Screen
+  g += rrect(x, y - h / 2 + h * 0.4, w, h * 0.8, 10, col);
+  // Keyboard
+  g += rrect(x, y + h / 2 - h * 0.1, w * 0.9, h * 0.2, 5, col);
+  // Stand
+  g += line(x, y + h * 0.2, x, y + h * 0.3, col, 8);
+  g += line(x - w * 0.2, y + h * 0.3, x + w * 0.2, y + h * 0.3, col, 8);
+  g += '</g>';
+  return g;
+}
+
+function cart(x, y, scale, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ') scale(' + scale + ')">';
+  var sw = 10 / scale;
+  var bodyW = 100, bodyH = 80;
+  var handleX = 60, handleY = -50;
+  var wheelR = 15;
+
+  // Basket body
+  g += line(-bodyW / 2, bodyH / 2, bodyW / 2, bodyH / 2, col, sw); // Bottom
+  g += line(-bodyW / 2 + 10, bodyH / 2, -bodyW / 2 + 30, -bodyH / 2 + 10, col, sw); // Front slant
+  g += line(bodyW / 2 - 10, bodyH / 2, bodyW / 2 - 30, -bodyH / 2 + 10, col, sw); // Back slant
+  g += line(-bodyW / 2 + 30, -bodyH / 2 + 10, bodyW / 2 - 30, -bodyH / 2 + 10, col, sw); // Top
+  // Handle
+  g += line(handleX - 10, handleY, handleX + 10, handleY, col, sw);
+  g += line(handleX, handleY, bodyW / 2 - 10, -bodyH / 2 + 10, col, sw); // Connect handle to basket
+  // Wheels
+  g += dot(-bodyW / 2 + 20, bodyH / 2 + wheelR, wheelR, col);
+  g += dot(bodyW / 2 - 20, bodyH / 2 + wheelR, wheelR, col);
+  g += '</g>';
+  return g;
+}
+
+function item(x, y, size, col, op) {
+  return rrect(x, y, size, size, 8, col, op);
+}
+
+function phoneIcon(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, size, size * 1.5, size * 0.15, col);
+  g += dot(x, y - size * 0.6, size * 0.1, WHITE); // Speaker dot
+  g += '</g>';
+  return g;
+}
+
+function serverRack(x, y, h, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var w = 120;
+  var unitH = 60;
+  g += rrect(x, y, w, h, 10, col, 0.2); // Outer casing
+  for (var i = 0; i < Math.floor(h / unitH); i++) {
+    var unitY = y - h / 2 + unitH / 2 + i * unitH;
+    g += rrectStroke(x, unitY, w * 0.8, unitH * 0.7, 5, col, 4); // Server units
+    g += dot(x - w * 0.3, unitY, 4, col); // Indicator light
+  }
+  return g;
+}
+
+function lockIcon(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var bodyW = size * 0.8, bodyH = size * 0.7;
+  g += rrect(x, y + size * 0.1, bodyW, bodyH, size * 0.1, col); // Lock body
+  g += '<path d="M ' + (x - bodyW * 0.3) + " " + (y - bodyH * 0.3) +
+       " A " + (bodyW * 0.4) + " " + (bodyW * 0.4) + " 0 0 1 " + (x + bodyW * 0.3) + " " + (y - bodyH * 0.3) +
+       " L " + (x + bodyW * 0.3) + " " + (y - bodyH * 0.1) +
+       " L " + (x - bodyW * 0.3) + " " + (y - bodyH * 0.1) + " Z" +
+       '" fill="' + col + '" stroke="none"/>'; // Lock shackle (fill, not stroke)
+  return g;
+}
+
+function cookieIcon(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += dot(x, y, size, col);
+  g += dot(x + size * 0.4, y + size * 0.3, size * 0.2, WHITE, 0.4);
+  g += dot(x - size * 0.3, y - size * 0.5, size * 0.15, WHITE, 0.4);
+  g += dot(x + size * 0.1, y - size * 0.4, size * 0.25, WHITE, 0.4);
+  g += '</g>';
+  return g;
+}
+
+function dataFlow(x1, y1, x2, y2, col, u, op) {
+  op = (op == null ? 1 : op);
+  var g = '';
+  var dist = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+  var numDots = Math.floor(dist / 40);
+  for (var i = 0; i < numDots; i++) {
+    var p = (u + i / numDots) % 1;
+    var x = lerp(x1, x2, p);
+    var y = lerp(y1, y2, p);
+    g += dot(x, y, 8, col, op * (1 - Math.abs(p - 0.5) * 2));
+  }
+  return g;
+}
+
+/* ---------- scene specific constants ---------- */
+var COMP_X = CX - 200, COMP_Y = CY + 100; // Computer base
+var CART_X = CX + 200, CART_Y = CY + 100; // Cart base
+var SF_BASE_Y = COMP_Y - 50; // Stick figure sits on top of computer base
+var ITEM_START_X = COMP_X - 100;
+var ITEM_START_Y = TOP + 200; // Items start high
+var SERVER_X = CX + 400, SERVER_Y = CY; // Server rack centered vertically
+var COOKIE_X = COMP_X + 100, COOKIE_Y = COMP_Y + 100; // Cookie near computer
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+
+  // Computer always present
+  s += computer(COMP_X, COMP_Y, 400, 300, WHITE, 1);
+
+  // Cart always present
+  s += cart(CART_X, CART_Y, 1, WHITE, 1);
+
+  // Items being added
+  var numItems = 3;
+  for (var i = 0; i < numItems; i++) {
+    var itemPhase = (u * 0.8 * numItems - i) / numItems; // Staggered entry
+    if (itemPhase > 0 && itemPhase < 1) {
+      var itemU = smooth(itemPhase);
+      var ix = lerp(ITEM_START_X + rnd(i) * 50, CART_X + rnd(i+1) * 20 - 10, itemU);
+      var iy = lerp(ITEM_START_Y + i * 80, CART_Y - 30 + rnd(i+2) * 10 - 10, itemU);
+      var itemOp = ramp(itemPhase, 0, 0.2) * (1 - ramp(itemPhase, 0.8, 1));
+      s += item(ix, iy, 40, WHITE, itemOp);
+    }
+  }
+
+  // Stick figure animation
+  var sfPose = 'computer';
+  var sfMoveX = 0;
+  var sfOp = 1;
+  var phoneOp = 0;
+
+  if (u < 0.3) { // Sitting at computer
+    sfPose = 'computer';
+  } else if (u < 0.6) { // Phone rings, turns away
+    sfPose = 'turn_right';
+    phoneOp = ramp(u, 0.3, 0.4);
+    s += phoneIcon(SF_BASE_Y + 100, SF_BASE_Y - 150, 40, WHITE, phoneOp);
+  } else { // Exits frame
+    sfPose = 'exit_right';
+    sfMoveX = easeOut(ramp(u, 0.6, 0.9)) * 600;
+    sfOp = 1 - ramp(u, 0.8, 1.0);
+    phoneOp = 1 - ramp(u, 0.6, 0.9);
+    s += phoneIcon(SF_BASE_Y + 100, SF_BASE_Y - 150, 40, WHITE, phoneOp);
+  }
+  s += stickFigure(COMP_X + sfMoveX, SF_BASE_Y, 1, AMBER, sfPose, sfOp);
+
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+
+  s += computer(COMP_X, COMP_Y, 400, 300, WHITE, 1);
+  s += cart(CART_X, CART_Y, 1, WHITE, 1);
+
+  // Stick figure slides back in
+  var sfMoveX = lerp(600, 0, easeOut(ramp(u, 0.0, 0.3)));
+  var sfOp = ramp(u, 0.0, 0.1);
+  s += stickFigure(COMP_X + sfMoveX, SF_BASE_Y, 1, AMBER, 'computer', sfOp);
+
+  // Cart "pulse" to emphasize presence
+  var cartPulse = Math.sin(u * Math.PI * 4) * 0.1 * pulse(u, 0.5, 0.3);
+  s += cart(CART_X, CART_Y, 1 + cartPulse, WHITE, 1);
+
+  // Blue connection line appears
+  var connectOp = ramp(u, 0.4, 0.8);
+  if (connectOp > 0) {
+    s += line(COMP_X + 50, SF_BASE_Y - 40, CART_X - 50, CART_Y - 40, BLUE, 8, connectOp);
+  }
+
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+
+  s += computer(COMP_X, COMP_Y, 400, 300, WHITE, 1);
+  s += cart(CART_X, CART_Y, 1, WHITE, 1);
+  s += stickFigure(COMP_X, SF_BASE_Y, 1, AMBER, 'computer', 1);
+
+  // Lock icon appears on computer screen
+  var lockOp = ramp(u, 0.1, 0.4);
+  var lockScale = lerp(0.5, 1, easeOut(ramp(u, 0.1, 0.4)));
+  s += '<g transform="translate(' + COMP_X + ' ' + (COMP_Y - 60) + ') scale(' + lockScale + ')">';
+  s += lockIcon(0, 0, 80, BLUE, lockOp);
+  s += '</g>';
+
+  // Server rack appears
+  var serverOp = ramp(u, 0.5, 0.8);
+  s += serverRack(SERVER_X, CY, BOT - TOP - 100, BLUE, serverOp);
+
+  // Blue connection line from computer to server
+  var lineOp = ramp(u, 0.6, 0.9);
+  if (lineOp > 0) {
+    s += line(COMP_X + 180, COMP_Y - 60, SERVER_X - 60, CY, BLUE, 8, lineOp);
+  }
+
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+
+  s += computer(COMP_X, COMP_Y, 400, 300, WHITE, 1);
+  s += cart(CART_X, CART_Y, 1, WHITE, 1);
+  s += stickFigure(COMP_X, SF_BASE_Y, 1, AMBER, 'computer', 1);
+  s += serverRack(SERVER_X, CY, BOT - TOP - 100, BLUE, 1);
+
+  // Session ID (BLUE block) moves from server to computer
+  var sessionID_move_u = ramp(u, 0.0, 0.4);
+  var sessionID_x = lerp(SERVER_X - 40, COMP_X, easeOut(sessionID_move_u));
+  var sessionID_y = lerp(CY - 100, COMP_Y - 60, easeOut(sessionID_move_u));
+  var sessionID_op = ramp(u, 0.0, 0.1);
+  s += rrect(sessionID_x, sessionID_y, 60, 40, 5, BLUE, sessionID_op);
+
+  // Session ID moves to cookie icon
+  var cookie_move_u = ramp(u, 0.4, 0.7);
+  var cookie_x = lerp(COMP_X, COOKIE_X, easeOut(cookie_move_u));
+  var cookie_y = lerp(COMP_Y - 60, COOKIE_Y, easeOut(cookie_move_u));
+  var cookie_op = ramp(u, 0.4, 0.5);
+  s += cookieIcon(cookie_x, cookie_y, 30, BLUE, cookie_op);
+
+  // Connection from cookie to cart
+  var connect_cookie_cart_op = ramp(u, 0.7, 0.9);
+  if (connect_cookie_cart_op > 0) {
+    s += line(COOKIE_X, COOKIE_Y, CART_X - 50, CART_Y - 40, BLUE, 8, connect_cookie_cart_op);
+  }
+
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+
+  s += computer(COMP_X, COMP_Y, 400, 300, WHITE, 1);
+  s += cart(CART_X, CART_Y, 1, WHITE, 1);
+  s += stickFigure(COMP_X, SF_BASE_Y, 1, AMBER, 'computer', 1);
+  s += serverRack(SERVER_X, CY, BOT - TOP - 100, BLUE, 1);
+  s += cookieIcon(COOKIE_X, COOKIE_Y, 30, BLUE, 1);
+
+  // Data flow from cookie to cart
+  var data_flow_op = ramp(u, 0.0, 0.3);
+  s += dataFlow(COOKIE_X, COOKIE_Y, CART_X - 50, CART_Y - 40, BLUE, u * 2, data_flow_op);
+
+  // Coral "lost cart" scenario (fades out)
+  var lostCartOp = 1 - ramp(u, 0.2, 0.7);
+  if (lostCartOp > 0.02) {
+    s += cart(CART_X + 150, CART_Y + 100, 0.8, CORAL, lostCartOp);
+    s += line(CART_X + 150 - 60, CART_Y + 100 - 60, CART_X + 150 + 60, CART_Y + 100 + 60, CORAL, 12, lostCartOp);
+    s += line(CART_X + 150 + 60, CART_Y + 100 - 60, CART_X + 150 - 60, CART_Y + 100 + 60, CORAL, 12, lostCartOp);
+  }
+
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+
+  // System elements fade into background
+  var systemFade = 1 - ramp(u, 0.0, 0.6);
+  s += computer(COMP_X, COMP_Y, 400, 300, WHITE, systemFade);
+  s += serverRack(SERVER_X, CY, BOT - TOP - 100, BLUE, systemFade * 0.5);
+  s += cookieIcon(COOKIE_X, COOKIE_Y, 30, BLUE, systemFade);
+
+  // Stick figure thumbs up
+  var sfPose = 'computer';
+  if (u > 0.3) sfPose = 'thumbs_up';
+  s += stickFigure(COMP_X, SF_BASE_Y, 1, AMBER, sfPose, 1);
+
+  // Cart with amber glow
+  var cartGlowOp = ramp(u, 0.2, 0.7);
+  s += ring(CART_X, CART_Y, 100 + Math.sin(u * Math.PI * 6) * 10, AMBER, 10, cartGlowOp * 0.4);
+  s += cart(CART_X, CART_Y, 1, AMBER, 1); // Cart itself becomes amber
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
