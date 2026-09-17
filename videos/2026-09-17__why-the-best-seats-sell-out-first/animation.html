@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why The Best Seats Sell Out First</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+var FIG_Y = BOT - 180;              // Base Y for stick figures (feet position)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary elements
+var BLUE  = "#4C86F0";              // signal blue  -> the system / solution
+var AMBER = "#F2A93B";              // warm amber   -> YOU / desire
+var CORAL = "#FF5B5B";              // coral red    -> frustration / naive model
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty, rot) {
+  rot = (rot == null ? 0 : rot);
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') rotate(' + rot + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* Stick figure builder */
+function stickFigure(x, y_base, h, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var sw = 8;
+  var headR = h * 0.12;
+  var bodyLen = h * 0.4;
+  var armLen = h * 0.3;
+  var legLen = h * 0.35;
+
+  var g = '<g opacity="' + op + '">';
+  // Head
+  var headY = y_base - h + headR;
+  g += dot(x, headY, headR, col);
+
+  // Body
+  var bodyStartY = headY + headR;
+  var bodyEndY = bodyStartY + bodyLen;
+  g += line(x, bodyStartY, x, bodyEndY, col, sw);
+
+  // Arms and Legs depend on pose
+  // pose: 0=default, 1=pointing, 2=shrug, 3=reaching, 4=nodding
+  var armAttachY = bodyStartY + bodyLen * 0.2;
+
+  switch (pose) {
+    case 1: // pointing
+      g += line(x, armAttachY, x + armLen * 0.8, armAttachY - armLen * 0.3, col, sw); // Right arm up
+      g += line(x + armLen * 0.8, armAttachY - armLen * 0.3, x + armLen * 0.8 + armLen * 0.2, armAttachY - armLen * 0.3 - armLen * 0.1, col, sw); // Pointing finger
+      g += line(x, armAttachY, x - armLen * 0.6, armAttachY + armLen * 0.2, col, sw); // Left arm down
+      break;
+    case 2: // shrug
+      g += line(x, armAttachY, x - armLen * 0.7, armAttachY - armLen * 0.2, col, sw); // Left arm up-out
+      g += line(x, armAttachY, x + armLen * 0.7, armAttachY - armLen * 0.2, col, sw); // Right arm up-out
+      break;
+    case 3: // reaching (simplified for animation)
+      g += line(x, armAttachY, x - armLen * 0.6, armAttachY + armLen * 0.2, col, sw); // Left arm default
+      // Right arm will be drawn separately for dynamic reach point
+      break;
+    case 4: // nodding
+      g += line(x, armAttachY, x - armLen * 0.6, armAttachY + armLen * 0.2, col, sw); // Left arm down
+      g += line(x, armAttachY, x + armLen * 0.6, armAttachY + armLen * 0.2, col, sw); // Right arm down
+      break;
+    default: // default pose
+      g += line(x, armAttachY, x - armLen * 0.6, armAttachY + armLen * 0.2, col, sw); // Left arm
+      g += line(x, armAttachY, x + armLen * 0.6, armAttachY + armLen * 0.2, col, sw); // Right arm
+      break;
+  }
+
+  // Legs
+  var legAttachY = bodyEndY;
+  g += line(x, legAttachY, x - legLen * 0.4, y_base, col, sw); // Left leg
+  g += line(x, legAttachY, x + legLen * 0.4, y_base, col, sw); // Right leg
+
+  g += '</g>';
+  return g;
+}
+
+/* Seat icon builder */
+function seatShape(x, y, w, h, fillCol, strokeCol, sw, op) {
+  op = (op == null ? 1 : op);
+  sw = (sw == null ? 8 : sw);
+  var rad = w * 0.15;
+  var backH = h * 0.4;
+  var seatH = h * 0.6;
+  var seatW = w * 0.8;
+
+  var g = '<g opacity="' + op + '">';
+  var backY = y - seatH / 2 - backH / 2;
+  var cushionY = y + backH / 2 + seatH / 2 - h / 2;
+
+  if (fillCol === 'none') {
+    g += rrectStroke(x, backY, w, backH, rad, strokeCol, sw);
+    g += rrectStroke(x, cushionY, seatW, seatH, rad, strokeCol, sw);
+  } else {
+    g += rrect(x, backY, w, backH, rad, fillCol);
+    g += rrect(x, cushionY, seatW, seatH, rad, fillCol);
+    if (strokeCol && strokeCol !== fillCol) { // Add stroke if explicitly different
+      g += rrectStroke(x, backY, w, backH, rad, strokeCol, sw);
+      g += rrectStroke(x, cushionY, seatW, seatH, rad, strokeCol, sw);
+    }
+  }
+  g += '</g>';
+  return g;
+}
+
+/* 'X' mark for unavailable seats */
+function xMark(x, y, size, col, sw, op) {
+  op = (op == null ? 1 : op);
+  sw = (sw == null ? 10 : sw);
+  var g = '<g opacity="' + op + '">';
+  g += line(x - size / 2, y - size / 2, x + size / 2, y + size / 2, col, sw);
+  g += line(x + size / 2, y - size / 2, x - size / 2, y + size / 2, col, sw);
+  g += '</g>';
+  return g;
+}
+
+/* Grid of seats */
+function seatGrid(centerX, centerY, rows, cols, seatW, seatH, gapX, gapY, highlightCells, highlightColor, unavailableCells, unavailableXColor, defaultFillColor, defaultStrokeColor, op) {
+  var g = '';
+  var totalGridW = cols * seatW + (cols - 1) * gapX;
+  var totalGridH = rows * seatH + (rows - 1) * gapY;
+  var startX = centerX - totalGridW / 2 + seatW / 2;
+  var startY = centerY - totalGridH / 2 + seatH / 2;
+
+  for (var r = 0; r < rows; r++) {
+    for (var c = 0; c < cols; c++) {
+      var x = startX + c * (seatW + gapX);
+      var y = startY + r * (seatH + gapY);
+      var cellKey = r + '_' + c;
+      var currentOp = op;
+
+      if (unavailableCells && unavailableCells.includes(cellKey)) {
+        g += seatShape(x, y, seatW, seatH, 'none', defaultStrokeColor, 5, currentOp);
+        g += xMark(x, y, seatW * 0.8, unavailableXColor, 8, currentOp);
+      } else if (highlightCells && highlightCells.includes(cellKey)) {
+        g += seatShape(x, y, seatW, seatH, highlightColor, highlightColor, 8, currentOp);
+      } else {
+        g += seatShape(x, y, seatW, seatH, defaultFillColor, defaultStrokeColor, 8, currentOp);
+      }
+    }
+  }
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftX = lerp(-40, 0, smooth(u * 0.9));
+  var driftY = lerp(20, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, driftX, driftY) + '>';
+
+  // Stick figure pointing
+  s += stickFigure(CX - 200, FIG_Y, 240, AMBER, 1, 1);
+
+  // Single prominent amber seat
+  var seatX = CX + 200;
+  var seatY = CY;
+  var seatW = 180;
+  var seatH = 220;
+  s += seatShape(seatX, seatY, seatW, seatH, AMBER, AMBER, 8);
+
+  // Soft glow around the seat
+  var glowOp = 0.2 + 0.3 * Math.sin(u * Math.PI * 2); // Pulsing glow
+  s += ring(seatX, seatY, seatW * 0.6, AMBER, 12, glowOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  // Camera zoom on unavailable seats
+  var camScale = lerp(1.0, 1.1, smooth(ramp(u, 0.4, 0.6)));
+  var camTX = lerp(0, 50, smooth(ramp(u, 0.4, 0.6)));
+  var camTY = lerp(0, -100, smooth(ramp(u, 0.4, 0.6)));
+  s += '<g ' + camera(camScale, camTX, camTY) + '>';
+
+  // Stick figure at a screen interface
+  s += stickFigure(CX - 300, FIG_Y, 240, AMBER, 0, 1);
+
+  // Screen interface
+  var screenX = CX + 150;
+  var screenY = CY;
+  var screenW = 600;
+  var screenH = 1000;
+  var screenOpacity = ramp(u, 0.0, 0.2);
+  s += rrect(screenX, screenY, screenW, screenH, 40, DIM, screenOpacity);
+
+  // Grid of seats on screen
+  var rows = 5, cols = 3;
+  var seatW = 80, seatH = 100;
+  var gapX = 20, gapY = 20;
+  var unavailableCells = ['0_0', '0_1', '0_2']; // Top row
+  var defaultStroke = WHITE;
+
+  s += seatGrid(screenX, screenY, rows, cols, seatW, seatH, gapX, gapY, null, null, unavailableCells, CORAL, WHITE, defaultStroke, screenOpacity);
+
+  // Click animation: a coral red X flashes over a greyed out seat
+  var clickFlash = pulse(u, 0.2, 0.1);
+  var targetSeatX = screenX - (seatW + gapX); // Position of '0_0' seat in the grid
+  var targetSeatY = screenY - (rows - 1) * (seatH + gapY) / 2 + seatH / 2;
+  s += xMark(targetSeatX, targetSeatY, seatW * 0.8, CORAL, 10, clickFlash * 0.9);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var camRot = lerp(0, 5 * Math.sin(u * Math.PI * 2), smooth(u));
+  s += '<g ' + camera(1.0, 0, 0, camRot) + '>';
+
+  // Stick figure confused, shrugging
+  s += stickFigure(CX, FIG_Y, 240, AMBER, 2, 1);
+
+  // Large, pulsing coral red question mark
+  var qmPulse = pulse(u, 0.5, 0.5);
+  var qmOp = lerp(0.6, 1.0, qmPulse);
+  var qmScale = lerp(1.0, 1.05, qmPulse);
+  var qmY = CY - 300;
+  s += '<g transform="translate(' + CX + ' ' + qmY + ') scale(' + qmScale + ') translate(' + (-CX) + ' ' + (-qmY) + ')">';
+  s += pathTag("M " + CX + " " + (qmY) + " Q " + (CX + 80) + " " + (qmY - 80) + " " + CX + " " + (qmY - 160) + " V " + (qmY - 200) + " M " + CX + " " + (qmY - 280) + " V " + (qmY - 260), CORAL, 12, qmOp);
+  s += '</g>';
+
+  // Fading coral red 'X' seats in background
+  var fadeOp = lerp(1, 0, ramp(u, 0.7, 1.0));
+  for (var i = 0; i < 5; i++) {
+    var sx = CX + (rnd(i) - 0.5) * 800;
+    var sy = CY + (rnd(i + 10) - 0.5) * 1000;
+    s += seatShape(sx, sy, 80, 100, 'none', DIM, 5, fadeOp * 0.3);
+    s += xMark(sx, sy, 80 * 0.8, CORAL, 8, fadeOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Grid of seats appears
+  var gridOpacity = ramp(u, 0.0, 0.3);
+  var rows = 5, cols = 5;
+  var seatW = 100, seatH = 120;
+  var gapX = 20, gapY = 20;
+  var gridX = CX, gridY = CY;
+  var highlightCells = ['0_1', '0_2', '0_3', '1_1', '1_2', '1_3']; // Top-center 3x2 block
+
+  // Blue background for highlight section
+  var blueRectW = (seatW + gapX) * 3 - gapX;
+  var blueRectH = (seatH + gapY) * 2 - gapY;
+  var blueRectX = gridX;
+  var blueRectY = gridY - (rows - 1) * (seatH + gapY) / 2 + (seatH + gapY) * 0.5; // Center of the top 2 rows
+  var scaleBlue = lerp(1, 1.1, smooth(ramp(u, 0.6, 0.8)));
+  
+  s += '<g transform="translate(' + blueRectX + ' ' + blueRectY + ') scale(' + scaleBlue + ') translate(' + (-blueRectX) + ' ' + (-blueRectY) + ')">';
+  s += rrect(blueRectX, blueRectY, blueRectW, blueRectH, 20, BLUE, 0.3 * gridOpacity);
+  s += '</g>';
+
+  s += seatGrid(gridX, gridY, rows, cols, seatW, seatH, gapX, gapY, highlightCells, BLUE, null, null, DIM, WHITE, gridOpacity);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Stick figure reaching
+  s += stickFigure(CX, FIG_Y, 240, AMBER, 3, 1);
+
+  // Two distinct seat icons: one signal blue (larger, closer), one grey (smaller, further)
+  var blueSeatX = CX - 180;
+  var blueSeatY = CY - 100;
+  var blueSeatW = 180;
+  var blueSeatH = 220;
+  s += seatShape(blueSeatX, blueSeatY, blueSeatW, blueSeatH, BLUE, BLUE, 8);
+
+  var greySeatX = CX + 180;
+  var greySeatY = CY - 100;
+  var greySeatW = 120;
+  var greySeatH = 150;
+  s += seatShape(greySeatX, greySeatY, greySeatW, greySeatH, DIM, DIM, 8);
+
+  // Amber hand reaching from blue towards grey seat
+  var armAttachY = FIG_Y - 240 + 240 * 0.12 + 240 * 0.4 * 0.2; // Y-coord where arm attaches to body
+  var elbowX = CX + 240 * 0.3 * 0.4;
+  var elbowY = armAttachY + 240 * 0.3 * 0.2;
+  var handTargetX = lerp(blueSeatX, greySeatX, easeOut(ramp(u, 0.4, 0.8)));
+  var handTargetY = lerp(blueSeatY + blueSeatH * 0.4, greySeatY + greySeatH * 0.4, easeOut(ramp(u, 0.4, 0.8))); // Adjust Y to be on the seat cushion
+
+  s += line(CX, armAttachY, elbowX, elbowY, AMBER, 8); // Upper arm
+  s += line(elbowX, elbowY, handTargetX, handTargetY, AMBER, 8); // Forearm
+  s += dot(handTargetX, handTargetY, 12, AMBER); // Hand
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var camScale = lerp(1.1, 1.0, smooth(u));
+  var camTY = lerp(-50, 0, smooth(u));
+  s += '<g ' + camera(camScale, 0, camTY) + '>';
+
+  // Stick figure nodding knowingly
+  var headNod = Math.sin(u * Math.PI * 3) * 5; // Subtle head nod
+  s += '<g transform="translate(' + (CX - 200) + ' ' + (FIG_Y - 240 + 240 * 0.12) + ') rotate(' + headNod + ') translate(' + (-(CX - 200)) + ' ' + (-(FIG_Y - 240 + 240 * 0.12)) + ')">';
+  s += stickFigure(CX - 200, FIG_Y, 240, AMBER, 4, 1);
+  s += '</g>';
+
+  // Full grid of seats with signal blue section understood, subtly glowing
+  var rows = 5, cols = 5;
+  var seatW = 100, seatH = 120;
+  var gapX = 20, gapY = 20;
+  var gridX = CX, gridY = CY;
+  var highlightCells = ['0_1', '0_2', '0_3', '1_1', '1_2', '1_3'];
+
+  s += seatGrid(gridX, gridY, rows, cols, seatW, seatH, gapX, gapY, highlightCells, BLUE, null, null, DIM, WHITE, 1);
+
+  // Subtle glow around blue section
+  var blueRectW = (seatW + gapX) * 3 - gapX;
+  var blueRectH = (seatH + gapY) * 2 - gapY;
+  var blueRectX = gridX;
+  var blueRectY = gridY - (rows - 1) * (seatH + gapY) / 2 + (seatH + gapY) * 0.5;
+  var glowOp = 0.2 + 0.1 * Math.sin(u * Math.PI * 5);
+  s += rrect(blueRectX, blueRectY, blueRectW, blueRectH, 20, BLUE, glowOp);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

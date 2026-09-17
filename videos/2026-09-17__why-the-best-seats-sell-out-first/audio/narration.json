@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You're hyped for an event – concert, game. You imagine that perfect seat, right in the action. You just want the best view, an amazing experience.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "But when tickets drop? Those prime spots vanish instantly. Or they're so expensive, completely out of reach. You're left with less exciting, far-back options.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "It’s confusing. Why do the best seats always disappear first? Is it bad luck? Or are certain people getting special access? It feels so unfair.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "The invisible system is differential pricing. Organizers know some fans pay a premium for prime locations, others prioritize value over the absolute best spot.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "So, the most desirable seats are priced highest, selling first to maximize revenue. Other price tiers then fill with different customer segments at lower costs.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "You’re not unlucky; you’re observing a calculated strategy. Now, when best seats vanish, you’ll understand the market at work, not just bad timing.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]
