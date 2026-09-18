@@ -1,0 +1,15 @@
+{
+  "id": "why-people-stand-on-the-right-on-escalators",
+  "slug": "2026-09-18__why-people-stand-on-the-right-on-escalators",
+  "title_working": "Why People Stand on the Right on Escalators",
+  "system": "implicit social norm formation and pathway optimization",
+  "cluster": "traffic-and-crowds",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-09-18T11:04:06+00:00",
+  "produced_at": "2026-09-18T11:12:16+00:00",
+  "verify": "PASS",
+  "takeaway": "The 'stand right, walk left' escalator rule is an emergent social norm that optimizes crowd flow for collective efficiency.",
+  "animation_source": "llm"
+}

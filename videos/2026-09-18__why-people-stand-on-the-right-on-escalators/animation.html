@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why People Stand on the Right on Escalators</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var ESC_W = 500;                    // Escalator total width
+var ESC_X = CX;                     // Escalator center X
+var ESC_Y_TOP = TOP + 100;          // Escalator top Y
+var ESC_Y_BOT = BOT - 100;          // Escalator bottom Y
+var STEP_H = 40;                    // Height of a single step face
+var RAIL_W = 60;                    // Width of the handrail
+var RAIL_Y_OFFSET = 100;            // How far handrail extends above/below steps
+
+var STAND_LANE_X = ESC_X + ESC_W / 4; // Right lane for standing
+var WALK_LANE_X = ESC_X - ESC_W / 4;  // Left lane for walking
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary elements
+var BLUE  = "#4C86F0";              // signal blue  -> system / flow
+var AMBER = "#F2A93B";              // warm amber   -> YOU / standing path
+var CORAL = "#FF5B5B";              // coral red    -> friction / inefficiency
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, fill) {
+  return '<path d="' + d + '" fill="' + (fill || 'none') + '" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function chevron(x, y, size, col, op, dir) { // dir: 1 for up, -1 for down
+  dir = dir == null ? 1 : dir;
+  var d = "M " + (x - size) + " " + (y + size * 0.55 * dir) + " L " + x + " " + (y - size * 0.55 * dir) + " L " + (x + size) + " " + (y + size * 0.55 * dir);
+  return pathTag(d, col, 14, op);
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* Stick figure: x, y is base of feet. phase [0,1) for walking animation. */
+function stickFigure(x, y, col, phase, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var bodyH = 120, headR = 30, armL = 60, legL = 80;
+  var headY = y - bodyH - headR;
+  var shoulderY = y - bodyH - legL;
+  var hipY = y - legL;
+
+  // Head
+  g += dot(x, headY, headR, col);
+
+  // Body
+  g += line(x, shoulderY, x, hipY, col, 10);
+
+  // Legs (walking animation)
+  var legSwing = Math.sin(phase * Math.PI * 2);
+  var legAngle1 = legSwing * 0.4; // radians
+  var legAngle2 = -legSwing * 0.4; // radians
+
+  // Right leg (from figure's perspective)
+  g += line(x, hipY, x + Math.sin(legAngle1) * legL, hipY + Math.cos(legAngle1) * legL, col, 10);
+
+  // Left leg
+  g += line(x, hipY, x + Math.sin(legAngle2) * legL, hipY + Math.cos(legAngle2) * legL, col, 10);
+
+  // Arms (walking animation)
+  var armSwing = Math.sin(phase * Math.PI * 2 + Math.PI / 2); // Offset phase for arms
+  var armAngle1 = armSwing * 0.5;
+  var armAngle2 = -armSwing * 0.5;
+
+  // Right arm
+  g += line(x, shoulderY, x + Math.sin(armAngle1) * armL, shoulderY + Math.cos(armAngle1) * armL, col, 10);
+
+  // Left arm
+  g += line(x, shoulderY, x + Math.sin(armAngle2) * armL, shoulderY + Math.cos(armAngle2) * armL, col, 10);
+
+  g += '</g>';
+  return g;
+}
+
+function standingFigure(x, y, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var bodyH = 120, headR = 30, armL = 60, legL = 80;
+  var headY = y - bodyH - headR;
+  var shoulderY = y - bodyH - legL;
+  var hipY = y - legL;
+
+  g += dot(x, headY, headR, col);
+  g += line(x, shoulderY, x, hipY, col, 10);
+  g += line(x, hipY, x - 20, y, col, 10); // Left leg
+  g += line(x, hipY, x + 20, y, col, 10); // Right leg
+  g += line(x, shoulderY, x - 40, shoulderY + armL, col, 10); // Left arm
+  g += line(x, shoulderY, x + 40, shoulderY + armL, col, 10); // Right arm
+  g += '</g>';
+  return g;
+}
+
+// Escalator step: y is the bottom-front corner of the step.
+// `xOffset` shifts the whole escalator horizontally.
+function escalatorStep(y, col, sw, op, xOffset) {
+  xOffset = xOffset || 0;
+  var x1 = ESC_X - ESC_W / 2 + xOffset;
+  var x2 = ESC_X + ESC_W / 2 + xOffset;
+  var g = '';
+  // Tread (horizontal part)
+  g += line(x1, y - STEP_H, x2, y - STEP_H, col, sw, op);
+  // Riser (vertical part)
+  g += line(x1, y, x1, y - STEP_H, col, sw, op);
+  g += line(x2, y, x2, y - STEP_H, col, sw, op);
+  return g;
+}
+
+// Escalator handrail: x is center of the rail, y1/y2 are start/end Y.
+function escalatorRail(x, y1, y2, col, sw, op) {
+  var railY1 = y1 - RAIL_Y_OFFSET;
+  var railY2 = y2 + RAIL_Y_OFFSET;
+  return rrect(x, (railY1 + railY2) / 2, RAIL_W, railY2 - railY1, RAIL_W / 2, col, op);
+}
+
+// Main escalator structure, can be morphed
+function escalatorStructure(u, xOffset, laneDivision, railOp, stepCol, railCol) {
+  xOffset = xOffset || 0;
+  laneDivision = laneDivision || 0; // 0=no division, 1=full division
+  railOp = railOp == null ? 0.8 : railOp;
+  stepCol = stepCol || WHITE;
+  railCol = railCol || DIM;
+
+  var s = '';
+  var numSteps = Math.ceil((ESC_Y_BOT - ESC_Y_TOP) / STEP_H) + 2; // +2 for off-screen
+  var stepOffset = (u % 1) * STEP_H; // Continuous upward motion
+
+  for (var i = 0; i < numSteps; i++) {
+    var y = ESC_Y_BOT - i * STEP_H + stepOffset;
+    if (y > ESC_Y_TOP - STEP_H && y < ESC_Y_BOT + STEP_H) {
+      s += escalatorStep(y, stepCol, 8, 0.9, xOffset);
+    }
+  }
+
+  // Handrails
+  var railX_L = ESC_X - ESC_W / 2 + RAIL_W / 2 + xOffset;
+  var railX_R = ESC_X + ESC_W / 2 - RAIL_W / 2 + xOffset;
+  s += escalatorRail(railX_L, ESC_Y_TOP, ESC_Y_BOT, railCol, 10, railOp);
+  s += escalatorRail(railX_R, ESC_Y_TOP, ESC_Y_BOT, railCol, 10, railOp);
+
+  // Lane division (morphing hero element)
+  if (laneDivision > 0) {
+    var divX = ESC_X + xOffset;
+    var divW = lerp(0, 8, laneDivision);
+    var divOpacity = lerp(0, 0.5, laneDivision);
+    s += rrect(divX, (ESC_Y_TOP + ESC_Y_BOT) / 2, divW, ESC_Y_BOT - ESC_Y_TOP + 2 * RAIL_Y_OFFSET, divW / 2, WHITE, divOpacity);
+  }
+  return s;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): Basic escalator, general movement. */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  s += escalatorStructure(u * 0.8); // Steps moving up
+
+  // A few generic figures, some standing, some walking
+  var figCount = 5;
+  for (var i = 0; i < figCount; i++) {
+    var yBase = ESC_Y_BOT - 100 - i * 300;
+    var y = yBase - u * 150 + rnd(i) * 50;
+    while (y < ESC_Y_TOP - 100) y += (ESC_Y_BOT - ESC_Y_TOP + 200);
+
+    var x = ESC_X + (rnd(i + 10) - 0.5) * (ESC_W * 0.6);
+    if (rnd(i + 20) < 0.5) { // Roughly half walking
+      s += stickFigure(x, y, WHITE, u * 2 + rnd(i + 30), 0.9);
+    } else {
+      s += standingFigure(x, y, WHITE, 0.9);
+    }
+  }
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): People standing on the right, walking on the left. */
+function scene2(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var division = ramp(u, 0.1, 0.6); // Lane division appears
+  s += escalatorStructure(u * 0.8 + 0.1, 0, division);
+
+  // Stander on the right (amber), walker on the left (blue)
+  var standerY = lerp(ESC_Y_BOT - 100, ESC_Y_TOP + 100, u * 0.3); // Slower movement
+  var walkerY = lerp(ESC_Y_BOT - 100, ESC_Y_TOP + 100, u * 0.7);  // Faster movement
+
+  s += standingFigure(STAND_LANE_X + 40, standerY, AMBER, 1);
+  s += stickFigure(WALK_LANE_X - 40, walkerY, BLUE, u * 3, 1);
+
+  // Other figures in lanes
+  var figCount = 3;
+  for (var i = 0; i < figCount; i++) {
+    var yOffset = i * 400;
+    var yStand = ESC_Y_BOT - 200 - yOffset - u * 100 + rnd(i) * 50;
+    while (yStand < ESC_Y_TOP - 100) yStand += (ESC_Y_BOT - ESC_Y_TOP + 200);
+    s += standingFigure(STAND_LANE_X + 40 + rnd(i + 10) * 20 - 10, yStand, DIM, 0.8);
+
+    var yWalk = ESC_Y_BOT - 200 - yOffset - u * 300 + rnd(i + 20) * 50;
+    while (yWalk < ESC_Y_TOP - 100) yWalk += (ESC_Y_BOT - ESC_Y_TOP + 200);
+    s += stickFigure(WALK_LANE_X - 40 + rnd(i + 30) * 20 - 10, yWalk, DIM, u * 4 + rnd(i + 40), 0.8);
+  }
+
+  // Flow arrows for lanes
+  var flowOp = smooth(ramp(u, 0.5, 0.9));
+  for (var i = 0; i < 3; i++) {
+    var arrowY = lerp(ESC_Y_BOT - 200, ESC_Y_TOP + 100, (u * 0.5 + i / 3) % 1);
+    s += chevron(STAND_LANE_X, arrowY, 20, AMBER, flowOp * 0.7);
+    s += chevron(WALK_LANE_X, arrowY, 20, BLUE, flowOp * 0.7);
+  }
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): The "why" - efficiency, flow. */
+function scene3(u) {
+  var s = '';
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14);
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+
+  s += escalatorStructure(u * 0.8 + 0.2, 0, 1, 0.8, WHITE, DIM); // Full division
+
+  // Stander (amber) and Walker (blue) with clear flow lines
+  var standerY = lerp(ESC_Y_BOT - 100, ESC_Y_TOP + 100, u * 0.3);
+  var walkerY = lerp(ESC_Y_BOT - 100, ESC_Y_TOP + 100, u * 0.7);
+
+  s += standingFigure(STAND_LANE_X + 40, standerY, AMBER, 1);
+  s += stickFigure(WALK_LANE_X - 40, walkerY, BLUE, u * 3, 1);
+
+  // Flow lines for each lane
+  var flowCount = 4;
+  for (var i = 0; i < flowCount; i++) {
+    var flowPhase = (u * 0.4 + i / flowCount) % 1;
+    var flowY = lerp(ESC_Y_BOT, ESC_Y_TOP, flowPhase);
+    var flowOp = 1 - Math.abs(flowPhase - 0.5) * 2; // Fade near ends
+    s += line(STAND_LANE_X - 40, flowY, STAND_LANE_X + 40, flowY, AMBER, 8, flowOp * 0.6);
+
+    flowPhase = (u * 0.8 + i / flowCount) % 1;
+    flowY = lerp(ESC_Y_BOT, ESC_Y_TOP, flowPhase);
+    flowOp = 1 - Math.abs(flowPhase - 0.5) * 2;
+    s += line(WALK_LANE_X - 40, flowY, WALK_LANE_X + 40, flowY, BLUE, 8, flowOp * 0.8);
+  }
+
+  // A "system" ring encompassing both lanes, pulsing
+  var ringOp = (0.3 + 0.7 * Math.sin(u * Math.PI * 4)) * 0.6;
+  s += rrectStroke(ESC_X, CY, ESC_W + 100, ESC_Y_BOT - ESC_Y_TOP + 2 * RAIL_Y_OFFSET + 100, 50, BLUE, 10, ringOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): Congestion without the rule. */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Escalator structure morphs to a single, wider lane
+  var laneMerge = smooth(ramp(u, 0.1, 0.5));
+  var escXOffset = lerp(0, ESC_W / 4, laneMerge); // Shift right for visual balance
+  s += escalatorStructure(u * 0.5 + 0.3, escXOffset, 1 - laneMerge, 0.6, WHITE, DIM);
+
+  // Congested figures, moving slowly, some red
+  var figCount = 8;
+  for (var i = 0; i < figCount; i++) {
+    var yBase = ESC_Y_BOT - 100 - i * 200;
+    var y = yBase - u * 80 + rnd(i) * 40;
+    while (y < ESC_Y_TOP - 100) y += (ESC_Y_BOT - ESC_Y_TOP + 200);
+
+    var x = ESC_X + escXOffset + (rnd(i + 10) - 0.5) * (ESC_W * 0.7 * (1 - laneMerge * 0.5)); // Wider spread
+    var col = WHITE;
+    if (rnd(i + 20) < 0.3 + u * 0.4) col = CORAL; // More red figures appear with time
+    var phase = (rnd(i + 30) < 0.5) ? 0 : u * 0.5; // Some standing, some very slow walk
+    if (phase === 0) s += standingFigure(x, y, col, 0.9);
+    else s += stickFigure(x, y, col, phase, 0.9);
+
+    // Friction/blockage indicators (coral)
+    if (col === CORAL) {
+      var pulseOp = pulse(u, 0.5 + rnd(i) * 0.4, 0.2);
+      s += ring(x, y - 100, 40, CORAL, 8, pulseOp * 0.7);
+    }
+  }
+
+  // Overall congestion indicator
+  var congestionOp = smooth(ramp(u, 0.4, 0.8));
+  var congestionPath = "M " + (ESC_X - ESC_W / 2 + escXOffset) + " " + ESC_Y_BOT +
+                       " L " + (ESC_X - ESC_W / 2 + escXOffset) + " " + ESC_Y_TOP +
+                       " L " + (ESC_X + ESC_W / 2 + escXOffset) + " " + ESC_Y_TOP +
+                       " L " + (ESC_X + ESC_W / 2 + escXOffset) + " " + ESC_Y_BOT + " Z";
+  s += pathTag(congestionPath, CORAL, 0, congestionOp * 0.15, CORAL); // Faint red fill
+  s += ring(CX + escXOffset, CY, 300, CORAL, 12, congestionOp * 0.5); // Large warning ring
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): The benefit - faster overall movement. */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.8, smooth(u));
+  s += '<g ' + camera(scale, 0, lerp(0, 90, smooth(u))) + '>';
+
+  // Escalator returns to two distinct lanes
+  var laneReform = smooth(ramp(u, 0.05, 0.4));
+  var escXOffset = lerp(ESC_W / 4, 0, laneReform);
+  s += escalatorStructure(u * 0.8 + 0.4, escXOffset, laneReform, 0.8, WHITE, DIM);
+
+  // Left lane (walking) with blue figures, fast flow
+  var walkerCount = 4;
+  for (var i = 0; i < walkerCount; i++) {
+    var yWalk = lerp(ESC_Y_BOT - 100, ESC_Y_TOP + 100, (u * 0.7 + rnd(i + 10) * 0.2 + i / walkerCount) % 1);
+    s += stickFigure(WALK_LANE_X - 40, yWalk, BLUE, u * 3 + rnd(i + 20), 1);
+    s += chevron(WALK_LANE_X, yWalk - 100, 24, BLUE, 0.8); // Flow indicator
+  }
+
+  // Right lane (standing) with amber figures, slower flow
+  var standerCount = 3;
+  for (var i = 0; i < standerCount; i++) {
+    var yStand = lerp(ESC_Y_BOT - 100, ESC_Y_TOP + 100, (u * 0.3 + rnd(i + 30) * 0.2 + i / standerCount) % 1);
+    s += standingFigure(STAND_LANE_X + 40, yStand, AMBER, 1);
+    s += chevron(STAND_LANE_X, yStand - 100, 24, AMBER, 0.8, -1); // Opposite direction chevron for "holding position"
+  }
+
+  // Overall system benefit visualization - a large blue arrow encompassing both lanes
+  var benefitOp = smooth(ramp(u, 0.6, 0.9));
+  var pathD = "M " + (WALK_LANE_X - 100) + " " + (ESC_Y_BOT - 100) +
+              " C " + (WALK_LANE_X - 100) + " " + (ESC_Y_BOT - 500) +
+              " " + (STAND_LANE_X + 100) + " " + (ESC_Y_TOP + 500) +
+              " " + (STAND_LANE_X + 100) + " " + (ESC_Y_TOP + 100);
+  s += pathTag(pathD, BLUE, 12, benefitOp * 0.7);
+  s += chevron(CX, ESC_Y_TOP + 150, 40, BLUE, benefitOp * 0.9); // Large arrow at the top
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): The social contract. */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.8, 0.92, smooth(clamp(u / 0.7, 0, 1)));
+  s += '<g ' + camera(scale, 0, lerp(90, 0, smooth(u))) + '>';
+
+  s += escalatorStructure(u * 0.8 + 0.5, 0, 1, 0.8, WHITE, DIM); // Stable, clear lanes
+
+  // Left lane (walking) with blue figures, fast flow
+  var walkerCount = 4;
+  for (var i = 0; i < walkerCount; i++) {
+    var yWalk = lerp(ESC_Y_BOT - 100, ESC_Y_TOP + 100, (u * 0.7 + rnd(i + 10) * 0.2 + i / walkerCount) % 1);
+    s += stickFigure(WALK_LANE_X - 40, yWalk, BLUE, u * 3 + rnd(i + 20), 1);
+    s += chevron(WALK_LANE_X, yWalk - 100, 24, BLUE, 0.8);
+  }
+
+  // Right lane (standing) with amber figures, slower flow
+  var standerCount = 3;
+  for (var i = 0; i < standerCount; i++) {
+    var yStand = lerp(ESC_Y_BOT - 100, ESC_Y_TOP + 100, (u * 0.3 + rnd(i + 30) * 0.2 + i / standerCount) % 1);
+    s += standingFigure(STAND_LANE_X + 40, yStand, AMBER, 1);
+    s += chevron(STAND_LANE_X, yStand - 100, 24, AMBER, 0.8, -1);
+  }
+
+  // A "contract" or "agreement" symbol forming at the top
+  var contractOp = smooth(ramp(u, 0.4, 0.8));
+  var contractY = ESC_Y_TOP - 60;
+  s += ring(CX, contractY, 60, BLUE, 10, contractOp);
+  s += line(CX - 40, contractY, CX + 40, contractY, BLUE, 10, contractOp); // Horizontal bar
+  s += line(CX, contractY - 40, CX, contractY + 40, BLUE, 10, contractOp); // Vertical bar (cross)
+
+  // A final, subtle pulse of the entire system
+  var finalPulse = pulse(u, 0.9, 0.1);
+  s += rrectStroke(CX, CY, ESC_W + 100, ESC_Y_BOT - ESC_Y_TOP + 2 * RAIL_Y_OFFSET + 100, 50, BLUE, 10, finalPulse * 0.5);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
