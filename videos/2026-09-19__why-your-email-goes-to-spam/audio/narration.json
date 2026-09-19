@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You craft the perfect email, a crucial message for an important recipient. You hit send, expecting it to land right in their inbox.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "But it vanishes. No reply. Later, you find out it never even reached them. It went... to the dreaded spam folder.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "Why? You might blame keywords – 'money', 'free', 'urgent'. You picture a simple filter, scanning for those obvious red flags.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "But the system is far more complex. It's not just about your words, it's about you – your sender's reputation.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "It tracks how many recipients open your emails, mark them as 'not spam', or even reply. It remembers your past behavior and your server's history.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "So, to get into the inbox, you need to earn trust. Every interaction, every open, every 'not spam' click, builds your invisible score.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

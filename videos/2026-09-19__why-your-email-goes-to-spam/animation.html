@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Your Email Goes to Spam</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var SENDER_X = 280, INBOX_X = 800;
+var COMPUTER_Y = BOT - 200;
+var EMAIL_Y = CY - 80;
+var FILTER_WALL_X = CX;
+var FILTER_WALL_Y = CY;
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue  -> the system
+var AMBER = "#F2A93B";              // warm amber   -> YOU / your email
+var CORAL = "#FF5B5B";              // coral red    -> naive model / false signals
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+/* Stick figure: head, body, arms, legs */
+function stickFigure(x, y, col, armAngle, legPhase, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = 26;
+  var bodyH = 100;
+  var legL = 70;
+  var armL = 60;
+  var sw = 8;
+
+  // Head
+  g += dot(x, y - bodyH / 2 - headR, headR, col);
+  // Body
+  g += line(x, y - bodyH / 2, x, y + bodyH / 2, col, sw);
+  // Legs
+  var legSwing = Math.sin(legPhase * Math.PI * 2) * 0.4;
+  g += line(x, y + bodyH / 2, x - armL * Math.sin(legSwing), y + bodyH / 2 + legL * Math.cos(legSwing), col, sw);
+  g += line(x, y + bodyH / 2, x + armL * Math.sin(legSwing), y + bodyH / 2 + legL * Math.cos(legSwing), col, sw);
+  // Arms
+  g += line(x, y - bodyH / 4, x + armL * Math.cos(armAngle), y - bodyH / 4 + armL * Math.sin(armAngle), col, sw);
+  g += line(x, y - bodyH / 4, x - armL * Math.cos(armAngle), y - bodyH / 4 + armL * Math.sin(armAngle), col, sw);
+  g += '</g>';
+  return g;
+}
+
+/* Computer: screen and base */
+function computer(x, y, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var screenW = 160, screenH = 100;
+  var baseW = 120, baseH = 16;
+  var standH = 20;
+  g += rrect(x, y - screenH / 2, screenW, screenH, 8, col, 0.9); // Screen
+  g += rrect(x, y + screenH / 2 + standH / 2, 10, standH, 4, col, 0.9); // Stand
+  g += rrect(x, y + screenH / 2 + standH + baseH / 2, baseW, baseH, 6, col, 0.9); // Base
+  g += '</g>';
+  return g;
+}
+
+/* Envelope: rectangle with a V-flap */
+function envelope(x, y, w, h, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 8, col, 0.9);
+  var d = "M " + (x - w / 2) + " " + (y - h / 2) +
+          " L " + x + " " + (y - h / 2 + h / 4) +
+          " L " + (x + w / 2) + " " + (y - h / 2) + " Z";
+  g += pathTag(d, col, 0, 0.9); // Fill for the flap
+  g += line(x - w / 2, y - h / 2, x, y - h / 2 + h / 4, col, 7);
+  g += line(x, y - h / 2 + h / 4, x + w / 2, y - h / 2, col, 7);
+  g += '</g>';
+  return g;
+}
+
+/* Inbox icon: rectangle with an open flap */
+function inboxIcon(x, y, w, h, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y + h / 8, w, h * 0.75, 8, col, 0.9); // Main body
+  g += line(x - w / 2, y - h / 4, x + w / 2, y - h / 4, col, 7); // Top line
+  g += line(x - w / 2, y - h / 4, x, y - h / 2, col, 7); // Flap left
+  g += line(x + w / 2, y - h / 4, x, y - h / 2, col, 7); // Flap right
+  g += '</g>';
+  return g;
+}
+
+/* Generic filter wall */
+function filterWall(x, y, w, h, col, op) {
+  return rrect(x, y, w, h, 20, col, op);
+}
+
+/* Keyword glyphs (no text) */
+function keywordGlyph(x, y, size, type, col, op) {
+  var g = '';
+  var sw = 8;
+  if (type === 'money') { // Two overlapping circles
+    g += dot(x - size * 0.2, y, size * 0.4, col, op);
+    g += dot(x + size * 0.2, y, size * 0.4, col, op);
+  } else if (type === 'free') { // Circle with a bar
+    g += ring(x, y, size * 0.4, col, sw, op);
+    g += line(x - size * 0.3, y, x + size * 0.3, y, col, sw, op);
+  } else if (type === 'urgent') { // Exclamation mark
+    g += line(x, y - size * 0.4, x, y + size * 0.1, col, sw, op);
+    g += dot(x, y + size * 0.3, size * 0.1, col, op);
+  }
+  return g;
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var figureY = COMPUTER_Y + 140;
+  var envelopeW = 120, envelopeH = 80;
+
+  var typePhase = Math.sin(u * Math.PI * 4) * 0.5 + 0.5; // For arm movement
+  var armAngle = lerp(-0.7, -0.2, typePhase); // Typing motion
+  s += stickFigure(SENDER_X, figureY, AMBER, armAngle, 0);
+  s += computer(SENDER_X, COMPUTER_Y, WHITE);
+
+  var envelopeStart = SENDER_X + 100;
+  var envelopeEnd = CX; // Moves towards the center for now
+  var envelopeX = lerp(envelopeStart, envelopeEnd, easeOut(ramp(u, 0.1, 0.7)));
+  var envelopeOp = ramp(u, 0.0, 0.1);
+  if (u > 0.1) s += envelope(envelopeX, EMAIL_Y, envelopeW, envelopeH, AMBER, envelopeOp);
+
+  s += inboxIcon(INBOX_X, EMAIL_Y, 140, 100, DIM, 0.6); // Distant inbox
+
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var figureY = COMPUTER_Y + 140;
+  var envelopeW = 120, envelopeH = 80;
+  
+  s += stickFigure(SENDER_X, figureY, AMBER, -0.4, 0); // Static figure
+  s += computer(SENDER_X, COMPUTER_Y, WHITE, 0.8);
+
+  var envelopeStart = CX;
+  var envelopeEnd = FILTER_WALL_X;
+  var envelopeX = lerp(envelopeStart, envelopeEnd, easeOut(ramp(u, 0.0, 0.3)));
+  var envelopeOp = 1 - ramp(u, 0.3, 0.4); // Fades out on impact
+
+  // Envelope movement and impact
+  if (u < 0.4) s += envelope(envelopeX, EMAIL_Y, envelopeW, envelopeH, AMBER, envelopeOp);
+  // Puff on impact
+  var puffOp = ramp(u, 0.3, 0.5);
+  if (puffOp > 0) s += ring(FILTER_WALL_X, EMAIL_Y, 40 + puffOp * 30, DIM, 10, puffOp);
+
+  // Filter wall
+  s += filterWall(FILTER_WALL_X, FILTER_WALL_Y, 400, BOT - TOP, DIM, 0.9);
+
+  s += inboxIcon(INBOX_X, EMAIL_Y, 140, 100, DIM, 0.6); // Empty inbox
+  
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var figureY = COMPUTER_Y + 140;
+  var wallW = 400, wallH = BOT - TOP;
+
+  var scale = lerp(1.0, 1.1, smooth(ramp(u, 0.2, 0.6)));
+  var shake = Math.sin(u * 30) * 5 * pulse(u, 0.5, 0.2);
+  s += '<g ' + camera(scale, shake, 0) + '>';
+
+  s += stickFigure(SENDER_X, figureY, AMBER, 0.5, 0); // Pointing
+  s += computer(SENDER_X, COMPUTER_Y, WHITE, 0.6);
+
+  // Filter wall with coral keywords
+  s += filterWall(FILTER_WALL_X, FILTER_WALL_Y, wallW, wallH, DIM, 0.9);
+
+  var keywordOp = ramp(u, 0.1, 0.8);
+  var shimmer = Math.sin(u * 20) * 0.05;
+  if (keywordOp > 0) {
+    s += keywordGlyph(FILTER_WALL_X, FILTER_WALL_Y - 180, 60, 'free', CORAL, keywordOp * (0.7 + shimmer));
+    s += keywordGlyph(FILTER_WALL_X, FILTER_WALL_Y, 60, 'money', CORAL, keywordOp * (0.7 + shimmer));
+    s += keywordGlyph(FILTER_WALL_X, FILTER_WALL_Y + 180, 60, 'urgent', CORAL, keywordOp * (0.7 + shimmer));
+  }
+
+  s += inboxIcon(INBOX_X, EMAIL_Y, 140, 100, DIM, 0.4);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var figureY = COMPUTER_Y + 140;
+  var wallW = 400, wallH = BOT - TOP;
+
+  s += stickFigure(SENDER_X, figureY, AMBER, -0.4, 0);
+  s += computer(SENDER_X, COMPUTER_Y, WHITE, 0.4);
+
+  // Filter wall morphs into blue network
+  var coralOp = 1 - ramp(u, 0.0, 0.3);
+  var blueOp = ramp(u, 0.1, 0.5);
+
+  if (coralOp > 0.02) {
+    s += filterWall(FILTER_WALL_X, FILTER_WALL_Y, wallW, wallH, DIM, 0.9 * coralOp);
+    s += keywordGlyph(FILTER_WALL_X, FILTER_WALL_Y - 180, 60, 'free', CORAL, coralOp);
+    s += keywordGlyph(FILTER_WALL_X, FILTER_WALL_Y, 60, 'money', CORAL, coralOp);
+    s += keywordGlyph(FILTER_WALL_X, FILTER_WALL_Y + 180, 60, 'urgent', CORAL, coralOp);
+  }
+
+  if (blueOp > 0.02) {
+    var networkScale = lerp(0.8, 1.0, smooth(blueOp));
+    s += '<g transform="scale(' + networkScale + ')">';
+    s += rrect(FILTER_WALL_X, FILTER_WALL_Y, wallW, wallH, 20, BLUE, 0.2 * blueOp); // Base glow
+
+    // Network nodes and lines
+    var numNodes = 8;
+    for (var i = 0; i < numNodes; i++) {
+      var nodeX = FILTER_WALL_X + Math.sin(i * 0.8 + u * 2) * (wallW / 3) * (0.8 + rnd(i) * 0.2);
+      var nodeY = FILTER_WALL_Y + Math.cos(i * 0.8 + u * 2) * (wallH / 3) * (0.8 + rnd(i + 1) * 0.2);
+      s += dot(nodeX, nodeY, 12, BLUE, 0.8 * blueOp);
+      if (i > 0) {
+        var prevX = FILTER_WALL_X + Math.sin((i - 1) * 0.8 + u * 2) * (wallW / 3) * (0.8 + rnd(i - 1) * 0.2);
+        var prevY = FILTER_WALL_Y + Math.cos((i - 1) * 0.8 + u * 2) * (wallH / 3) * (0.8 + rnd(i) * 0.2);
+        s += line(prevX, prevY, nodeX, nodeY, BLUE, 4, 0.6 * blueOp);
+      }
+    }
+    s += '</g>';
+  }
+
+  s += inboxIcon(INBOX_X, EMAIL_Y, 140, 100, DIM, 0.2);
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var figureY = COMPUTER_Y + 140;
+  var wallW = 400, wallH = BOT - TOP;
+
+  s += stickFigure(SENDER_X, figureY, AMBER, -0.4, 0);
+  s += computer(SENDER_X, COMPUTER_Y, WHITE, 0.3);
+
+  s += rrect(FILTER_WALL_X, FILTER_WALL_Y, wallW, wallH, 20, BLUE, 0.2); // Base glow
+
+  // Network nodes and lines (static for this scene)
+  var numNodes = 8;
+  for (var i = 0; i < numNodes; i++) {
+    var nodeX = FILTER_WALL_X + Math.sin(i * 0.8 + 0.5 * 2) * (wallW / 3) * (0.8 + rnd(i) * 0.2);
+    var nodeY = FILTER_WALL_Y + Math.cos(i * 0.8 + 0.5 * 2) * (wallH / 3) * (0.8 + rnd(i + 1) * 0.2);
+    s += dot(nodeX, nodeY, 12, BLUE, 0.8);
+    if (i > 0) {
+      var prevX = FILTER_WALL_X + Math.sin((i - 1) * 0.8 + 0.5 * 2) * (wallW / 3) * (0.8 + rnd(i - 1) * 0.2);
+      var prevY = FILTER_WALL_Y + Math.cos((i - 1) * 0.8 + 0.5 * 2) * (wallH / 3) * (0.8 + rnd(i) * 0.2);
+      s += line(prevX, prevY, nodeX, nodeY, BLUE, 4, 0.6);
+    }
+  }
+
+  // Amber dots (interactions) flowing into the network
+  var flowProgress = easeIn(u);
+  var dotCount = 10;
+  for (var j = 0; j < dotCount; j++) {
+    var startX = SENDER_X + 100 + rnd(j * 3) * 100;
+    var startY = COMPUTER_Y - 50 + rnd(j * 5) * 100;
+    var targetX = FILTER_WALL_X + Math.sin(j * 1.2 + u * 4) * (wallW / 4) * (0.5 + rnd(j * 7) * 0.5);
+    var targetY = FILTER_WALL_Y + Math.cos(j * 1.2 + u * 4) * (wallH / 4) * (0.5 + rnd(j * 9) * 0.5);
+    var dotX = lerp(startX, targetX, flowProgress);
+    var dotY = lerp(startY, targetY, flowProgress);
+    var dotR = lerp(8, 4, flowProgress);
+    var dotCol = (rnd(j) < 0.7) ? AMBER : DIM; // Some bright, some dim
+    s += dot(dotX, dotY, dotR, dotCol, 0.8 * (1 - flowProgress));
+  }
+
+  // Reputation meter/gauge
+  var meterFill = smooth(ramp(u, 0.2, 0.9));
+  var meterX = FILTER_WALL_X, meterY = FILTER_WALL_Y + wallH / 2 - 80;
+  var meterW = wallW * 0.6, meterH = 30;
+  s += rrectStroke(meterX, meterY, meterW, meterH, 8, AMBER, 4, 0.6);
+  s += rrect(meterX - meterW / 2 + meterW * meterFill / 2, meterY, meterW * meterFill, meterH - 8, 6, AMBER, 0.9);
+  s += rrect(meterX - meterW / 2 + meterW * meterFill, meterY, 16, meterH + 10, 4, AMBER, 0.9); // Moving marker
+
+  s += inboxIcon(INBOX_X, EMAIL_Y, 140, 100, DIM, 0.2);
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var figureY = COMPUTER_Y + 140;
+  var envelopeW = 120, envelopeH = 80;
+  var wallW = 400, wallH = BOT - TOP;
+
+  s += stickFigure(SENDER_X, figureY, AMBER, -0.4, 0);
+  s += computer(SENDER_X, COMPUTER_Y, WHITE);
+
+  var networkOpen = smooth(ramp(u, 0.3, 0.7));
+  var leftWallX = FILTER_WALL_X - wallW / 2 + (wallW / 4) * networkOpen;
+  var rightWallX = FILTER_WALL_X + wallW / 2 - (wallW / 4) * networkOpen;
+
+  // Network base morphing to open
+  s += rrect(leftWallX + (wallW / 4) * networkOpen / 2, FILTER_WALL_Y, wallW / 2 - (wallW / 4) * networkOpen, wallH, 20, BLUE, 0.2);
+  s += rrect(rightWallX - (wallW / 4) * networkOpen / 2, FILTER_WALL_Y, wallW / 2 - (wallW / 4) * networkOpen, wallH, 20, BLUE, 0.2);
+
+  // Network lines parting
+  var numLines = 5;
+  for (var i = 0; i < numLines; i++) {
+    var lineY = TOP + 100 + i * ((BOT - TOP - 200) / (numLines - 1));
+    var lineX1 = lerp(FILTER_WALL_X - wallW / 2, leftWallX, networkOpen);
+    var lineX2 = lerp(FILTER_WALL_X + wallW / 2, rightWallX, networkOpen);
+    s += line(lineX1, lineY, lineX2, lineY, BLUE, 4, 0.6);
+  }
+
+  // New amber envelope
+  var envelopeStart = SENDER_X + 100;
+  var envelopeMid = FILTER_WALL_X;
+  var envelopeEnd = INBOX_X;
+  var envelopeX, envelopeOp = 1;
+
+  if (u < 0.5) { // Approaching filter
+    envelopeX = lerp(envelopeStart, envelopeMid, easeOut(ramp(u, 0.0, 0.5)));
+  } else { // Passing through and going to inbox
+    envelopeX = lerp(envelopeMid, envelopeEnd, easeOut(ramp(u, 0.5, 0.9)));
+  }
+  s += envelope(envelopeX, EMAIL_Y, envelopeW, envelopeH, AMBER, envelopeOp);
+
+  // Inbox icon glows when email arrives
+  var inboxGlow = ramp(u, 0.8, 0.9);
+  s += inboxIcon(INBOX_X, EMAIL_Y, 140, 100, WHITE, 0.6 + inboxGlow * 0.4);
+  if (inboxGlow > 0) s += ring(INBOX_X, EMAIL_Y, 70 + inboxGlow * 20, WHITE, 5, inboxGlow * 0.8);
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "id": "why-your-email-goes-to-spam",
+  "slug": "2026-09-19__why-your-email-goes-to-spam",
+  "title_working": "Why Your Email Goes to Spam",
+  "system": "reputational scoring and filtering algorithms",
+  "cluster": "platforms-and-algorithms",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-09-19T10:51:34+00:00",
+  "produced_at": "2026-09-19T10:55:48+00:00",
+  "verify": "PASS",
+  "takeaway": "Email filters don't just scan for keywords; they silently judge your sender reputation based on past interactions.",
+  "animation_source": "llm"
+}

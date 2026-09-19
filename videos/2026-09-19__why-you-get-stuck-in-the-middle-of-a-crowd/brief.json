@@ -1,0 +1,15 @@
+{
+  "id": "why-you-get-stuck-in-the-middle-of-a-crowd",
+  "slug": "2026-09-19__why-you-get-stuck-in-the-middle-of-a-crowd",
+  "title_working": "Why You Get Stuck in a Crowd — Invisible Systems",
+  "system": "jam formation from localized density fluctuations",
+  "cluster": "traffic-and-crowds",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-09-19T10:47:42+00:00",
+  "produced_at": "2026-09-19T10:51:30+00:00",
+  "verify": "PASS",
+  "takeaway": "Crowd jams are often emergent properties of density fluctuations, not just individual behavior.",
+  "animation_source": "llm"
+}

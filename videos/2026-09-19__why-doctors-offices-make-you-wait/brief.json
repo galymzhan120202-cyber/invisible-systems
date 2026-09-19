@@ -1,0 +1,15 @@
+{
+  "id": "why-doctors-offices-make-you-wait",
+  "slug": "2026-09-19__why-doctors-offices-make-you-wait",
+  "title_working": "Why Doctor's Offices Make You Wait",
+  "system": "buffering against unpredictable appointment durations",
+  "cluster": "queues-and-waiting",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-09-19T10:55:51+00:00",
+  "produced_at": "2026-09-19T11:05:35+00:00",
+  "verify": "PASS",
+  "takeaway": "Doctor's offices build in waiting time as a necessary buffer to ensure every patient receives the care they need, rather than strictly sticking to a schedule.",
+  "animation_source": "llm"
+}

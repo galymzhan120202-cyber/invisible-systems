@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Doctor's Offices Make You Wait</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+var LEFT_COL = CX - 200;            // Left column for patient/clock
+var RIGHT_COL = CX + 200;           // Right column for timeline/slots
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary elements
+var BLUE  = "#4C86F0";              // signal blue  -> the system / buffer
+var AMBER = "#F2A93B";              // warm amber   -> YOU / patient
+var CORAL = "#FF5B5B";              // coral red    -> frustration / delay / overrun
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+/* Stick figure patient */
+function patient(x, y, col, pose, op) { // pose: 'stand', 'sit', 'frustrated', 'happy', 'walk'
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = 28;
+  var bodyLen = 80;
+  var armLen = 50;
+  var legLen = 60;
+  var sw = 8;
+
+  g += dot(x, y - headR - bodyLen / 2, headR, col); // Head
+
+  if (pose === 'stand' || pose === 'walk' || pose === 'happy') {
+    g += line(x, y - bodyLen / 2, x, y + bodyLen / 2, col, sw); // Body
+    g += line(x, y - bodyLen / 2 + 10, x - armLen, y - bodyLen / 2 + 10 + (pose === 'walk' ? 20 : 0), col, sw); // Left arm
+    g += line(x, y - bodyLen / 2 + 10, x + armLen, y - bodyLen / 2 + 10 - (pose === 'walk' ? 20 : 0), col, sw); // Right arm
+    g += line(x, y + bodyLen / 2, x - 20, y + bodyLen / 2 + legLen, col, sw); // Left leg
+    g += line(x, y + bodyLen / 2, x + 20, y + bodyLen / 2 + legLen, col, sw); // Right leg
+  } else if (pose === 'sit' || pose === 'frustrated') {
+    var sitY = y + (pose === 'frustrated' ? 30 : 20);
+    g += line(x, sitY - bodyLen / 2, x, sitY + 10, col, sw); // Body
+    g += line(x, sitY - bodyLen / 2 + 10, x - armLen * 0.7, sitY - bodyLen / 2 + 10 + (pose === 'frustrated' ? 30 : 0), col, sw); // Left arm
+    g += line(x, sitY - bodyLen / 2 + 10, x + armLen * 0.7, sitY - bodyLen / 2 + 10 + (pose === 'frustrated' ? 30 : 0), col, sw); // Right arm
+    g += line(x - 20, sitY + 10, x - 20 - legLen * 0.8, sitY + 10, col, sw); // Left leg (bent)
+    g += line(x + 20, sitY + 10, x + 20 + legLen * 0.8, sitY + 10, col, sw); // Right leg (bent)
+    g += rrect(x, sitY + 40 + legLen * 0.8 / 2, 100, 30, 10, DIM, 0.7); // Bench
+    if (pose === 'frustrated') {
+      g += pathTag("M " + (x - 12) + " " + (sitY - headR - bodyLen / 2 + 12) + " Q " + x + " " + (sitY - headR - bodyLen / 2 + 2) + " " + (x + 12) + " " + (sitY - headR - bodyLen / 2 + 12), WHITE, 4); // Frown
+    }
+  }
+  g += '</g>';
+  return g;
+}
+
+/* Simple clock */
+function clock(x, y, r, hour, minute, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, r, col, 8);
+  // Hour hand
+  var hourAngle = (hour % 12 + minute / 60) * 30 - 90; // degrees
+  g += line(x, y, x + r * 0.5 * Math.cos(hourAngle * Math.PI / 180), y + r * 0.5 * Math.sin(hourAngle * Math.PI / 180), col, 8);
+  // Minute hand
+  var minuteAngle = minute * 6 - 90; // degrees
+  g += line(x, y, x + r * 0.8 * Math.cos(minuteAngle * Math.PI / 180), y + r * 0.8 * Math.sin(minuteAngle * Math.PI / 180), col, 6);
+  g += dot(x, y, 10, col); // Center dot
+  g += '</g>';
+  return g;
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): The Ideal Schedule */
+function scene1(u) {
+  var s = '';
+  var patientY = lerp(BOT + 100, BOT - 100, easeOut(ramp(u, 0.0, 0.2)));
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += patient(LEFT_COL, patientY, AMBER, 'stand', 1);
+
+  // Clock
+  s += clock(LEFT_COL, TOP + 200, 80, 9, lerp(0, 0, u), WHITE, 1); // Stays at 9:00
+
+  // Timeline slots
+  var slotHeight = 160;
+  var numSlots = 5;
+  var totalTimelineHeight = numSlots * slotHeight;
+  var timelineY = CY - totalTimelineHeight / 2 + 100;
+  var slotOpacity = lerp(0.2, 0.8, ramp(u, 0.1, 0.4));
+
+  for (var i = 0; i < numSlots; i++) {
+    s += rrect(RIGHT_COL, timelineY + slotHeight / 2 + i * slotHeight, 180, slotHeight - 10, 12, WHITE, slotOpacity);
+    s += rrectStroke(RIGHT_COL, timelineY + slotHeight / 2 + i * slotHeight, 180, slotHeight - 10, 12, WHITE, 7, slotOpacity * 1.2);
+  }
+  // Highlight patient's slot (e.g., 2nd slot)
+  var highlightOp = lerp(0, 1, ramp(u, 0.5, 0.8));
+  s += rrectStroke(RIGHT_COL, timelineY + slotHeight / 2 + 1 * slotHeight, 180, slotHeight - 10, 12, AMBER, 10, highlightOp);
+  s += line(RIGHT_COL - 120, timelineY + slotHeight / 2 + 1 * slotHeight, RIGHT_COL - 70, timelineY + slotHeight / 2 + 1 * slotHeight, AMBER, 8, highlightOp); // Arrow pointing to slot
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): The First Delay */
+function scene2(u) {
+  var s = '';
+  var patientY = BOT - 100;
+  var clockY = TOP + 200;
+  var slotHeight = 160;
+  var numSlots = 5;
+  var totalTimelineHeight = numSlots * slotHeight;
+  var timelineY = CY - totalTimelineHeight / 2 + 100;
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += patient(LEFT_COL, patientY, AMBER, 'sit', 1);
+
+  // Clock: time advances
+  var minuteAdv = lerp(0, 20, easeOut(u)); // 9:00 to 9:20
+  s += clock(LEFT_COL, clockY, 80, 9, minuteAdv, WHITE, 1);
+
+  // Timeline slots: previous slot expands, others shift
+  var overrun = lerp(0, 80, easeOut(ramp(u, 0.2, 0.7))); // Previous slot runs 80px long
+  var currentSlotIdx = 1; // Patient's slot is the second one (index 1)
+
+  var currentSlotY = timelineY;
+  for (var i = 0; i < numSlots; i++) {
+    var h = slotHeight - 10;
+    var col = WHITE;
+    var strokeCol = WHITE;
+    var strokeW = 7;
+
+    if (i < currentSlotIdx) { // Slots before patient's
+      if (i === currentSlotIdx - 1) { // The slot immediately before patient's
+        h += overrun;
+        col = CORAL;
+        strokeCol = CORAL;
+        strokeW = 10;
+      } else {
+        col = DIM;
+      }
+    } else if (i === currentSlotIdx) { // Patient's slot
+      strokeCol = AMBER;
+      strokeW = 10;
+    } else { // Slots after patient's
+      col = DIM;
+    }
+
+    s += rrect(RIGHT_COL, currentSlotY + h / 2, 180, h, 12, col, 0.8);
+    s += rrectStroke(RIGHT_COL, currentSlotY + h / 2, 180, h, 12, strokeCol, strokeW, 1);
+    currentSlotY += h;
+  }
+
+  // Frustration glyph for patient
+  var frownOp = ramp(u, 0.6, 0.9);
+  s += pathTag("M " + (LEFT_COL - 20) + " " + (patientY - 140) + " Q " + LEFT_COL + " " + (patientY - 160) + " " + (LEFT_COL + 20) + " " + (patientY - 140), CORAL, 6, frownOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): Cascading Delays */
+function scene3(u) {
+  var s = '';
+  var patientY = BOT - 100;
+  var clockY = TOP + 200;
+  var slotHeight = 160;
+  var numSlots = 5;
+  var totalTimelineHeight = numSlots * slotHeight;
+  var timelineY = CY - totalTimelineHeight / 2 + 100;
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += patient(LEFT_COL, patientY, AMBER, 'frustrated', 1);
+
+  // Clock: time advances further
+  var minuteAdv = lerp(20, 50, easeOut(u)); // 9:20 to 9:50
+  s += clock(LEFT_COL, clockY, 80, 9, minuteAdv, WHITE, 1);
+
+  // Timeline slots: multiple previous slots expand, others shift more
+  var overrun1 = lerp(80, 120, easeOut(ramp(u, 0.0, 0.5))); // 1st slot before patient
+  var overrun2 = lerp(0, 70, easeOut(ramp(u, 0.3, 0.8))); // 2nd slot before patient
+  var currentSlotIdx = 2; // Patient's slot is now effectively the third one (index 2) due to shifts
+
+  var currentSlotY = timelineY;
+  for (var i = 0; i < numSlots; i++) {
+    var h = slotHeight - 10;
+    var col = WHITE;
+    var strokeCol = WHITE;
+    var strokeW = 7;
+
+    if (i < currentSlotIdx) {
+      if (i === currentSlotIdx - 1) { h += overrun1; col = CORAL; strokeCol = CORAL; strokeW = 10; }
+      else if (i === currentSlotIdx - 2) { h += overrun2; col = CORAL; strokeCol = CORAL; strokeW = 10; }
+      else { col = DIM; }
+    } else if (i === currentSlotIdx) {
+      strokeCol = AMBER;
+      strokeW = 10;
+    } else {
+      col = DIM;
+    }
+
+    s += rrect(RIGHT_COL, currentSlotY + h / 2, 180, h, 12, col, 0.8);
+    s += rrectStroke(RIGHT_COL, currentSlotY + h / 2, 180, h, 12, strokeCol, strokeW, 1);
+    currentSlotY += h;
+  }
+
+  // Accumulated delay visualization (coral bar)
+  var totalOverrun = overrun1 + overrun2;
+  if (totalOverrun > 0) {
+    var barHeight = lerp(0, 180, smooth(u));
+    s += rrect(LEFT_COL + 100, CY + 200 + barHeight / 2, 40, barHeight, 10, CORAL, 0.7);
+    s += ring(LEFT_COL + 100, CY + 200 + barHeight, 20, CORAL, 5, 0.9 * pulse(u, 0.5, 0.4));
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): The Naive Solution (No Buffers) */
+function scene4(u) {
+  var s = '';
+  var patientY = BOT - 100;
+  var clockY = TOP + 200;
+  var slotHeight = 160;
+  var numSlots = 5;
+  var totalTimelineHeight = numSlots * slotHeight;
+  var timelineY = CY - totalTimelineHeight / 2 + 100;
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += patient(LEFT_COL, patientY, AMBER, 'frustrated', 1);
+
+  // Clock: time advances, showing continued delay
+  var minuteAdv = lerp(50, 60, easeOut(u)); // 9:50 to 10:00
+  s += clock(LEFT_COL, clockY, 80, 9 + Math.floor(minuteAdv / 60), minuteAdv % 60, WHITE, 1);
+
+  // Timeline slots: tightly packed, then one overruns and causes immediate stress
+  var compress = smooth(ramp(u, 0.0, 0.3));
+  var tightSlotHeight = slotHeight - lerp(0, 30, compress); // Reduce height to show tight packing
+  var currentSlotY = timelineY;
+  var overrunEffect = ramp(u, 0.5, 0.9);
+  var overrunAmount = lerp(0, 100, overrunEffect); // One slot overruns
+  var stressOp = lerp(0, 1, overrunEffect);
+
+  for (var i = 0; i < numSlots; i++) {
+    var h = tightSlotHeight - 10;
+    var col = WHITE;
+    var strokeCol = WHITE;
+    var strokeW = 7;
+
+    if (i === 0) { // First slot overruns
+      h += overrunAmount;
+      col = CORAL;
+      strokeCol = CORAL;
+      strokeW = 10;
+    } else if (i === 1) { // Second slot (patient's) is immediately impacted
+      strokeCol = AMBER;
+      strokeW = 10;
+    } else {
+      col = DIM;
+    }
+
+    s += rrect(RIGHT_COL, currentSlotY + h / 2, 180, h, 12, col, 0.8);
+    s += rrectStroke(RIGHT_COL, currentSlotY + h / 2, 180, h, 12, strokeCol, strokeW, 1);
+    currentSlotY += h;
+
+    // Stress glyph at the overlap point
+    if (i === 0 && overrunEffect > 0.1) {
+      s += pathTag("M " + (RIGHT_COL - 30) + " " + (currentSlotY - 20) + " L " + (RIGHT_COL - 10) + " " + (currentSlotY + 10) + " L " + (RIGHT_COL + 10) + " " + (currentSlotY - 20) + " L " + (RIGHT_COL + 30) + " " + (currentSlotY + 10), CORAL, 8, stressOp);
+    }
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): Introducing Buffers */
+function scene5(u) {
+  var s = '';
+  var patientY = BOT - 100;
+  var clockY = TOP + 200;
+  var slotHeight = 160;
+  var bufferHeight = lerp(0, 60, easeOut(ramp(u, 0.2, 0.6))); // Buffers grow
+  var numSlots = 4; // Fewer main slots to make space for buffers
+  var totalTimelineHeight = numSlots * slotHeight + (numSlots - 1) * bufferHeight;
+  var timelineY = CY - totalTimelineHeight / 2 + 100;
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += patient(LEFT_COL, patientY, AMBER, 'sit', 1);
+
+  // Clock: time stabilizes or slowly advances
+  s += clock(LEFT_COL, clockY, 80, 10, lerp(0, 10, u), WHITE, 1);
+
+  // Timeline slots with buffers
+  var currentSlotY = timelineY;
+  var overrunAmount = lerp(0, 60, easeOut(ramp(u, 0.6, 0.9))); // One slot overruns
+  var patientSlotIdx = 1; // Patient's slot
+
+  for (var i = 0; i < numSlots; i++) {
+    var h = slotHeight - 10;
+    var col = WHITE;
+    var strokeCol = WHITE;
+    var strokeW = 7;
+
+    if (i === 0) { // First slot overruns
+      h += overrunAmount;
+      col = CORAL;
+      strokeCol = CORAL;
+      strokeW = 10;
+    } else if (i === patientSlotIdx) { // Patient's slot
+      strokeCol = AMBER;
+      strokeW = 10;
+    } else {
+      col = DIM;
+    }
+
+    s += rrect(RIGHT_COL, currentSlotY + h / 2, 180, h, 12, col, 0.8);
+    s += rrectStroke(RIGHT_COL, currentSlotY + h / 2, 180, h, 12, strokeCol, strokeW, 1);
+    currentSlotY += h;
+
+    // Add buffer if not the last slot
+    if (i < numSlots - 1) {
+      var bufferOp = lerp(0.2, 0.8, ramp(u, 0.3, 0.7));
+      s += rrect(RIGHT_COL, currentSlotY + bufferHeight / 2, 180, bufferHeight, 12, BLUE, bufferOp);
+      s += rrectStroke(RIGHT_COL, currentSlotY + bufferHeight / 2, 180, bufferHeight, 12, BLUE, 7, bufferOp * 1.2);
+
+      // Show buffer absorbing overrun
+      if (i === 0 && overrunAmount > 0) {
+        var absorbY = currentSlotY - overrunAmount / 2 + bufferHeight / 2;
+        var absorbR = lerp(0, 40, ramp(u, 0.7, 1.0));
+        s += ring(RIGHT_COL, absorbY, absorbR, BLUE, 8, 0.8 * (1 - ramp(u, 0.9, 1.0))); // Absorption ripple
+      }
+      currentSlotY += bufferHeight;
+    }
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): The System at Work (Buffering) */
+function scene6(u) {
+  var s = '';
+  var patientY = lerp(BOT - 100, CY + 100, easeOut(ramp(u, 0.4, 0.8))); // Patient moves to be seen
+  var patientPose = (u < 0.4) ? 'sit' : (u < 0.8 ? 'walk' : 'happy');
+  var clockY = TOP + 200;
+  var slotHeight = 160;
+  var bufferHeight = 60;
+  var numSlots = 4;
+  var totalTimelineHeight = numSlots * slotHeight + (numSlots - 1) * bufferHeight;
+  var timelineY = CY - totalTimelineHeight / 2 + 100;
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += patient(LEFT_COL, patientY, AMBER, patientPose, 1);
+
+  // Clock: time advances, showing patient being seen
+  s += clock(LEFT_COL, clockY, 80, 10, lerp(10, 30, u), WHITE, 1);
+
+  // Dynamic timeline with buffers and absorbed overruns
+  var currentSlotY = timelineY;
+  var patientSlotIdx = 1; // Patient's slot
+
+  for (var i = 0; i < numSlots; i++) {
+    var h = slotHeight - 10;
+    var col = WHITE;
+    var strokeCol = WHITE;
+    var strokeW = 7;
+    var overrun = 0;
+
+    // Simulate some random overruns being absorbed
+    if (i === 0) overrun = lerp(60, 20, smooth(u)); // First slot had a big overrun, now less
+    if (i === 2) overrun = lerp(0, 40, smooth(u - 0.2)); // Third slot has a new overrun
+
+    h += overrun;
+    if (overrun > 0) { col = CORAL; strokeCol = CORAL; strokeW = 10; }
+
+    if (i === patientSlotIdx) { // Patient's slot is reached
+      strokeCol = AMBER;
+      strokeW = 10;
+      if (u > 0.8) { // Patient is "in" their slot
+        s += pathTag("M " + (LEFT_COL - 20) + " " + (patientY - 140) + " Q " + LEFT_COL + " " + (patientY - 120) + " " + (LEFT_COL + 20) + " " + (patientY - 140), AMBER, 6, ramp(u, 0.8, 1.0)); // Smile
+      }
+    } else if (overrun === 0) {
+      col = DIM;
+    }
+
+    s += rrect(RIGHT_COL, currentSlotY + h / 2, 180, h, 12, col, 0.8);
+    s += rrectStroke(RIGHT_COL, currentSlotY + h / 2, 180, h, 12, strokeCol, strokeW, 1);
+    currentSlotY += h;
+
+    // Add buffer if not the last slot
+    if (i < numSlots - 1) {
+      var bufferOverrun = Math.min(overrun, bufferHeight); // How much buffer is used
+      var remainingBuffer = bufferHeight - bufferOverrun;
+      
+      // Draw used buffer (coral) and remaining buffer (blue)
+      if (bufferOverrun > 0) {
+        s += rrect(RIGHT_COL, currentSlotY - bufferOverrun / 2, 180, bufferOverrun, 12, CORAL, 0.5);
+      }
+      if (remainingBuffer > 0) {
+        s += rrect(RIGHT_COL, currentSlotY + remainingBuffer / 2, 180, remainingBuffer, 12, BLUE, 0.8);
+      }
+      s += rrectStroke(RIGHT_COL, currentSlotY + bufferHeight / 2 - bufferOverrun / 2, 180, bufferHeight, 12, BLUE, 7, 1);
+
+      currentSlotY += bufferHeight;
+    }
+  }
+
+  // Final stable state: patient walking towards the "doctor's room" (implied by the end of the timeline)
+  // The patient's position is now aligned with their slot's actual start time on the adjusted timeline.
+  var patientTargetY = timelineY + patientSlotIdx * (slotHeight + bufferHeight) + (slotHeight + bufferHeight) / 2;
+  s += patient(LEFT_COL, lerp(patientY, patientTargetY, ramp(u, 0.8, 1.0)), AMBER, 'walk', 1);
+
+  s += '</g>';
+  return s;
+}
+
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
