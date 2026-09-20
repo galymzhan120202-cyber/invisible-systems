@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You're excited for a new app. But first, a wall of text: the Terms of Service. A dense document demanding your agreement.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "Only one path forward: a stark 'I Agree' button. The app stays locked, your desired experience just out of reach, until you commit.",
+    "rate": "+5%",
+    "start": 9.8
+  },
+  {
+    "id": "scene-03",
+    "text": "Most scroll past, thinking it's just formality. A silly legal hoop no one reads. We believe it's a burden, not a real contract.",
+    "rate": "+5%",
+    "start": 19.8
+  },
+  {
+    "id": "scene-04",
+    "text": "But it's more. These terms are the invisible system, a signal blue shield defining what you can and can't do, and the company's responsibilities.",
+    "rate": "+5%",
+    "start": 29.8
+  },
+  {
+    "id": "scene-05",
+    "text": "By clicking 'Agree,' you're granting explicit permission. You trade certain rights, like data usage or dispute resolution, for access to their service.",
+    "rate": "+5%",
+    "start": 39.8
+  },
+  {
+    "id": "scene-06",
+    "text": "You'll still click 'Agree,' because the app is too useful. But now, you understand the silent, binding agreement underpinning every online interaction.",
+    "rate": "+5%",
+    "start": 49.8
+  }
+]

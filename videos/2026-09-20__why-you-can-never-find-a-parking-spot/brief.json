@@ -1,0 +1,15 @@
+{
+  "id": "why-you-can-never-find-a-parking-spot",
+  "slug": "2026-09-20__why-you-can-never-find-a-parking-spot",
+  "title_working": "Why You Can Never Find a Parking Spot",
+  "system": "supply-demand mismatch and search friction",
+  "cluster": "queues-and-waiting",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "failed",
+  "created_at": "2026-09-20T11:12:57+00:00",
+  "produced_at": "2026-09-20T11:18:40+00:00",
+  "verify": "FAIL",
+  "takeaway": "Parking is hard not due to bad luck, but a systemic mismatch of supply and demand combined with the inherent friction of searching.",
+  "animation_source": "llm"
+}

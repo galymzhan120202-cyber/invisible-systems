@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why You Can Never Find a Parking Spot</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary elements
+var BLUE  = "#4C86F0";              // signal blue  -> the system / mechanism
+var AMBER = "#F2A93B";              // warm amber   -> YOU / car / desire
+var CORAL = "#FF5B5B";              // coral red    -> frustration / scarcity
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function chevron(x, y, size, col, op) {
+  var d = "M " + (x - size) + " " + (y + size * 0.55) + " L " + x + " " + (y - size * 0.55) + " L " + (x + size) + " " + (y + size * 0.55);
+  return pathTag(d, col, 14, op);
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom shape builders for parking animation ---------- */
+
+// The "you" car: stick-figure style
+function car(x, y, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  // Body: rounded rectangle
+  g += '<rect x="' + (x - 40) + '" y="' + (y - 20) + '" width="80" height="40" rx="12" fill="none" stroke="' + col + '" stroke-width="8"/>';
+  // Head: circle
+  g += dot(x, y - 42, 14, col);
+  // Wheels: two circles
+  g += dot(x - 25, y + 28, 9, col);
+  g += dot(x + 25, y + 28, 9, col);
+  g += '</g>';
+  return g;
+}
+
+// Parking spot outline
+function parkingSpotOutline(x, y, w, h, col, sw, op) {
+  return rrectStroke(x, y, w, h, 8, col, sw, op);
+}
+
+// Filled parking spot (with a generic car placeholder)
+function parkingSpotFilled(x, y, w, h, col, op) {
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 8, col); // The spot itself
+  // A simple filled rectangle to represent a parked car
+  g += rrect(x, y, w * 0.7, h * 0.6, 6, DIM, op * 0.8);
+  g += '</g>';
+  return g;
+}
+
+// Parking grid helper
+function parkingGrid(centerX, centerY, rows, cols, spotW, spotH, rowSpacing, colSpacing, strokeCol, strokeWidth, filledRatio, filledCarCol, op, seed) {
+  var g = '';
+  var totalGridW = cols * (spotW + colSpacing) - colSpacing;
+  var totalGridH = rows * (spotH + rowSpacing) - rowSpacing;
+  var startX = centerX - totalGridW / 2;
+  var startY = centerY - totalGridH / 2;
+
+  for (var r = 0; r < rows; r++) {
+    for (var c = 0; c < cols; c++) {
+      var spotX = startX + c * (spotW + colSpacing) + spotW / 2;
+      var spotY = startY + r * (spotH + rowSpacing) + spotH / 2;
+      
+      if (rnd(seed + r * cols + c) < filledRatio) {
+        g += parkingSpotFilled(spotX, spotY, spotW, spotH, filledCarCol, op);
+      } else {
+        g += parkingSpotOutline(spotX, spotY, spotW, spotH, strokeCol, strokeWidth, op);
+      }
+    }
+  }
+  return g;
+}
+
+// Thought bubble (multiple circles)
+function thoughtBubble(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += dot(x, y, size, col);
+  g += dot(x - size * 0.6, y + size * 0.4, size * 0.7, col);
+  g += dot(x + size * 0.7, y + size * 0.3, size * 0.6, col);
+  g += dot(x - size * 0.9, y + size * 0.8, size * 0.4, col);
+  g += dot(x + size * 0.9, y + size * 0.9, size * 0.5, col);
+  return g;
+}
+
+// Clock icon
+function clock(x, y, r, hourAngle, minuteAngle, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, r, col, sw);
+  // Minute hand
+  g += line(x, y, x + r * 0.8 * Math.sin(minuteAngle), y - r * 0.8 * Math.cos(minuteAngle), col, sw * 0.8);
+  // Hour hand
+  g += line(x, y, x + r * 0.5 * Math.sin(hourAngle), y - r * 0.5 * Math.cos(hourAngle), col, sw * 0.8);
+  g += dot(x, y, sw * 0.5, col); // Center dot
+  return g;
+}
+
+// Fuel gauge icon
+function fuelGauge(x, y, w, h, fillRatio, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, 6, col, sw);
+  var fillW = w * clamp(fillRatio, 0, 1);
+  g += rrect(x - w / 2 + fillW / 2, y, fillW, h - sw * 0.5, 4, col); // Filled bar
+  return g;
+}
+
+// X mark for unavailable spot
+function xMark(x, y, size, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += line(x - size / 2, y - size / 2, x + size / 2, y + size / 2, col, sw);
+  g += line(x - size / 2, y + size / 2, x + size / 2, y - size / 2, col, sw);
+  g += '</g>';
+  return g;
+}
+
+// 'FULL' sign (rectangle with a vertical bar)
+function fullSign(x, y, w, h, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 8, col);
+  g += line(x, y - h / 3, x, y + h / 3, WHITE, sw * 0.8); // Vertical bar
+  return g;
+}
+
+// Zig-zag path
+function zigZag(x, y, length, amplitude, segments, col, sw, op) {
+  var d = "M " + x + " " + y;
+  for (var i = 0; i < segments; i++) {
+    var segX = x + (i + 0.5) * (length / segments);
+    var segY = y + (i % 2 === 0 ? -1 : 1) * amplitude;
+    d += " L " + segX + " " + segY;
+  }
+  d += " L " + (x + length) + " " + y;
+  return pathTag(d, col, sw, op);
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var carX = lerp(-150, CX - 200, smooth(ramp(u, 0.0, 0.4))); // Car moves from left off-screen to a spot
+  var carY = CY + 400;
+
+  // Parking grid appears from bottom, scales up
+  var gridOp = ramp(u, 0.1, 0.6);
+  var gridScale = lerp(0.8, 1.0, easeOut(ramp(u, 0.0, 0.5)));
+  var gridCenterY = lerp(BOT + 200, CY + 100, easeOut(ramp(u, 0.0, 0.5)));
+
+  s += '<g ' + camera(gridScale, 0, gridCenterY - CY) + '>';
+  s += parkingGrid(CX, CY, 5, 4, 120, 80, 40, 40, WHITE, 8, 0.1, DIM, gridOp, 1); // Mostly empty
+  s += '</g>';
+
+  s += car(carX, carY, AMBER, 1);
+
+  // Thought bubble with glowing amber spot
+  var bubbleOp = ramp(u, 0.4, 0.8);
+  var bubbleScale = lerp(0.5, 1.0, easeOut(ramp(u, 0.4, 0.8)));
+  var bubbleX = carX + 80;
+  var bubbleY = carY - 180;
+
+  if (bubbleOp > 0.01) {
+    s += '<g transform="translate(' + bubbleX + ' ' + bubbleY + ') scale(' + bubbleScale + ') translate(' + (-bubbleX) + ' ' + (-bubbleY) + ')" opacity="' + bubbleOp + '">';
+    s += thoughtBubble(bubbleX, bubbleY, 50, WHITE);
+    s += dot(bubbleX, bubbleY - 10, 10, AMBER, 0.8 + 0.2 * Math.sin(u * Math.PI * 8)); // Glowing spot
+    s += '</g>';
+  }
+
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var carX, carY;
+
+  // Car path: enters grid, turns right, then down an aisle
+  var pathPhase1 = ramp(u, 0.0, 0.3); // Enter
+  var pathPhase2 = ramp(u, 0.3, 0.6); // Turn
+  var pathPhase3 = ramp(u, 0.6, 1.0); // Drive down aisle
+
+  var startCarX = CX - 200;
+  var startCarY = CY + 400;
+  var turnPointX = CX - 100;
+  var turnPointY = CY + 100;
+  var endCarX = CX - 100;
+  var endCarY = CY + 500;
+
+  if (u < 0.3) {
+    carX = lerp(startCarX, turnPointX, smooth(pathPhase1));
+    carY = lerp(startCarY, turnPointY, smooth(pathPhase1));
+  } else if (u < 0.6) {
+    carX = turnPointX; // X stays same for vertical movement
+    carY = lerp(turnPointY, turnPointY + 150, smooth(pathPhase2));
+  } else {
+    carX = turnPointX;
+    carY = lerp(turnPointY + 150, endCarY, smooth(pathPhase3));
+  }
+
+  // Parking grid: more filled spots
+  var filledRatio = lerp(0.1, 0.6, smooth(u)); // Gradually fill more spots
+  s += parkingGrid(CX, CY + 100, 5, 4, 120, 80, 40, 40, WHITE, 8, filledRatio, WHITE, 1, 2);
+
+  // Arrows on the ground
+  var arrowOp = ramp(u, 0.2, 0.8);
+  s += chevron(CX - 100, CY + 200, 30, WHITE, arrowOp);
+  s += chevron(CX - 100, CY + 350, 30, WHITE, arrowOp * 0.7);
+  s += chevron(CX - 100, CY + 500, 30, WHITE, arrowOp * 0.4);
+
+  s += car(carX, carY, AMBER, 1);
+
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var carX, carY;
+
+  // Car loops in a figure-8 or similar path
+  var loopRadiusX = 150;
+  var loopRadiusY = 100;
+  var loopCenterX = CX - 100;
+  var loopCenterY = CY + 300;
+
+  var angle = u * Math.PI * 4; // Two loops
+  carX = loopCenterX + Math.sin(angle) * loopRadiusX;
+  carY = loopCenterY + Math.sin(angle * 0.5) * loopRadiusY;
+
+  // Parking grid: very dense, some spots with X or FULL signs
+  var filledRatio = lerp(0.6, 0.8, smooth(u)); // Even more filled
+  s += parkingGrid(CX, CY + 100, 5, 4, 120, 80, 40, 40, WHITE, 8, filledRatio, WHITE, 1, 3);
+
+  // Pop-up 'X' marks and 'FULL' signs
+  var popOp = ramp(u, 0.2, 0.8);
+  var popScale = lerp(0.5, 1.0, easeOut(ramp(u, 0.2, 0.4)));
+
+  var spots = [
+    {x: CX + 100, y: CY - 100, type: 'X', seed: 1},
+    {x: CX - 200, y: CY + 50, type: 'FULL', seed: 2},
+    {x: CX + 50, y: CY + 250, type: 'X', seed: 3},
+    {x: CX - 150, y: CY + 400, type: 'FULL', seed: 4}
+  ];
+
+  for (var i = 0; i < spots.length; i++) {
+    var spotU = (u + rnd(spots[i].seed) * 0.2) % 1; // Stagger appearance
+    var spotPop = pulse(spotU, 0.5, 0.3); // Pop up and fade
+    if (spotPop > 0.01) {
+      var currentScale = lerp(0.5, 1.0, easeOut(spotPop));
+      s += '<g transform="translate(' + spots[i].x + ' ' + spots[i].y + ') scale(' + currentScale + ') translate(' + (-spots[i].x) + ' ' + (-spots[i].y) + ')" opacity="' + spotPop + '">';
+      if (spots[i].type === 'X') {
+        s += xMark(spots[i].x, spots[i].y, 60, CORAL, 10);
+      } else {
+        s += fullSign(spots[i].x, spots[i].y, 100, 60, CORAL, 8);
+      }
+      s += '</g>';
+    }
+  }
+
+  // Coral zig-zag lines radiating from car
+  var zigOp = pulse(u, 0.7, 0.4);
+  if (zigOp > 0.01) {
+    var zigSize = lerp(0, 150, easeOut(zigOp));
+    s += zigZag(carX - zigSize / 2, carY - 80, zigSize, 30, 4, CORAL, 6, zigOp);
+    s += zigZag(carX - zigSize / 2, carY - 100, zigSize, 20, 3, CORAL, 6, zigOp * 0.6);
+  }
+
+  s += car(carX, carY, AMBER, 1);
+
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+
+  // Parking grid fades out
+  var gridOp = lerp(1.0, 0.1, smooth(ramp(u, 0.0, 0.3)));
+  s += parkingGrid(CX, CY + 100, 5, 4, 120, 80, 40, 40, WHITE, 8, 0.8, WHITE, gridOp, 4);
+
+  // Demand/Supply diagram appears
+  var diagramOp = ramp(u, 0.2, 0.8);
+  var graphX1 = CX - 300, graphX2 = CX + 300;
+  var graphY1 = BOT - 200, graphY2 = TOP + 200;
+
+  // Demand line (upward sloping)
+  var demandY2 = lerp(graphY1, graphY2, smooth(ramp(u, 0.3, 0.6)));
+  s += line(graphX1, graphY1, graphX2, demandY2, BLUE, 8, diagramOp);
+
+  // Supply line (flat)
+  var supplyY = lerp(graphY1, graphY1 - 150, smooth(ramp(u, 0.4, 0.7)));
+  s += line(graphX1, supplyY, graphX2, supplyY, BLUE, 8, diagramOp);
+
+  // Intersection point
+  var intersectX = lerp(graphX1, graphX1 + (graphX2 - graphX1) * 0.6, smooth(ramp(u, 0.5, 0.8)));
+  var intersectY = lerp(graphY1, supplyY, smooth(ramp(u, 0.5, 0.8)));
+  s += dot(intersectX, intersectY, 15, BLUE, diagramOp);
+
+  // Amber car icons for demand
+  var numDemandCars = Math.floor(lerp(0, 10, smooth(ramp(u, 0.3, 0.7))));
+  for (var i = 0; i < numDemandCars; i++) {
+    var carDrawX = lerp(graphX1 + 50, graphX2 - 50, rnd(i + 10));
+    var carDrawY = lerp(graphY1 - 50, graphY2 + 50, rnd(i + 20));
+    var carOp = diagramOp * (0.5 + 0.5 * rnd(i + 30));
+    s += car(carDrawX, carDrawY, AMBER, carOp * 0.6); // Smaller cars
+  }
+
+  // Signal blue dots for supply
+  var numSupplyDots = Math.floor(lerp(0, 4, smooth(ramp(u, 0.4, 0.8))));
+  for (var j = 0; j < numSupplyDots; j++) {
+    var dotDrawX = lerp(graphX1 + 100, graphX2 - 100, rnd(j + 40));
+    var dotDrawY = supplyY + rnd(j + 50) * 30 - 15;
+    s += dot(dotDrawX, dotDrawY, 10, BLUE, diagramOp * (0.7 + 0.3 * rnd(j + 60)));
+  }
+
+  // Amber car's inefficient search path
+  var pathOp = ramp(u, 0.6, 1.0);
+  var pathD = "M " + (CX - 250) + " " + (CY + 400);
+  for (var k = 0; k < 10; k++) {
+    var pathSegX = lerp(CX - 250, CX + 250, k / 9);
+    var pathSegY = lerp(CY + 400, CY - 300, k / 9) + Math.sin(k * 2 + u * 10) * 30 * (1 - pathOp);
+    pathD += " L " + pathSegX + " " + pathSegY;
+  }
+  s += pathTag(pathD, AMBER, 5, pathOp);
+
+  // The amber car itself, following a simplified path
+  var carPathU = ramp(u, 0.6, 1.0);
+  var currentCarX = lerp(CX - 250, CX + 250, carPathU);
+  var currentCarY = lerp(CY + 400, CY - 300, carPathU) + Math.sin(carPathU * 10) * 20;
+  s += car(currentCarX, currentCarY, AMBER, pathOp);
+
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+
+  // Coral red overlay for frustration
+  var tintOp = lerp(0.0, 0.15, smooth(ramp(u, 0.0, 0.5)));
+  s += rrect(CX, CY, W, H, 0, CORAL, tintOp);
+
+  // Parking grid, dense and slightly faded
+  s += parkingGrid(CX, CY + 100, 5, 4, 120, 80, 40, 40, WHITE, 8, 0.85, WHITE, 0.6, 5);
+
+  // Amber car looping
+  var loopRadiusX = 180;
+  var loopRadiusY = 120;
+  var loopCenterX = CX - 50;
+  var loopCenterY = CY + 200;
+
+  var angle = u * Math.PI * 6; // More loops, faster
+  var carX = loopCenterX + Math.sin(angle) * loopRadiusX;
+  var carY = loopCenterY + Math.sin(angle * 0.5) * loopRadiusY;
+
+  s += car(carX, carY, AMBER, 1);
+
+  // Clock icon spinning rapidly
+  var clockX = CX + 300, clockY = TOP + 150;
+  var minuteAngle = u * Math.PI * 2 * 20; // 20 rotations per 10s
+  var hourAngle = minuteAngle / 12;
+  s += clock(clockX, clockY, 60, hourAngle, minuteAngle, WHITE, 8, 1);
+
+  // Coral red fuel gauge dropping
+  var gaugeX = CX + 300, gaugeY = BOT - 150;
+  var fillRatio = lerp(1.0, 0.1, smooth(u));
+  s += fuelGauge(gaugeX, gaugeY, 150, 40, fillRatio, CORAL, 8, 1);
+
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+
+  // Parking grid returns to normal, car parks
+  var parkOp = ramp(u, 0.0, 0.4);
+  var carParkX = lerp(CX - 50, CX - 200, smooth(parkOp)); // Moves to a specific spot
+  var carParkY = lerp(CY + 200, CY + 100, smooth(parkOp));
+
+  // Normal parking lot, one spot for the amber car
+  s += parkingGrid(CX, CY + 100, 5, 4, 120, 80, 40, 40, WHITE, 8, 0.6, WHITE, 1, 6); // Default filled ratio
+
+  // The amber car parked
+  s += car(carParkX, carParkY, AMBER, 1);
+
+  // Signal blue thought bubble appears above parked car
+  var bubbleOp = ramp(u, 0.5, 0.9);
+  var bubbleScale = lerp(0.5, 1.0, easeOut(ramp(u, 0.5, 0.8)));
+  var bubbleX = carParkX + 80;
+  var bubbleY = carParkY - 180;
+
+  if (bubbleOp > 0.01) {
+    s += '<g transform="translate(' + bubbleX + ' ' + bubbleY + ') scale(' + bubbleScale + ') translate(' + (-bubbleX) + ' ' + (-bubbleY) + ')" opacity="' + bubbleOp + '">';
+    s += thoughtBubble(bubbleX, bubbleY, 50, BLUE);
+
+    // Simplified supply/demand diagram inside thought bubble
+    var diagX1 = bubbleX - 30, diagY1 = bubbleY + 20;
+    var diagX2 = bubbleX + 30, diagY2 = bubbleY - 20;
+    var diagSupplyY = bubbleY;
+
+    // Demand line
+    s += line(diagX1, diagY1, diagX2, diagY2, WHITE, 3);
+    // Supply line
+    s += line(diagX1, diagSupplyY, diagX2, diagSupplyY, WHITE, 3);
+    // Intersection dot
+    s += dot(bubbleX, (diagY2 + diagSupplyY) / 2, 5, WHITE);
+
+    s += '</g>';
+  }
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
