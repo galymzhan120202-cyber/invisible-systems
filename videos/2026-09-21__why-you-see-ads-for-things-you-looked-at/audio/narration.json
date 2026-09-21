@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You're online, browsing for new headphones. You check details, decide to wait, and close the tab.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "Later, on a different site, you see it: an ad for those *exact same headphones*. Strange coincidence, or invasive?",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "How do ads follow you? Listening devices? Random chance? You might feel uneasy, wondering if you're constantly monitored.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "It’s 'retargeting.' Visiting that headphone site placed a tiny, invisible 'pixel' on your browser. It marked your interest, not your identity.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "This pixel signals ad networks: 'Interested browser is here!' Other sites then show specific ads. Your past interest now influences what you see.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "Now you know. Not magic; a silent digital breadcrumb. The internet isn't listening; it's remembering. You'll spot the invisible system.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

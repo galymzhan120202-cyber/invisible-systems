@@ -1,0 +1,15 @@
+{
+  "id": "why-your-phone-suggests-words",
+  "slug": "2026-09-21__why-your-phone-suggests-words",
+  "title_working": "Why Your Phone Suggests the Next Word",
+  "system": "predictive text algorithms learning user patterns",
+  "cluster": "platforms-and-algorithms",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-09-21T12:45:56+00:00",
+  "produced_at": "2026-09-21T12:49:23+00:00",
+  "verify": "PASS",
+  "takeaway": "Your phone's predictive text works by learning your unique typing patterns and context, not just general language.",
+  "animation_source": "llm"
+}

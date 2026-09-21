@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why the Middle Seat is Cheaper on Flights</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue  -> the system / rules
+var AMBER = "#F2A93B";              // warm amber   -> YOU / traveler
+var CORAL = "#FF5B5B";              // coral red    -> discomfort / naive assumption
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+var FIGURE_H = 180; // stick figure height
+var FIGURE_SW = 10; // stick figure stroke width
+var SEAT_W = 200;
+var SEAT_H = 120;
+var SEAT_RAD = 20;
+var ROW_Y = CY + 200; // Y position for the main seat row
+
+/* stick figure: x, y is center of body, col is color, pose determines state */
+function stickFigure(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = FIGURE_H * 0.12;
+  var bodyL = FIGURE_H * 0.4;
+  var legL = FIGURE_H * 0.3;
+  var armL = FIGURE_H * 0.25;
+
+  // Head
+  g += dot(x, y - bodyL / 2 - headR, headR, col);
+
+  // Body
+  g += line(x, y - bodyL / 2, x, y + bodyL / 2, col, FIGURE_SW);
+
+  // Legs
+  if (pose === "standing" || pose === "scrolling" || pose === "arm_up") {
+    g += line(x, y + bodyL / 2, x - FIGURE_H * 0.1, y + bodyL / 2 + legL, col, FIGURE_SW);
+    g += line(x, y + bodyL / 2, x + FIGURE_H * 0.1, y + bodyL / 2 + legL, col, FIGURE_SW);
+  } else { // Sitting poses
+    g += line(x, y + bodyL / 2, x - FIGURE_H * 0.1, y + bodyL / 2 + legL * 0.6, col, FIGURE_SW);
+    g += line(x, y + bodyL / 2, x + FIGURE_H * 0.1, y + bodyL / 2 + legL * 0.6, col, FIGURE_SW);
+  }
+
+  // Arms
+  if (pose === "scrolling") {
+    g += line(x, y - bodyL / 4, x - FIGURE_H * 0.15, y - bodyL / 4 - armL, col, FIGURE_SW); // Left arm up
+    g += line(x, y - bodyL / 4, x + FIGURE_H * 0.15, y - bodyL / 4 + armL * 0.2, col, FIGURE_SW); // Right arm slightly forward
+  } else if (pose === "squished") {
+    g += line(x, y - bodyL / 4, x - FIGURE_H * 0.1, y - bodyL / 4 + armL * 0.5, col, FIGURE_SW); // Arms down, slightly in
+    g += line(x, y - bodyL / 4, x + FIGURE_H * 0.1, y - bodyL / 4 + armL * 0.5, col, FIGURE_SW);
+  } else if (pose === "questioning") {
+    g += line(x, y - bodyL / 4, x - FIGURE_H * 0.15, y - bodyL / 4 - armL * 0.8, col, FIGURE_SW); // Arms up in questioning gesture
+    g += line(x, y - bodyL / 4, x + FIGURE_H * 0.15, y - bodyL / 4 - armL * 0.8, col, FIGURE_SW);
+  } else if (pose === "nodding") {
+    g += line(x, y - bodyL / 4, x - FIGURE_H * 0.1, y - bodyL / 4 + armL * 0.2, col, FIGURE_SW); // Arms relaxed
+    g += line(x, y - bodyL / 4, x + FIGURE_H * 0.1, y - bodyL / 4 + armL * 0.2, col, FIGURE_SW);
+    // Small head nod animation (implied by camera/figure movement in scene)
+  } else if (pose === "arm_up") {
+    g += line(x, y - bodyL / 4, x - FIGURE_H * 0.15, y - bodyL / 4 - armL * 0.8, col, FIGURE_SW); // Left arm up
+    g += line(x, y - bodyL / 4, x + FIGURE_H * 0.15, y - bodyL / 4 + armL * 0.2, col, FIGURE_SW); // Right arm relaxed
+  } else { // Default sitting
+    g += line(x, y - bodyL / 4, x - FIGURE_H * 0.1, y - bodyL / 4 + armL * 0.2, col, FIGURE_SW);
+    g += line(x, y - bodyL / 4, x + FIGURE_H * 0.1, y - bodyL / 4 + armL * 0.2, col, FIGURE_SW);
+  }
+  g += '</g>';
+  return g;
+}
+
+/* single seat */
+function seat(x, y, w, h, col, sw, op) {
+  return rrectStroke(x, y, w, h, SEAT_RAD, col, sw, op);
+}
+
+/* question mark glyph */
+function questionMark(x, y, size, col, sw, op) {
+  var d = "M " + x + " " + (y - size * 0.5) +
+          " A " + (size * 0.3) + " " + (size * 0.3) + " 0 1 0 " + (x + size * 0.3) + " " + (y - size * 0.2) +
+          " L " + (x + size * 0.1) + " " + (y + size * 0.1) +
+          " M " + x + " " + (y + size * 0.35);
+  return pathTag(d, col, sw, op);
+}
+
+/* value icon (upward arrow) */
+function valueArrow(x, y, size, col, sw, op) {
+  var d = "M " + (x - size * 0.3) + " " + (y + size * 0.2) +
+          " L " + x + " " + (y - size * 0.2) +
+          " L " + (x + size * 0.3) + " " + (y + size * 0.2);
+  return pathTag(d, col, sw, op);
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var screenX = CX + 180, screenY = CY;
+  var screenW = 500, screenH = 1000;
+
+  var figX = CX - 280, figY = CY + 100;
+  var figScale = lerp(1, 0.95, smooth(u));
+  var figDriftY = Math.sin(u * Math.PI * 2) * 8;
+
+  s += '<g ' + camera(figScale, 0, figDriftY) + '>';
+  s += stickFigure(figX, figY, AMBER, "scrolling");
+
+  // Screen frame
+  s += rrect(screenX, screenY, screenW, screenH, 40, WHITE, 0.9);
+  s += rrect(screenX, screenY, screenW - 20, screenH - 20, 30, "#000000", 1); // Inner screen
+
+  // Flight options
+  var optionH = 120, optionGap = 30;
+  var numOptions = 5;
+  var scrollOffset = u * (optionH + optionGap) * 2; // Simulate scrolling
+  var highlightIdx = Math.floor(u * 0.8 * numOptions); // Which option is highlighted
+
+  for (var i = 0; i < numOptions; i++) {
+    var optionY = screenY - (numOptions - 1) * (optionH + optionGap) / 2 + i * (optionH + optionGap) + scrollOffset;
+    if (optionY > screenY - screenH / 2 + optionH / 2 + 10 && optionY < screenY + screenH / 2 - optionH / 2 - 10) {
+      var optionCol = (i === highlightIdx) ? BLUE : DIM;
+      var optionOp = (i === highlightIdx) ? 1 : 0.6;
+      s += rrect(screenX, optionY, screenW * 0.7, optionH, 15, optionCol, optionOp);
+    }
+  }
+
+  // Cursor icon
+  var cursorY = lerp(screenY - screenH / 2 + 100, screenY + screenH / 2 - 100, smooth(u * 0.8));
+  var cursorX = screenX + screenW * 0.35 + Math.sin(u * Math.PI * 4) * 5;
+  s += line(cursorX, cursorY, cursorX + 30, cursorY + 30, WHITE, 8);
+  s += line(cursorX, cursorY, cursorX + 40, cursorY - 10, WHITE, 8);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20s): GO */
+function scene2(u) {
+  var s = '';
+  var figX = CX, figY = ROW_Y - 80;
+
+  var screenFade = 1 - smooth(ramp(u, 0.0, 0.2));
+  var seatAppear = smooth(ramp(u, 0.1, 0.4));
+  var squishAmount = smooth(ramp(u, 0.3, 0.7));
+
+  // Screen dissolving (from S1)
+  if (screenFade > 0.01) {
+    var screenScale = lerp(1, 0.5, screenFade);
+    s += '<g ' + camera(screenScale, CX + 180 - CX, CY - CY) + '>'; // Center screen for scaling
+    s += rrect(CX + 180, CY, 500, 1000, 40, WHITE, 0.9 * screenFade);
+    s += '</g>';
+  }
+
+  // Airplane cabin cross-section
+  var seatY = ROW_Y;
+  var seatSpacing = SEAT_W + 60;
+  var seatX_L = CX - seatSpacing;
+  var seatX_M = CX;
+  var seatX_R = CX + seatSpacing;
+
+  if (seatAppear > 0.01) {
+    s += seat(seatX_L, seatY, SEAT_W, SEAT_H, WHITE, 10, seatAppear);
+    s += seat(seatX_M, seatY, SEAT_W, SEAT_H, WHITE, 10, seatAppear);
+    s += seat(seatX_R, seatY, SEAT_W, SEAT_H, WHITE, 10, seatAppear);
+
+    // Amber stick figure in middle seat
+    var currentFigX = lerp(CX + 180, seatX_M, easeOut(ramp(u, 0.1, 0.4))); // From screen to seat
+    var currentFigY = lerp(CY, figY, easeOut(ramp(u, 0.1, 0.4)));
+    var currentFigScale = lerp(0.9, 1, easeOut(ramp(u, 0.1, 0.4)));
+    
+    // Squish effect
+    var figSquishX = CX + Math.sin(u * Math.PI * 10) * 5 * squishAmount;
+    var figSquishY = figY + Math.cos(u * Math.PI * 10) * 3 * squishAmount;
+    var figSquishScaleX = lerp(1, 0.9, squishAmount);
+    var figSquishScaleY = lerp(1, 1.05, squishAmount);
+
+    s += '<g ' + camera(currentFigScale, currentFigX - CX, currentFigY - CY) + '>';
+    s += '<g transform="translate(' + (CX - currentFigX) + ' ' + (CY - currentFigY) + ') scale(' + figSquishScaleX + ' ' + figSquishScaleY + ') translate(' + (currentFigX - CX) + ' ' + (currentFigY - CY) + ')">';
+    s += stickFigure(currentFigX, currentFigY, AMBER, "squished");
+    s += '</g>';
+    s += '</g>';
+    
+    // Squish lines
+    if (squishAmount > 0.1) {
+      s += line(seatX_M - SEAT_W/2 - 20, currentFigY - 40, seatX_M - SEAT_W/2 - 5, currentFigY - 40, CORAL, 6, squishAmount);
+      s += line(seatX_M + SEAT_W/2 + 20, currentFigY - 40, seatX_M + SEAT_W/2 + 5, currentFigY - 40, CORAL, 6, squishAmount);
+      s += line(seatX_M - SEAT_W/2 - 20, currentFigY + 40, seatX_M - SEAT_W/2 - 5, currentFigY + 40, CORAL, 6, squishAmount);
+      s += line(seatX_M + SEAT_W/2 + 20, currentFigY + 40, seatX_M + SEAT_W/2 + 5, currentFigY + 40, CORAL, 6, squishAmount);
+    }
+  }
+
+  return s;
+}
+
+/* SCENE 3 (20-30s): SEARCH */
+function scene3(u) {
+  var s = '';
+  var figX = CX, figY = ROW_Y - 80;
+  var seatY = ROW_Y;
+  var seatSpacing = SEAT_W + 60;
+  var seatX_L = CX - seatSpacing;
+  var seatX_M = CX;
+  var seatX_R = CX + seatSpacing;
+
+  s += seat(seatX_L, seatY, SEAT_W, SEAT_H, WHITE, 10);
+  s += seat(seatX_M, seatY, SEAT_W, SEAT_H, WHITE, 10);
+  s += seat(seatX_R, seatY, SEAT_W, SEAT_H, WHITE, 10);
+
+  // Amber stick figure in middle seat, with discomfort
+  var discomfortOp = (0.5 + 0.5 * Math.sin(u * Math.PI * 6)) * (1 - ramp(u, 0.8, 1.0));
+  var figSquishX = CX + Math.sin(u * Math.PI * 10) * 5;
+  var figSquishY = figY + Math.cos(u * Math.PI * 10) * 3;
+  s += stickFigure(figSquishX, figSquishY, AMBER, "questioning");
+
+  // Coral red wavy lines for discomfort
+  var waveOffset = u * 20;
+  for (var i = 0; i < 4; i++) {
+    var yOffset = i * 40 + waveOffset;
+    var waveY = figY - 60 + yOffset;
+    var waveAmp = 20 * (0.5 + 0.5 * Math.sin(u * Math.PI * 4 + i));
+    var d = "M " + (figX - 80) + " " + waveY + " Q " + (figX - 80 + waveAmp) + " " + (waveY + 10) + " " + (figX - 80) + " " + (waveY + 20);
+    s += pathTag(d, CORAL, 8, discomfortOp);
+    d = "M " + (figX + 80) + " " + waveY + " Q " + (figX + 80 - waveAmp) + " " + (waveY + 10) + " " + (figX + 80) + " " + (waveY + 20);
+    s += pathTag(d, CORAL, 8, discomfortOp);
+  }
+
+  // Question mark icon above head
+  var qOp = ramp(u, 0.2, 0.6) * (1 - ramp(u, 0.8, 1.0));
+  s += questionMark(figX, figY - FIGURE_H * 0.8, 60, WHITE, 10, qOp);
+
+  return s;
+}
+
+/* SCENE 4 (30-40s): FIND */
+function scene4(u) {
+  var s = '';
+  var seatY = ROW_Y;
+  var seatSpacing = SEAT_W + 60;
+  var seatX_L = CX - seatSpacing;
+  var seatX_M = CX;
+  var seatX_R = CX + seatSpacing;
+
+  var transformProg = smooth(ramp(u, 0.0, 0.5));
+  var valueIconAppear = smooth(ramp(u, 0.6, 0.9));
+
+  // Seats transforming into value zones
+  var seatW_L = lerp(SEAT_W, SEAT_W * 1.3, transformProg);
+  var seatH_L = lerp(SEAT_H, SEAT_H * 1.5, transformProg);
+  var seatW_M = lerp(SEAT_W, SEAT_W * 0.8, transformProg);
+  var seatH_M = lerp(SEAT_H, SEAT_H * 1.2, transformProg);
+  var seatW_R = lerp(SEAT_W, SEAT_W * 1.3, transformProg);
+  var seatH_R = lerp(SEAT_H, SEAT_H * 1.5, transformProg);
+
+  var seatCol_L = lerpColor(WHITE, BLUE, transformProg);
+  var seatCol_M = lerpColor(WHITE, DIM, transformProg);
+  var seatCol_R = lerpColor(WHITE, BLUE, transformProg);
+
+  s += rrect(seatX_L, seatY, seatW_L, seatH_L, SEAT_RAD, seatCol_L, 0.8);
+  s += rrect(seatX_M, seatY, seatW_M, seatH_M, SEAT_RAD, seatCol_M, 0.8);
+  s += rrect(seatX_R, seatY, seatW_R, seatH_R, SEAT_RAD, seatCol_R, 0.8);
+
+  // Value icons above blue zones
+  if (valueIconAppear > 0.01) {
+    s += valueArrow(seatX_L, seatY - seatH_L / 2 - 80, 50, BLUE, 10, valueIconAppear);
+    s += valueArrow(seatX_R, seatY - seatH_R / 2 - 80, 50, BLUE, 10, valueIconAppear);
+  }
+
+  // Stick figure (faded out as it's a conceptual diagram)
+  s += stickFigure(CX, ROW_Y - 80, AMBER, "sitting", 0.1 * (1 - transformProg));
+
+  return s;
+}
+
+// Helper to lerp colors (simple RGB interpolation)
+function lerpColor(c1, c2, t) {
+  var r1 = parseInt(c1.substring(1, 3), 16), g1 = parseInt(c1.substring(3, 5), 16), b1 = parseInt(c1.substring(5, 7), 16);
+  var r2 = parseInt(c2.substring(1, 3), 16), g2 = parseInt(c2.substring(3, 5), 16), b2 = parseInt(c2.substring(5, 7), 16);
+  var r = Math.round(lerp(r1, r2, t));
+  var g = Math.round(lerp(g1, g2, t));
+  var b = Math.round(lerp(b1, b2, t));
+  return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
+}
+
+
+/* SCENE 5 (40-50s): TAKE */
+function scene5(u) {
+  var s = '';
+  var seatY = ROW_Y;
+  var seatSpacing = SEAT_W + 60;
+  var seatX_L = CX - seatSpacing;
+  var seatX_M = CX;
+  var seatX_R = CX + seatSpacing;
+
+  // Conceptual diagram from S4 (fully transformed)
+  var seatW_L = SEAT_W * 1.3;
+  var seatH_L = SEAT_H * 1.5;
+  var seatW_M = SEAT_W * 0.8;
+  var seatH_M = SEAT_H * 1.2;
+  var seatW_R = SEAT_W * 1.3;
+  var seatH_R = SEAT_H * 1.5;
+
+  s += rrect(seatX_L, seatY, seatW_L, seatH_L, SEAT_RAD, BLUE, 0.8);
+  s += rrect(seatX_M, seatY, seatW_M, seatH_M, SEAT_RAD, DIM, 0.8);
+  s += rrect(seatX_R, seatY, seatW_R, seatH_R, BLUE, 0.8);
+
+  s += valueArrow(seatX_L, seatY - seatH_L / 2 - 80, 50, BLUE, 10);
+  s += valueArrow(seatX_R, seatY - seatH_R / 2 - 80, 50, BLUE, 10);
+
+  // Multiple small amber stick figures (demand)
+  var numFigures = 12;
+  var figAppearProg = smooth(ramp(u, 0.0, 0.7));
+
+  for (var i = 0; i < numFigures; i++) {
+    var targetX, targetY;
+    var pose = "arm_up"; // Represents "wanting"
+    var baseOp = 0.9;
+
+    if (i < 4) { // Flock to left (window)
+      targetX = seatX_L + lerp(-seatW_L / 4, seatW_L / 4, rnd(i));
+      targetY = seatY + lerp(-seatH_L / 4, seatH_L / 4, rnd(i + 10));
+    } else if (i < 8) { // Flock to right (aisle)
+      targetX = seatX_R + lerp(-seatW_R / 4, seatW_R / 4, rnd(i));
+      targetY = seatY + lerp(-seatH_R / 4, seatH_R / 4, rnd(i + 20));
+    } else { // Reluctantly fill middle
+      targetX = seatX_M + lerp(-seatW_M / 4, seatW_M / 4, rnd(i));
+      targetY = seatY + lerp(-seatH_M / 4, seatH_M / 4, rnd(i + 30));
+      baseOp = 0.7; // Slightly less prominent for middle
+    }
+
+    // Figures fly in from top
+    var startY = TOP + rnd(i + 40) * 200;
+    var currentY = lerp(startY, targetY, easeOut(clamp(figAppearProg - i * 0.05, 0, 1)));
+    var currentX = lerp(CX, targetX, easeOut(clamp(figAppearProg - i * 0.05, 0, 1)));
+    
+    // Only draw if figure has appeared
+    if (figAppearProg - i * 0.05 > 0) {
+      s += stickFigure(currentX, currentY, AMBER, pose, baseOp);
+    }
+  }
+
+  return s;
+}
+
+/* SCENE 6 (50-60s): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var figX = CX, figY = ROW_Y - 80;
+  var seatY = ROW_Y;
+  var seatSpacing = SEAT_W + 60;
+  var seatX_L = CX - seatSpacing;
+  var seatX_M = CX;
+  var seatX_R = CX + seatSpacing;
+
+  var transformBack = smooth(ramp(u, 0.0, 0.4));
+  var systemLinesAppear = smooth(ramp(u, 0.5, 0.9));
+
+  // Seats transforming back to concrete
+  var seatW_L = lerp(SEAT_W * 1.3, SEAT_W, transformBack);
+  var seatH_L = lerp(SEAT_H * 1.5, SEAT_H, transformBack);
+  var seatW_M = lerp(SEAT_W * 0.8, SEAT_W, transformBack);
+  var seatH_M = lerp(SEAT_H * 1.2, SEAT_H, transformBack);
+  var seatW_R = lerp(SEAT_W * 1.3, SEAT_W, transformBack);
+  var seatH_R = lerp(SEAT_H * 1.5, SEAT_H, transformBack);
+
+  var seatCol_L = lerpColor(BLUE, WHITE, transformBack);
+  var seatCol_M = lerpColor(DIM, WHITE, transformBack);
+  var seatCol_R = lerpColor(BLUE, WHITE, transformBack);
+
+  s += rrect(seatX_L, seatY, seatW_L, seatH_L, SEAT_RAD, seatCol_L, 0.8);
+  s += rrect(seatX_M, seatY, seatW_M, seatH_M, SEAT_RAD, seatCol_M, 0.8);
+  s += rrect(seatX_R, seatY, seatW_R, seatH_R, SEAT_RAD, seatCol_R, 0.8);
+
+  // Single amber stick figure in middle seat (nodding pose)
+  s += stickFigure(figX, figY, AMBER, "nodding");
+
+  // Faint signal blue lines radiating from seats (invisible pricing system)
+  if (systemLinesAppear > 0.01) {
+    var lineOp = systemLinesAppear * 0.2;
+    var waveAmp = 20 * (0.5 + 0.5 * Math.sin(u * Math.PI * 4));
+    
+    // Lines from left seat
+    s += line(seatX_L - seatW_L / 2 - 40, seatY, seatX_L - seatW_L / 2 - 100, seatY - 80, BLUE, 4, lineOp);
+    s += line(seatX_L - seatW_L / 2 - 40, seatY, seatX_L - seatW_L / 2 - 100, seatY + 80, BLUE, 4, lineOp);
+    
+    // Lines from right seat
+    s += line(seatX_R + seatW_R / 2 + 40, seatY, seatX_R + seatW_R / 2 + 100, seatY - 80, BLUE, 4, lineOp);
+    s += line(seatX_R + seatW_R / 2 + 40, seatY, seatX_R + seatW_R / 2 + 100, seatY + 80, BLUE, 4, lineOp);
+
+    // Subtle lines around middle seat
+    var midLineY = figY + Math.sin(u * Math.PI * 6) * 5;
+    s += line(seatX_M - seatW_M / 2 - 20, midLineY, seatX_M - seatW_M / 2 - 50, midLineY, BLUE, 3, lineOp * 0.7);
+    s += line(seatX_M + seatW_M / 2 + 20, midLineY, seatX_M + seatW_M / 2 + 50, midLineY, BLUE, 3, lineOp * 0.7);
+  }
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
