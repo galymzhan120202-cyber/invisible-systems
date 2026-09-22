@@ -1,0 +1,524 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Restaurants Offer 'Daily Specials'</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var BLUE  = "#4C86F0";              // signal blue  -> the system/mechanism
+var AMBER = "#F2A93B";              // warm amber   -> YOU/special dish
+var CORAL = "#FF5B5B";              // coral red    -> naive assumption
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, fill) {
+  return '<path d="' + d + '" fill="' + (fill || 'none') + '" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+// Custom shapes for this animation
+function stickFigure(x, y, scale, headAngle, armAngle, legPhase, shrug, op) {
+  scale = scale == null ? 1 : scale;
+  headAngle = headAngle == null ? 0 : headAngle; // radians
+  armAngle = armAngle == null ? 0 : armAngle;   // radians
+  legPhase = legPhase == null ? 0 : legPhase;   // 0 to 1 for walking cycle
+  shrug = shrug == null ? 0 : shrug; // 0 to 1 for shrug intensity
+  op = (op == null ? 1 : op);
+
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ') scale(' + scale + ')">';
+  var headR = 30;
+  var bodyL = 120;
+  var armL = 80;
+  var legL = 100;
+  var bodyY = -headR;
+  var hipY = bodyY + bodyL;
+
+  // Head
+  g += dot(0, bodyY - headR, headR, WHITE);
+  // Gaze / expression
+  g += line(0 + Math.sin(headAngle) * headR * 0.4, bodyY - headR + Math.cos(headAngle) * headR * 0.4,
+            0 + Math.sin(headAngle) * headR * 0.8, bodyY - headR + Math.cos(headAngle) * headR * 0.8, WHITE, 6);
+
+  // Body
+  g += line(0, bodyY, 0, hipY, WHITE, 10);
+
+  // Arms
+  var armX = 0 + Math.cos(armAngle + Math.PI / 2) * (armL * 0.2); // slight bend
+  var armY = bodyY + 30;
+  var armOffX = 10 + shrug * 20;
+  var armOffY = shrug * -15;
+
+  g += line(0, armY, -armOffX, armY + armOffY + armL * Math.sin(armAngle), WHITE, 8);
+  g += line(0, armY, armOffX, armY + armOffY + armL * Math.sin(armAngle), WHITE, 8);
+
+  // Legs
+  var legSwing = Math.sin(legPhase * Math.PI * 2) * 0.4;
+  g += line(0, hipY, -15 + legL * Math.sin(legSwing), hipY + legL * Math.cos(legSwing), WHITE, 8);
+  g += line(0, hipY, 15 + legL * Math.sin(-legSwing), hipY + legL * Math.cos(-legSwing), WHITE, 8);
+
+  g += '</g>';
+  return g;
+}
+
+function menuIcon(x, y, w, h, highlightX, highlightY, highlightW, highlightH, highlightCol, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, 12, WHITE, 8); // Menu outline
+  g += line(x - w * 0.35, y - h * 0.3, x + w * 0.35, y - h * 0.3, WHITE, 6); // Line 1
+  g += line(x - w * 0.35, y - h * 0.1, x + w * 0.25, y - h * 0.1, WHITE, 6); // Line 2
+  g += line(x - w * 0.35, y + h * 0.1, x + w * 0.35, y + h * 0.1, WHITE, 6); // Line 3
+  g += line(x - w * 0.35, y + h * 0.3, x + w * 0.15, y + h * 0.3, WHITE, 6); // Line 4
+
+  if (highlightCol) {
+      g += rrect(highlightX, highlightY, highlightW, highlightH, 8, highlightCol, 0.8);
+  }
+  g += '</g>';
+  return g;
+}
+
+function plate(x, y, r, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, r, col, sw);
+  g += ring(x, y, r * 0.8, col, sw * 0.6); // Inner rim
+  g += '</g>';
+  return g;
+}
+
+function simpleMeal(x, y, r, op) {
+    op = (op == null ? 1 : op);
+    var g = '<g opacity="' + op + '">';
+    g += dot(x - r * 0.4, y - r * 0.3, r * 0.2, WHITE);
+    g += dot(x + r * 0.3, y - r * 0.1, r * 0.25, WHITE);
+    g += dot(x - r * 0.1, y + r * 0.4, r * 0.18, WHITE);
+    g += '</g>';
+    return g;
+}
+
+function thoughtBubble(x, y, w, h, op) {
+    op = (op == null ? 1 : op);
+    var d = "M " + (x - w/2) + " " + (y - h/2) +
+            " Q " + (x - w/2 - 30) + " " + (y - h/2 - 30) + " " + (x - w/2) + " " + (y - h/2 - 60) +
+            " C " + (x - w/2 + 50) + " " + (y - h/2 - 100) + " " + (x + w/2 - 50) + " " + (y - h/2 - 100) + " " + (x + w/2) + " " + (y - h/2 - 60) +
+            " Q " + (x + w/2 + 30) + " " + (y - h/2 - 30) + " " + (x + w/2) + " " + (y - h/2) +
+            " Z";
+    return pathTag(d, WHITE, 8, op, WHITE);
+}
+
+function questionMark(x, y, size, col, sw, op) {
+    op = (op == null ? 1 : op);
+    var d = "M " + (x - size * 0.2) + " " + (y - size * 0.5) +
+            " A " + (size * 0.3) + " " + (size * 0.3) + " 0 1 1 " + (x + size * 0.2) + " " + (y - size * 0.2) +
+            " L " + x + " " + (y + size * 0.1) +
+            " M " + x + " " + (y + size * 0.3) + " L " + x + " " + (y + size * 0.4);
+    return pathTag(d, col, sw, op);
+}
+
+function ingredientBlock(x, y, w, h, col, op, crackOp) {
+    op = (op == null ? 1 : op);
+    crackOp = crackOp == null ? 0 : crackOp;
+    var g = '<g opacity="' + op + '">';
+    g += rrect(x, y, w, h, 12, col);
+    if (crackOp > 0.01) {
+        g += line(x - w * 0.3, y - h * 0.2, x + w * 0.3, y + h * 0.1, CORAL, 6, crackOp);
+        g += line(x - w * 0.1, y + h * 0.3, x + w * 0.2, y - h * 0.3, CORAL, 6, crackOp * 0.7);
+    }
+    g += '</g>';
+    return g;
+}
+
+function coinIcon(x, y, r, col, sw, op) {
+    op = (op == null ? 1 : op);
+    var g = '<g opacity="' + op + '">';
+    g += ring(x, y, r, col, sw);
+    g += line(x - r * 0.3, y, x + r * 0.3, y, col, sw * 0.6); // Simple bar for value
+    g += line(x, y - r * 0.3, x, y + r * 0.3, col, sw * 0.6); // Simple bar for value
+    g += '</g>';
+    return g;
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+// Shared elements for continuity
+var YOU_X = CX - 250;
+var YOU_Y_SIT = BOT - 300; // Sitting position
+var TABLE_Y = BOT - 200;
+var TABLE_W = 600;
+var TABLE_H = 100;
+var PLATE_X = CX + 150;
+var PLATE_Y = CY + 100;
+var PLATE_R = 240; // Diameter 480px, good for hero element
+var MENU_X = CX - 250;
+var MENU_Y = CY - 200;
+var MENU_W = 160;
+var MENU_H = 240;
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  // Table
+  s += rrect(CX, TABLE_Y, TABLE_W, TABLE_H, 20, WHITE, 0.8);
+  s += line(CX - TABLE_W / 2 + 50, TABLE_Y + TABLE_H / 2, CX - TABLE_W / 2 + 50, BOT, WHITE, 8);
+  s += line(CX + TABLE_W / 2 - 50, TABLE_Y + TABLE_H / 2, CX + TABLE_W / 2 - 50, BOT, WHITE, 8);
+
+  // YOU stick figure
+  s += stickFigure(YOU_X, YOU_Y_SIT, 1, Math.sin(u * Math.PI * 0.5) * 0.2, 0, 0, 0, 1);
+
+  // Menu icon
+  s += menuIcon(MENU_X, MENU_Y, MENU_W, MENU_H, null, null, null, null, null, 1);
+
+  // Empty plate
+  s += plate(PLATE_X, PLATE_Y, PLATE_R, WHITE, 12, 1);
+
+  // Thought bubble
+  var bubbleOp = ramp(u, 0.3, 0.7);
+  var bubbleScale = lerp(0.8, 1.0, smooth(ramp(u, 0.4, 0.8)));
+  s += '<g transform="translate(' + (YOU_X + 100) + ' ' + (YOU_Y_SIT - 300) + ') scale(' + bubbleScale + ')">';
+  s += thoughtBubble(0, 0, 280, 200, bubbleOp);
+  s += simpleMeal(0, 0, 80, bubbleOp);
+  s += '</g>';
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20s): GO */
+function scene2(u) {
+  var s = '';
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14);
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+
+  // Table
+  s += rrect(CX, TABLE_Y, TABLE_W, TABLE_H, 20, WHITE, 0.8);
+  s += line(CX - TABLE_W / 2 + 50, TABLE_Y + TABLE_H / 2, CX - TABLE_W / 2 + 50, BOT, WHITE, 8);
+  s += line(CX + TABLE_W / 2 - 50, TABLE_Y + TABLE_H / 2, CX + TABLE_W / 2 - 50, BOT, WHITE, 8);
+
+  // YOU stick figure
+  var headTurn = lerp(0, Math.PI * 0.1, smooth(ramp(u, 0.2, 0.6)));
+  s += stickFigure(YOU_X, YOU_Y_SIT, 1, headTurn, 0, 0, 0, 1);
+
+  // Menu icon with amber highlight
+  var highlightOp = smooth(ramp(u, 0.1, 0.5));
+  var highlightPulse = 1 + Math.sin(u * Math.PI * 8) * 0.05;
+  var menuHighlightX = MENU_X;
+  var menuHighlightY = MENU_Y + MENU_H * 0.3; // Highlight the bottom section
+  var menuHighlightW = MENU_W * 0.8 * highlightPulse;
+  var menuHighlightH = MENU_H * 0.2 * highlightPulse;
+  s += menuIcon(MENU_X, MENU_Y, MENU_W, MENU_H, menuHighlightX, menuHighlightY, menuHighlightW, menuHighlightH, AMBER, highlightOp);
+
+  // Special dish appears
+  var dishOp = smooth(ramp(u, 0.1, 0.5));
+  var dishScale = lerp(0.5, 1.0, easeOut(ramp(u, 0.1, 0.5)));
+  var dishRotate = u * 360 * 0.5;
+  s += '<g transform="translate(' + PLATE_X + ' ' + PLATE_Y + ') scale(' + dishScale + ') rotate(' + dishRotate + ') translate(' + (-PLATE_X) + ' ' + (-PLATE_Y) + ')">';
+  s += plate(PLATE_X, PLATE_Y, PLATE_R, AMBER, 12, dishOp);
+  s += simpleMeal(PLATE_X, PLATE_Y, PLATE_R * 0.6, dishOp); // Amber meal
+  s += '</g>';
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30s): SEARCH */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Table
+  s += rrect(CX, TABLE_Y, TABLE_W, TABLE_H, 20, WHITE, 0.8);
+  s += line(CX - TABLE_W / 2 + 50, TABLE_Y + TABLE_H / 2, CX - TABLE_W / 2 + 50, BOT, WHITE, 8);
+  s += line(CX + TABLE_W / 2 - 50, TABLE_Y + TABLE_H / 2, CX + TABLE_W / 2 - 50, BOT, WHITE, 8);
+
+  // YOU stick figure
+  var shrugAmount = smooth(ramp(u, 0.6, 0.9));
+  s += stickFigure(YOU_X, YOU_Y_SIT, 1, 0, 0, 0, shrugAmount, 1);
+
+  // Menu icon (faded)
+  s += menuIcon(MENU_X, MENU_Y, MENU_W, MENU_H, null, null, null, null, null, 0.3);
+
+  // Special dish (amber)
+  s += plate(PLATE_X - 180, PLATE_Y, PLATE_R, AMBER, 12, 1);
+  s += simpleMeal(PLATE_X - 180, PLATE_Y, PLATE_R * 0.6, 1);
+
+  // Generic dish (white)
+  var genericDishOp = smooth(ramp(u, 0.1, 0.4));
+  s += plate(PLATE_X + 180, PLATE_Y, PLATE_R, WHITE, 12, genericDishOp);
+  s += simpleMeal(PLATE_X + 180, PLATE_Y, PLATE_R * 0.6, genericDishOp);
+
+  // Coral red question marks
+  var qOp = smooth(ramp(u, 0.2, 0.6)) * (1 - smooth(ramp(u, 0.8, 1.0)));
+  var qPulse = 1 + Math.sin(u * Math.PI * 10) * 0.1;
+  var qSize = 80 * qPulse;
+  s += questionMark(PLATE_X - 180, PLATE_Y - PLATE_R - 80, qSize, CORAL, 10, qOp);
+  s += questionMark(PLATE_X + 180, PLATE_Y - PLATE_R - 80, qSize, CORAL, 10, qOp);
+
+  // Question mark over YOU's head
+  var youQOp = smooth(ramp(u, 0.5, 0.8));
+  var youQSize = 90 * qPulse;
+  s += questionMark(YOU_X + 20, YOU_Y_SIT - 280, youQSize, CORAL, 10, youQOp);
+
+  // Coral cloud around YOU's head on shrug
+  if (shrugAmount > 0.01) {
+      var cloudR = 120 * shrugAmount;
+      s += dot(YOU_X + 20, YOU_Y_SIT - 280, cloudR, CORAL, 0.15 * shrugAmount);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40s): FIND */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // YOU stick figure (persists, slightly faded)
+  s += stickFigure(YOU_X, YOU_Y_SIT, 1, 0, 0, 0, 0, 0.3);
+
+  // Chef stick figure
+  var chefX = CX + 300;
+  var chefY = BOT - 250;
+  var chefOp = smooth(ramp(u, 0.1, 0.4));
+  var chefArmAngle = lerp(0, -Math.PI / 4, smooth(ramp(u, 0.3, 0.7))); // Pointing
+  s += stickFigure(chefX, chefY, 1, 0, chefArmAngle, 0, 0, chefOp);
+
+  // Special dish dissolves into blocks
+  var dissolve = smooth(ramp(u, 0.0, 0.3)); // 0=dish, 1=blocks
+  var reform = 1 - dissolve;
+
+  // Plate elements (fading out)
+  s += plate(PLATE_X, PLATE_Y, PLATE_R, AMBER, 12, reform);
+  s += simpleMeal(PLATE_X, PLATE_Y, PLATE_R * 0.6, reform);
+
+  // Ingredient blocks (appearing)
+  var numBlocks = 8;
+  var blockW = 250;
+  var blockH = 150;
+  var stackX = CX - 100;
+  var stackBaseY = BOT - 100; // Bottom of the stack
+
+  for (var i = 0; i < numBlocks; i++) {
+    var blockY = stackBaseY - i * blockH;
+    var blockOp = clamp(dissolve * 2 - (i * 0.1), 0, 1); // Staggered appearance
+    var crackOp = smooth(ramp(u, 0.4 + i * 0.05, 0.8)); // Staggered cracks
+
+    // Perishable blocks (e.g., every other one)
+    var isPerishable = (i % 2 === 0);
+    var blockColor = BLUE; // All blue, cracks for perishable
+    var currentCrackOp = isPerishable ? crackOp : 0;
+
+    // Morphing position from plate to stack
+    var morphX = lerp(PLATE_X, stackX, dissolve);
+    var morphY = lerp(PLATE_Y, blockY, dissolve);
+    var morphScale = lerp(PLATE_R * 2 / blockW, 1, dissolve); // Scale from plate size to block size
+
+    s += '<g transform="translate(' + morphX + ' ' + morphY + ') scale(' + morphScale + ') translate(' + (-morphX) + ' ' + (-morphY) + ')">';
+    s += ingredientBlock(morphX, morphY, blockW, blockH, blockColor, blockOp, currentCrackOp);
+    s += '</g>';
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50s): TAKE */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.8, smooth(u));
+  s += '<g ' + camera(scale, 0, lerp(0, 90, smooth(u))) + '>';
+
+  // YOU stick figure (persists, slightly faded)
+  s += stickFigure(YOU_X, YOU_Y_SIT, 1, 0, 0, 0, 0, 0.3);
+
+  // Chef stick figure (fades out)
+  var chefX = CX + 300;
+  var chefY = BOT - 250;
+  var chefOp = 1 - smooth(ramp(u, 0.0, 0.3));
+  s += stickFigure(chefX, chefY, 1, -Math.PI / 4, -Math.PI / 4, 0, 0, chefOp);
+
+  // Ingredient blocks reassemble into special dish
+  var reform = smooth(ramp(u, 0.2, 0.7)); // 0=blocks, 1=dish
+  var numBlocks = 8;
+  var blockW = 250;
+  var blockH = 150;
+  var stackX = CX - 100;
+  var stackBaseY = BOT - 100;
+
+  for (var i = 0; i < numBlocks; i++) {
+    var blockY = stackBaseY - i * blockH;
+    var blockOp = 1 - reform; // Blocks fade out
+    var morphX = lerp(stackX, PLATE_X, reform);
+    var morphY = lerp(blockY, PLATE_Y, reform);
+    var morphScale = lerp(1, PLATE_R * 2 / blockW, reform); // Scale from block size to plate size
+
+    s += '<g transform="translate(' + morphX + ' ' + morphY + ') scale(' + morphScale + ') translate(' + (-morphX) + ' ' + (-morphY) + ')">';
+    s += ingredientBlock(morphX, morphY, blockW, blockH, BLUE, blockOp, 0); // No cracks on reassembly
+    s += '</g>';
+  }
+
+  // Special dish (amber) reappears
+  var dishOp = reform;
+  var dishScale = lerp(0.5, 1.0, easeOut(reform));
+  s += '<g transform="translate(' + PLATE_X + ' ' + PLATE_Y + ') scale(' + dishScale + ')">';
+  s += plate(PLATE_X, PLATE_Y, PLATE_R, AMBER, 12, dishOp);
+  s += simpleMeal(PLATE_X, PLATE_Y, PLATE_R * 0.6, dishOp);
+  s += '</g>';
+
+  // YOU's hand guided by signal blue arrow
+  var handReach = smooth(ramp(u, 0.1, 0.5));
+  var handX = YOU_X + 50 + handReach * (PLATE_X - YOU_X - 100);
+  var handY = YOU_Y_SIT - 50 + handReach * (PLATE_Y - YOU_Y_SIT + 50);
+  s += line(YOU_X + 50, YOU_Y_SIT - 50, handX, handY, WHITE, 8, 1); // Arm reaching
+  var arrowOp = smooth(ramp(u, 0.2, 0.6)) * (1 - smooth(ramp(u, 0.7, 0.9)));
+  var arrowSize = 40;
+  s += line(handX - arrowSize, handY, handX, handY - arrowSize, BLUE, 10, arrowOp);
+  s += line(handX + arrowSize, handY, handX, handY - arrowSize, BLUE, 10, arrowOp);
+
+  // Profit coin icon
+  var coinOp = smooth(ramp(u, 0.6, 0.9));
+  var coinPulse = 1 + Math.sin(u * Math.PI * 15) * 0.1;
+  s += coinIcon(PLATE_X + PLATE_R + 100, PLATE_Y - 50, 40 * coinPulse, BLUE, 8, coinOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60s): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.8, 0.92, smooth(clamp(u / 0.7, 0, 1)));
+  s += '<g ' + camera(scale, 0, lerp(90, 0, smooth(u))) + '>';
+
+  // Table
+  s += rrect(CX, TABLE_Y, TABLE_W, TABLE_H, 20, WHITE, 0.8);
+  s += line(CX - TABLE_W / 2 + 50, TABLE_Y + TABLE_H / 2, CX - TABLE_W / 2 + 50, BOT, WHITE, 8);
+  s += line(CX + TABLE_W / 2 - 50, TABLE_Y + TABLE_H / 2, CX + TABLE_W / 2 - 50, BOT, WHITE, 8);
+
+  // YOU stick figure
+  var nodAmount = smooth(ramp(u, 0.5, 0.9));
+  var headNod = lerp(0, -Math.PI / 8, nodAmount);
+  s += stickFigure(YOU_X, YOU_Y_SIT, 1, headNod, 0, 0, 0, 1);
+
+  // Menu icon with signal blue highlight
+  var highlightOp = 1;
+  var menuHighlightX = MENU_X;
+  var menuHighlightY = MENU_Y + MENU_H * 0.3;
+  var menuHighlightW = MENU_W * 0.8;
+  var menuHighlightH = MENU_H * 0.2;
+  var highlightColor = lerpColor(AMBER, BLUE, smooth(ramp(u, 0.1, 0.5))); // Amber to Blue transition
+  s += menuIcon(MENU_X, MENU_Y, MENU_W, MENU_H, menuHighlightX, menuHighlightY, menuHighlightW, menuHighlightH, highlightColor, highlightOp);
+
+  // Subtle signal blue glow around YOU's head
+  if (nodAmount > 0.01) {
+      var glowR = 80 * nodAmount;
+      s += dot(YOU_X + 20, YOU_Y_SIT - 280, glowR, BLUE, 0.15 * nodAmount);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+// Helper for color interpolation
+function lerpColor(a, b, t) {
+    var ah = parseInt(a.replace(/#/g, ''), 16),
+        ar = ah >> 16, ag = (ah >> 8) & 0xff, ab = ah & 0xff,
+        bh = parseInt(b.replace(/#/g, ''), 16),
+        br = bh >> 16, bg = (bh >> 8) & 0xff, bb = bh & 0xff,
+        rr = ar + t * (br - ar),
+        rg = ag + t * (bg - ag),
+        rb = ab + t * (bb - ab);
+    return '#' + ((1 << 24) + (rr << 16) + (rg << 8) + rb | 0).toString(16).slice(1);
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

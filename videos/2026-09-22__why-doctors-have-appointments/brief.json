@@ -1,0 +1,15 @@
+{
+  "id": "why-doctors-have-appointments",
+  "slug": "2026-09-22__why-doctors-have-appointments",
+  "title_working": "Why Doctors Use Appointment Slots",
+  "system": "scheduling to balance physician time and patient flow",
+  "cluster": "queues-and-waiting",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-09-22T11:37:44+00:00",
+  "produced_at": "2026-09-22T11:43:57+00:00",
+  "verify": "PASS",
+  "takeaway": "Appointment systems, though sometimes frustrating, are a deliberate design to manage scarce medical resources and patient expectations efficiently.",
+  "animation_source": "fallback"
+}
