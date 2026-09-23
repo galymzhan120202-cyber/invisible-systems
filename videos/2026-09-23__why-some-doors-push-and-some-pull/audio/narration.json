@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "Every day, countless doors stand between you and where you need to be. You approach, expecting a simple, intuitive move to open your path quickly.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "But then it happens: you push a door that pulls, or pull one that pushes. A moment of awkward fumbling, and suddenly you feel silly.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "Why this constant confusion? You blame bad design or random inconsistency. It feels like doors are deliberately trying to trick you, making tasks frustrating.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "The truth is, many doors are designed for crowds and emergencies, not individual convenience. Fire exits must push OUT easily, without obstruction, for safety.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "So, your occasional awkward push-pull is the silent cost of a system prioritizing collective safety. Your momentary confusion ensures everyone can exit swiftly.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "Now, you'll spot the subtle cues: a flat plate means push, a handle implies pull. You understand the system, making you an expert observer.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

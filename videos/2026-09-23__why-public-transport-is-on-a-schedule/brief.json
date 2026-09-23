@@ -1,0 +1,15 @@
+{
+  "id": "why-public-transport-is-on-a-schedule",
+  "slug": "2026-09-23__why-public-transport-is-on-a-schedule",
+  "title_working": "Why Public Transport Runs on a Schedule",
+  "system": "optimizing vehicle deployment and passenger expectations",
+  "cluster": "traffic-and-crowds",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-09-23T11:30:32+00:00",
+  "produced_at": "2026-09-23T11:34:59+00:00",
+  "verify": "PASS",
+  "takeaway": "Public transport runs on schedules not to inconvenience you, but to efficiently manage limited resources and serve the entire system.",
+  "animation_source": "llm"
+}

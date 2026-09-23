@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You're deep into a website, shopping or working. You just want seamless access, expecting to stay logged in forever, for ultimate convenience.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "Then, suddenly, \"Session Expired.\" You open a site used yesterday and boom, logged out. It feels like a frustrating, familiar digital roadblock.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "Your immediate thought: \"Ugh, another glitch!\" or \"This site is so annoying!\" You suspect bad design, a server error, or a personal vendetta.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "But it's no bug; it's a crucial security feature. Websites use temporary \"session tokens,\" your digital key, designed to expire after a set time.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "This minor inconvenience is the price of strong security. If a token were stolen, an attacker's access is limited. It protects you from forgotten logins on public computers.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "So next time you re-enter your password, remember: it's not the system failing. It's *protecting* you, by keeping your digital keys on a short leash.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

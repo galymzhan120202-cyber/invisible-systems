@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Public Transport Runs on a Schedule</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / rules
+var AMBER = "#F2A93B";              // warm amber   -> YOU / desire
+var CORAL = "#FF5B5B";              // coral red    -> naive model / failure
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- common element dimensions and positions ---------- */
+var FIGURE_H = 220;
+var FIGURE_W = 120;
+var FIGURE_Y = BOT - FIGURE_H / 2 - 80; // Resting height for the figure
+var STOP_X = CX - 150;                  // Bus stop X position
+var FIGURE_X = STOP_X;                  // Figure stands at the stop
+var STOP_W = 200;
+var STOP_H = 300;
+var STOP_Y = FIGURE_Y + FIGURE_H / 2 - 20; // Figure stands at the stop, base of pole
+var CLOCK_R = 60;
+var CLOCK_Y = TOP + CLOCK_R + 80;
+var BUS_W = 180;
+var BUS_H = 80;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom shape builders ---------- */
+function person(x, y, col, op, pose) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var bodyH = FIGURE_H * 0.5;
+  var headR = FIGURE_H * 0.15;
+  var armLen = FIGURE_H * 0.3;
+  var legLen = FIGURE_H * 0.4;
+  var bodyY = y - headR - bodyH / 2;
+  var headY = y - headR - bodyH;
+
+  // Head
+  g += dot(x, headY, headR, col);
+  // Body
+  g += line(x, bodyY - bodyH / 2, x, bodyY + bodyH / 2, col, 10);
+  // Legs
+  g += line(x, bodyY + bodyH / 2, x - FIGURE_W * 0.2, bodyY + bodyH / 2 + legLen, col, 10);
+  g += line(x, bodyY + bodyH / 2, x + FIGURE_W * 0.2, bodyY + bodyH / 2 + legLen, col, 10);
+
+  if (pose === 'phone') {
+    var handX = x + FIGURE_W * 0.3;
+    var handY = bodyY - bodyH / 2 + armLen * 0.6;
+    g += line(x, bodyY - bodyH / 2, handX, handY, col, 10); // Arm
+    // Phone (simple rectangle)
+    g += rrect(handX + 30, handY + 10, 40, 70, 8, DIM, 0.9);
+  } else if (pose === 'frustrated') {
+    // Arms up in exasperation
+    g += line(x, bodyY - bodyH / 2, x - armLen * 0.8, bodyY - bodyH / 2 - armLen * 0.6, col, 10);
+    g += line(x, bodyY - bodyH / 2, x + armLen * 0.8, bodyY - bodyH / 2 - armLen * 0.6, col, 10);
+  } else if (pose === 'looking_up') {
+    g += line(x, headY, x + 10, headY - headR * 0.8, WHITE, 7); // Gaze line
+  } else { // 'idle'
+    // Arms down
+    g += line(x, bodyY - bodyH / 2, x - FIGURE_W * 0.2, bodyY + armLen * 0.4, col, 10);
+    g += line(x, bodyY - bodyH / 2, x + FIGURE_W * 0.2, bodyY + armLen * 0.4, col, 10);
+  }
+  g += '</g>';
+  return g;
+}
+
+function busStop(x, y, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var poleX = x - STOP_W / 2 + 30;
+  var poleY = y - STOP_H / 2;
+  // Pole
+  g += line(poleX, poleY, poleX, y + 20, col, 8);
+  // Sign
+  g += rrect(poleX + STOP_W / 2 - 30, poleY + STOP_H / 2 - 40, STOP_W - 60, STOP_H - 100, 12, col, 0.1); // Background
+  g += rrectStroke(poleX + STOP_W / 2 - 30, poleY + STOP_H / 2 - 40, STOP_W - 60, STOP_H - 100, 12, col, 6);
+  // Bus icon on sign (small)
+  g += bus(poleX + STOP_W / 2 - 30, poleY + STOP_H / 2 - 40, col, 0.8, 0.5); // scale 0.5
+  g += '</g>';
+  return g;
+}
+
+function clock(x, y, r, col, handAngle1, handAngle2, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, r, col, 8);
+  // Hands
+  var h1x = x + r * 0.6 * Math.sin(handAngle1);
+  var h1y = y - r * 0.6 * Math.cos(handAngle1);
+  var h2x = x + r * 0.9 * Math.sin(handAngle2);
+  var h2y = y - r * 0.9 * Math.cos(handAngle2);
+  g += line(x, y, h1x, h1y, col, 8);
+  g += line(x, y, h2x, h2y, col, 8);
+  g += dot(x, y, 10, col); // Center dot
+  g += '</g>';
+  return g;
+}
+
+function bus(x, y, col, op, scale) {
+  op = (op == null ? 1 : op);
+  scale = (scale == null ? 1 : scale);
+  var g = '<g opacity="' + op + '">';
+  var w = BUS_W * scale, h = BUS_H * scale;
+  g += rrect(x, y, w, h, w * 0.15, col, 0.9);
+  // Wheels
+  g += dot(x - w * 0.3, y + h * 0.4, h * 0.2, DIM);
+  g += dot(x + w * 0.3, y + h * 0.4, h * 0.2, DIM);
+  g += '</g>';
+  return g;
+}
+
+function thoughtBubble(x, y, w, h, col, op, u) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 40, col, 0.15);
+  g += rrectStroke(x, y, w, h, 40, col, 6);
+  // Small connecting bubbles
+  g += dot(x + w * 0.4, y + h * 0.5 + 30, 20, col, 0.15);
+  g += dot(x + w * 0.4 + 20, y + h * 0.5 + 60, 12, col, 0.15);
+
+  // Chaotic lines
+  for (var i = 0; i < 5; i++) {
+    var startX = x + (rnd(i) - 0.5) * w * 0.8;
+    var startY = y + (rnd(i + 1) - 0.5) * h * 0.8;
+    var endX = x + (rnd(i + 2) - 0.5) * w * 0.8;
+    var endY = y + (rnd(i + 3) - 0.5) * h * 0.8;
+    var midX = x + (rnd(i + 4) - 0.5) * w * 0.8;
+    var midY = y + (rnd(i + 5) - 0.5) * h * 0.8;
+    var lineU = (u * 2 + rnd(i * 10)) % 1;
+    var currentX1 = lerp(startX, midX, smooth(lineU));
+    var currentY1 = lerp(startY, midY, smooth(lineU));
+    var currentX2 = lerp(midX, endX, smooth(lineU));
+    var currentY2 = lerp(midY, endY, smooth(lineU));
+    g += line(currentX1, currentY1, currentX2, currentY2, WHITE, 5, 0.7);
+  }
+  g += '</g>';
+  return g;
+}
+
+function frustrationAura(x, y, col, pulseVal) {
+  if (pulseVal <= 0) return '';
+  var r = lerp(30, 120, pulseVal);
+  return ring(x, y - FIGURE_H * 0.2, r, col, lerp(12, 4, pulseVal), pulseVal);
+}
+
+function cityGrid(u, col, op, scale) {
+  op = (op == null ? 1 : op);
+  scale = (scale == null ? 1 : scale);
+  var g = '<g opacity="' + op + '">';
+  var gridW = W * scale * 0.8, gridH = (BOT - TOP) * scale * 0.8;
+  var gridX = CX, gridY = CY;
+
+  var numLines = 8;
+  var lineSpacing = gridW / numLines;
+
+  for (var i = 0; i <= numLines; i++) {
+    var y = gridY - gridH / 2 + i * lineSpacing;
+    g += line(gridX - gridW / 2, y, gridX + gridW / 2, y, col, 4);
+  }
+  for (var i = 0; i <= numLines; i++) {
+    var x = gridX - gridW / 2 + i * lineSpacing;
+    g += line(x, gridY - gridH / 2, x, gridY + gridH / 2, col, 4);
+  }
+  g += '</g>';
+  return g;
+}
+
+function miniBusOnGrid(x, y, col, op, u, id) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var size = 10 + Math.sin(u * 10 + id) * 2;
+  g += rrect(x, y, size * 2, size * 1.2, size * 0.3, col, 0.9);
+  g += dot(x - size * 0.6, y + size * 0.4, size * 0.3, DIM);
+  g += dot(x + size * 0.6, y + size * 0.4, size * 0.3, DIM);
+  g += '</g>';
+  return g;
+}
+
+function passengerDot(x, y, col, op, u, id) {
+  op = (op == null ? 1 : op);
+  var r = 10 + Math.sin(u * 10 + id) * 2;
+  return dot(x, y, r, col, op);
+}
+
+function scheduleOverlay(x, y, w, h, col, op, u) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var lineH = h / 5;
+  g += line(x - w / 2, y - h / 2, x - w / 2, y + h / 2, col, 6);
+  g += line(x + w / 2, y - h / 2, x + w / 2, y + h / 2, col, 6);
+  for (var i = 0; i < 5; i++) {
+    var ly = y - h / 2 + i * lineH;
+    g += line(x - w / 2, ly, x + w / 2, ly, col, 4);
+  }
+  for (var i = 0; i < 4; i++) {
+    for (var j = 0; j < 3; j++) {
+      var cx = x - w / 2 + w * 0.2 + j * w * 0.3;
+      var cy = y - h / 2 + lineH * 0.5 + i * lineH;
+      g += dot(cx, cy, 8, col, 0.7);
+    }
+  }
+  g += '</g>';
+  return g;
+}
+
+/* ---------- Persistent "System" hero element that morphs across scenes ---------- */
+function systemBackground(u, sceneIdx, op) {
+  var s = '';
+  if (sceneIdx <= 2) { // S1-S3: Subtle blue frame around the main action area
+    var frameW = 600, frameH = BOT - TOP - 100;
+    var frameX = CX, frameY = CY + 50;
+    s += rrectStroke(frameX, frameY, frameW, frameH, 40, BLUE, 5, op * 0.2);
+  } else if (sceneIdx === 3) { // S4: City Grid forming
+    var gridScale = lerp(0.1, 1.0, easeOut(u));
+    s += cityGrid(u, BLUE, op, gridScale);
+  } else if (sceneIdx === 4) { // S5: Expanded City Grid
+    s += cityGrid(u, BLUE, op, 1.0);
+  } else if (sceneIdx === 5) { // S6: Schedule Overlay
+    var overlayW = lerp(W * 0.8, STOP_W + 100, smooth(u));
+    var overlayH = lerp(H * 0.8, STOP_H + 100, smooth(u));
+    var overlayY = lerp(CY, STOP_Y - 50, smooth(u));
+    var overlayX = lerp(CX, FIGURE_X, smooth(u));
+    s += scheduleOverlay(overlayX, overlayY, overlayW, overlayH, BLUE, op * lerp(1, 0.7, u), u);
+  }
+  return s;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  s += systemBackground(u, 0, 1); // Blue frame
+  var figureOp = ramp(u, 0.0, 0.2);
+  var clockOp = ramp(u, 0.2, 0.5);
+  var bob = Math.sin(u * Math.PI * 2) * 5; // Subtle shift weight
+
+  s += busStop(STOP_X, STOP_Y, WHITE, figureOp);
+  s += person(FIGURE_X, FIGURE_Y + bob, AMBER, figureOp, 'phone');
+  s += clock(CX, CLOCK_Y, CLOCK_R, WHITE, 0, Math.PI/6, clockOp); // 12:00 and 1:00
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  s += systemBackground(u, 1, 1); // Blue frame
+  var bob = Math.sin(u * Math.PI * 3) * 5;
+  s += busStop(STOP_X, STOP_Y, WHITE, 1);
+  s += person(FIGURE_X, FIGURE_Y + bob, AMBER, 1, 'idle');
+
+  // Clock hands spin fast
+  var hand1Angle = u * Math.PI * 15; // Faster hand
+  var hand2Angle = u * Math.PI * 30; // Even faster hand
+  s += clock(CX, CLOCK_Y, CLOCK_R, WHITE, hand1Angle, hand2Angle, 1);
+
+  // Bus flashes and disappears
+  var busTravel = ramp(u, 0.2, 0.6);
+  var busX = lerp(W + BUS_W / 2, -BUS_W / 2, busTravel);
+  var busOp = pulse(u, 0.4, 0.2);
+  s += bus(busX, FIGURE_Y - 100, WHITE, busOp, 1);
+
+  // Frustration aura
+  s += frustrationAura(FIGURE_X, FIGURE_Y, CORAL, pulse(u, 0.8, 0.15));
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  s += systemBackground(u, 2, 1); // Blue frame
+  var zoom = lerp(1.0, 1.1, smooth(ramp(u, 0.0, 0.5)));
+  var panY = lerp(0, -100, smooth(ramp(u, 0.0, 0.5))); // Pan up to focus on thought bubble
+  s += '<g ' + camera(zoom, 0, panY) + '>';
+
+  s += busStop(STOP_X, STOP_Y, WHITE, 1);
+  s += person(FIGURE_X, FIGURE_Y, AMBER, 1, 'looking_up');
+
+  var bubbleOp = ramp(u, 0.1, 0.4) * (1 - ramp(u, 0.8, 1.0)); // Dissipate towards end
+  s += thoughtBubble(CX, CLOCK_Y + 100, 400, 300, CORAL, bubbleOp, u);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  // Thought bubble dissipates
+  var bubbleOp = 1 - ramp(u, 0.0, 0.2);
+  if (bubbleOp > 0.02) {
+    s += thoughtBubble(CX, CLOCK_Y + 100, 400, 300, CORAL, bubbleOp, u);
+  }
+
+  s += systemBackground(u, 3, 1); // City Grid forms
+
+  // Hero dot (person morphs into a dot)
+  var heroDotOp = ramp(u, 0.3, 0.5);
+  s += dot(FIGURE_X, FIGURE_Y, lerp(15, 8, smooth(u)), AMBER, heroDotOp);
+
+  // Mini buses moving on grid
+  var numBuses = 8;
+  var gridScale = lerp(0.1, 1.0, easeOut(u));
+  var gridW = W * gridScale * 0.8, gridH = (BOT - TOP) * gridScale * 0.8;
+  var gridX = CX, gridY = CY;
+  for (var i = 0; i < numBuses; i++) {
+    var p = (u * 0.5 + rnd(i)) % 1;
+    var x = lerp(gridX - gridW / 2, gridX + gridW / 2, p);
+    var y = gridY - gridH / 2 + (i % 4) * (gridH / 3);
+    s += miniBusOnGrid(x, y, WHITE, ramp(u, 0.4, 0.6), u, i);
+  }
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.7, smooth(u)); // Camera pull back
+  s += '<g ' + camera(scale, 0, 0) + '>';
+  s += systemBackground(u, 4, 1); // Expanded City Grid
+
+  // Hero dot
+  s += dot(FIGURE_X, FIGURE_Y, 8, AMBER, 1);
+
+  // Many passenger dots flowing
+  var numPassengerDots = 20;
+  var gridW = W * 0.8, gridH = (BOT - TOP) * 0.8;
+  var gridX = CX, gridY = CY;
+  for (var i = 0; i < numPassengerDots; i++) {
+    var p = (u * 0.8 + rnd(i * 10)) % 1;
+    var x = lerp(gridX - gridW / 2, gridX + gridW / 2, rnd(i * 20));
+    var y = lerp(gridY - gridH / 2, gridY + gridH / 2, p);
+    s += passengerDot(x, y, WHITE, 0.8, u, i);
+  }
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.7, 1.0, smooth(u)); // Camera zoom in
+  s += '<g ' + camera(scale, 0, 0) + '>';
+
+  s += systemBackground(u, 5, 1); // Schedule Overlay morphing
+
+  s += busStop(STOP_X, STOP_Y, WHITE, 1);
+  s += person(FIGURE_X, FIGURE_Y, AMBER, 1, 'idle');
+
+  var clockOp = ramp(u, 0.2, 0.5);
+  s += clock(CX, CLOCK_Y, CLOCK_R, WHITE, Math.PI/2, Math.PI/2 + Math.PI/6, clockOp); // 3:00 and 4:00
+
+  // Bus approaches and stops
+  var busArrival = ramp(u, 0.5, 0.9);
+  var busStopX = STOP_X + STOP_W / 2 + BUS_W / 2 + 30; // Bus stops next to the stop sign
+  var busX = lerp(W + BUS_W / 2, busStopX, busArrival);
+  s += bus(busX, FIGURE_Y - 100, WHITE, 1, 1);
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why You Keep Logging In on Websites</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue  -> system/rules
+var AMBER = "#F2A93B";              // warm amber   -> YOU/desire
+var CORAL = "#FF5B5B";              // coral red    -> naive model/friction
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom shape builders ---------- */
+
+// Stick figure helper
+function stickFigure(x, y, scale, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var s = '<g transform="translate(' + x + ' ' + y + ') scale(' + scale + ')" opacity="' + op + '">';
+  var sw = 10 / scale; // Adjust stroke width for scale
+
+  // Head
+  var headTilt = 0; // degrees
+  var bodyLean = 0; // x offset for body top
+  var armL1 = { x: -30, y: -60 }, armL2 = { x: -50, y: -20 };
+  var armR1 = { x: 30, y: -60 }, armR2 = { x: 50, y: -20 };
+  var legL1 = { x: -15, y: -20 }, legL2 = { x: -30, y: 30 };
+  var legR1 = { x: 15, y: -20 }, legR2 = { x: 30, y: 30 };
+
+  switch (pose) {
+    case 'sitting':
+      legL1 = { x: -15, y: 0 }; legL2 = { x: -40, y: 0 };
+      legR1 = { x: 15, y: 0 }; legR2 = { x: 40, y: 0 };
+      armL1 = { x: -30, y: -40 }; armL2 = { x: -50, y: -50 };
+      armR1 = { x: 30, y: -40 }; armR2 = { x: 50, y: -50 };
+      break;
+    case 'surprised':
+      armL1 = { x: -20, y: -80 }; armL2 = { x: -40, y: -120 };
+      armR1 = { x: 20, y: -80 }; armR2 = { x: 40, y: -120 };
+      headTilt = -10;
+      break;
+    case 'frustrated':
+      armL1 = { x: -20, y: -80 }; armL2 = { x: -40, y: -120 };
+      armR1 = { x: 20, y: -80 }; armR2 = { x: 40, y: -120 };
+      headTilt = 15;
+      bodyLean = 10;
+      break;
+    case 'thinking':
+      armL1 = { x: -20, y: -80 }; armL2 = { x: -40, y: -50 };
+      armR1 = { x: 20, y: -80 }; armR2 = { x: 10, y: -90 }; // Hand to chin
+      headTilt = 5;
+      break;
+    case 'observing': // Neutral, slightly forward
+      bodyLean = 5;
+      break;
+    case 'shielded':
+      armL1 = { x: -20, y: -80 }; armL2 = { x: -40, y: -10 };
+      armR1 = { x: 20, y: -80 }; armR2 = { x: 40, y: -10 };
+      break;
+    case 'attacking': // Generic attacker
+      armL1 = { x: -20, y: -80 }; armL2 = { x: -50, y: -100 };
+      armR1 = { x: 20, y: -80 }; armR2 = { x: 50, y: -100 };
+      legL1 = { x: -15, y: -20 }; legL2 = { x: -30, y: 0 };
+      legR1 = { x: 15, y: -20 }; legR2 = { x: 30, y: 0 };
+      bodyLean = 10;
+      break;
+    case 'nods':
+      headTilt = 15;
+      break;
+  }
+
+  s += '<g transform="rotate(' + headTilt + ' 0 -100)">' + dot(0, -100, 20 / scale, col) + '</g>'; // Head with tilt
+  s += line(bodyLean, -80, bodyLean, -20, col, sw); // Body with lean
+
+  s += line(bodyLean + armL1.x, armL1.y, bodyLean + armL2.x, armL2.y, col, sw);
+  s += line(bodyLean + armR1.x, armR1.y, bodyLean + armR2.x, armR2.y, col, sw);
+  s += line(bodyLean + legL1.x, legL1.y, bodyLean + legL2.x, legL2.y, col, sw);
+  s += line(bodyLean + legR1.x, legR1.y, bodyLean + legR2.x, legR2.y, col, sw);
+
+  s += '</g>';
+  return s;
+}
+
+// Computer screen helper
+function computerScreen(x, y, w, h, content, col, op) {
+  op = (op == null ? 1 : op);
+  var s = '<g opacity="' + op + '">';
+  s += rrect(x, y, w, h, 20, col, 0.1); // Screen background (faint fill)
+  s += rrectStroke(x, y, w, h, 20, col, 8); // Screen border
+  s += '<g transform="translate(' + x + ' ' + y + ')">';
+  s += content; // Inner content
+  s += '</g></g>';
+  return s;
+}
+
+// Key icon helper
+function keyIcon(x, y, size, col, state, op) {
+  op = (op == null ? 1 : op);
+  var sw = size / 10;
+  var s = '<g transform="translate(' + x + ' ' + y + ') scale(' + (size / 100) + ')" opacity="' + op + '">';
+  var headR = 30;
+  var neckW = 15, neckH = 20;
+  var bodyW = 20, bodyH = 50;
+  var toothW = 20, toothH = 15;
+
+  switch (state) {
+    case 'active':
+    case 'entering':
+      s += ring(0, 0, headR, col, sw);
+      s += rrect(0, headR + neckH / 2, neckW, neckH, 5, col);
+      s += rrect(0, headR + neckH + bodyH / 2, bodyW, bodyH, 5, col);
+      s += rrect(bodyW / 2 + toothW / 2 + 2, headR + neckH + bodyH / 2 + 10, toothW, toothH, 3, col);
+      s += rrect(bodyW / 2 + toothW / 2 + 2, headR + neckH + bodyH / 2 - 10, toothW, toothH, 3, col);
+      break;
+    case 'broken':
+      s += ring(0, 0, headR, col, sw);
+      s += line(0, headR + neckH / 2 - neckH / 2, 0, headR + neckH / 2 + neckH / 2, col, sw); // Neck
+      s += line(0, headR + neckH + bodyH / 2 - bodyH / 2, 0, headR + neckH + bodyH / 2 + bodyH / 2, col, sw); // Body
+      s += line(bodyW / 2 + toothW / 2 + 2 - toothW / 2, headR + neckH + bodyH / 2 + 10, bodyW / 2 + toothW / 2 + 2 + toothW / 2, headR + neckH + bodyH / 2 + 10, col, sw);
+      s += line(bodyW / 2 + toothW / 2 + 2 - toothW / 2, headR + neckH + bodyH / 2 - 10, bodyW / 2 + toothW / 2 + 2 + toothW / 2, headR + neckH + bodyH / 2 - 10, col, sw);
+      // Add 'shattered' effect (small lines)
+      s += line(-headR * 0.7, -headR * 0.7, -headR * 0.9, -headR * 0.9, col, sw * 0.5);
+      s += line(headR * 0.7, headR * 0.7, headR * 0.9, headR * 0.9, col, sw * 0.5);
+      break;
+  }
+  s += '</g>';
+  return s;
+}
+
+// Lock icon helper
+function lockIcon(x, y, size, col, state, op) {
+  op = (op == null ? 1 : op);
+  var sw = size / 10;
+  var s = '<g transform="translate(' + x + ' ' + y + ') scale(' + (size / 100) + ')" opacity="' + op + '">';
+  var bodyW = 60, bodyH = 70;
+  var shackleR = 30;
+
+  // Shackle
+  s += pathTag("M " + (-shackleR) + " " + (-bodyH / 2 - shackleR) +
+               " A " + shackleR + " " + shackleR + " 0 0 1 " + shackleR + " " + (-bodyH / 2 - shackleR) +
+               " V " + (-bodyH / 2 + 10) + " M " + (-shackleR) + " " + (-bodyH / 2 + 10) + " V " + (-bodyH / 2 - shackleR), col, sw);
+
+  // Body
+  s += rrect(0, 0, bodyW, bodyH, 10, col);
+
+  // Keyhole (simple rectangle)
+  s += rrect(0, 20, 10, 20, 2, WHITE);
+
+  s += '</g>';
+  return s;
+}
+
+// Thought bubble helper
+function thoughtBubble(x, y, w, h, content, col, op) {
+  op = (op == null ? 1 : op);
+  var s = '<g opacity="' + op + '">';
+  // Main bubble
+  s += rrect(x, y, w, h, 30, col, 0.1);
+  s += rrectStroke(x, y, w, h, 30, col, 6);
+  // Small bubbles leading to head
+  s += dot(x - w / 2 + 40, y + h / 2 + 40, 15, col, 0.8);
+  s += dot(x - w / 2 + 20, y + h / 2 + 70, 10, col, 0.6);
+  s += '<g transform="translate(' + x + ' ' + y + ')">';
+  s += content;
+  s += '</g></g>';
+  return s;
+}
+
+// Broken circuit board icon (simple)
+function brokenCircuit(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var s = '<g transform="translate(' + x + ' ' + y + ') scale(' + (size / 100) + ')" opacity="' + op + '">';
+  s += rrect(0, 0, 80, 80, 10, col, 0.1);
+  s += line(-30, -30, 30, 30, col, 8);
+  s += line(-30, 30, 30, -30, col, 8);
+  s += dot(-40, -40, 8, col);
+  s += dot(40, -40, 8, col);
+  s += dot(-40, 40, 8, col);
+  s += dot(40, 40, 8, col);
+  s += line(-40, 0, 40, 0, col, 3);
+  s += line(0, -40, 0, 40, col, 3);
+  // Crack
+  s += pathTag("M -20 -20 Q 0 -40 20 -20 Q 40 0 20 20 Q 0 40 -20 20 Z", CORAL, 6);
+  s += '</g>';
+  return s;
+}
+
+// Clock icon helper
+function clockIcon(x, y, size, col, handAngle, op) {
+  op = (op == null ? 1 : op);
+  var s = '<g transform="translate(' + x + ' ' + y + ') scale(' + (size / 100) + ')" opacity="' + op + '">';
+  s += ring(0, 0, 40, col, 8);
+  s += dot(0, 0, 5, col);
+  // Hour hand (fixed for simplicity)
+  s += line(0, 0, 0, -20, col, 6);
+  // Minute hand, rotates
+  s += '<g transform="rotate(' + (handAngle * 180 / Math.PI) + ' 0 0)">';
+  s += line(0, 0, 0, -30, col, 4);
+  s += '</g>';
+  s += '</g>';
+  return s;
+}
+
+// Shield icon helper
+function shield(x, y, w, h, col, op) {
+  op = (op == null ? 1 : op);
+  var s = '<g opacity="' + op + '">';
+  var pathD = "M " + (x - w / 2) + " " + (y - h / 2) +
+              " L " + (x + w / 2) + " " + (y - h / 2) +
+              " L " + (x + w / 2) + " " + (y + h / 2 - 50) +
+              " Q " + x + " " + (y + h / 2 + 50) + " " + (x - w / 2) + " " + (y + h / 2 - 50) +
+              " Z";
+  s += pathTag(pathD, col, 12);
+  s += '</g>';
+  return s;
+}
+
+// Lightbulb icon helper
+function lightbulb(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var s = '<g transform="translate(' + x + ' ' + y + ') scale(' + (size / 100) + ')" opacity="' + op + '">';
+  s += pathTag("M 0 -40 A 30 30 0 1 1 0 20 V 40 H -10 V 50 H 10 V 40 H 0 Z", col, 8);
+  s += '</g>';
+  return s;
+}
+
+// Checkmark icon helper
+function checkMark(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var s = '<g transform="translate(' + x + ' ' + y + ') scale(' + (size / 100) + ')" opacity="' + op + '">';
+  s += pathTag("M -40 0 L -10 30 L 40 -20", col, 12);
+  s += '</g>';
+  return s;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  var youX = CX, youY = BOT - 200;
+  var screenX = CX, screenY = CY - 200;
+  var screenW = 600, screenH = 400;
+
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  // YOU
+  s += stickFigure(youX, youY, 1, AMBER, 'sitting', 1);
+
+  // Screen
+  var cursorX = screenX - 150 + Math.sin(u * Math.PI * 3) * 50;
+  var cursorY = screenY - 50 + Math.cos(u * Math.PI * 2) * 30;
+  s += computerScreen(screenX, screenY, screenW, screenH, dot(cursorX - screenX, cursorY - screenY, 10, BLUE, 1), WHITE, 1);
+
+  // Flow lines from YOU
+  for (var i = 0; i < 8; i++) {
+    var angle = (i / 8) * Math.PI * 2 + u * Math.PI * 0.2;
+    var startR = 80;
+    var endR = lerp(120, 200, smooth(u + rnd(i) * 0.2));
+    var lineX1 = youX + Math.cos(angle) * startR;
+    var lineY1 = youY + Math.sin(angle) * startR;
+    var lineX2 = youX + Math.cos(angle) * endR;
+    var lineY2 = youY + Math.sin(angle) * endR;
+    s += line(lineX1, lineY1, lineX2, lineY2, AMBER, 6, 0.5 + 0.5 * Math.sin(u * Math.PI * 2 + i));
+  }
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var youX = CX, youY = BOT - 200;
+  var screenX = CX, screenY = CY - 200;
+  var screenW = 600, screenH = 400;
+
+  var pose = 'sitting';
+  if (u < 0.3) pose = 'sitting';
+  else if (u < 0.6) pose = 'surprised';
+  else pose = 'frustrated';
+
+  var barrierHeight = lerp(0, screenH, easeOut(ramp(u, 0.3, 0.6)));
+  var barrierY = screenY + screenH / 2 - barrierHeight / 2;
+  var barrierOpacity = ramp(u, 0.3, 0.6);
+
+  s += '<g>';
+  // YOU
+  s += stickFigure(youX, youY, 1, AMBER, pose, 1);
+
+  // Screen
+  s += computerScreen(screenX, screenY, screenW, screenH, '', WHITE, 1);
+
+  // Barrier
+  if (barrierOpacity > 0.01) {
+    s += rrect(screenX, barrierY, screenW, barrierHeight, 20, CORAL, 0.8 * barrierOpacity);
+    // Simple glyph for "Session Expired" (e.g., a cross)
+    var crossSize = 80;
+    var crossOp = ramp(u, 0.5, 0.8);
+    if (crossOp > 0.01) {
+      s += line(screenX - crossSize / 2, screenY - crossSize / 2, screenX + crossSize / 2, screenY + crossSize / 2, WHITE, 10, crossOp);
+      s += line(screenX - crossSize / 2, screenY + crossSize / 2, screenX + crossSize / 2, screenY - crossSize / 2, WHITE, 10, crossOp);
+    }
+  }
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var youX = CX - 100, youY = BOT - 200;
+  var screenX = CX, screenY = CY - 200;
+  var screenW = 600, screenH = 400;
+
+  var bubbleX = CX + 150, bubbleY = CY - 300;
+  var bubbleW = 300, bubbleH = 200;
+  var bubbleOp = ramp(u, 0.0, 0.3);
+
+  s += '<g>';
+  // Faded screen in background
+  s += computerScreen(screenX, screenY, screenW, screenH, '', WHITE, 0.1);
+
+  // YOU
+  s += stickFigure(youX, youY, 1, AMBER, 'thinking', 1);
+
+  // Thought bubble
+  if (bubbleOp > 0.01) {
+    s += thoughtBubble(bubbleX, bubbleY, bubbleW, bubbleH, brokenCircuit(0, 0, 80, CORAL, 1), WHITE, bubbleOp);
+  }
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var youX = CX, youY = BOT - 200;
+  var screenX = CX, screenY = CY - 200;
+  var screenW = 600, screenH = 400;
+
+  // Thought bubble fades out
+  var bubbleOp = 1 - ramp(u, 0.0, 0.2);
+  if (bubbleOp > 0.01) {
+    s += thoughtBubble(CX + 150, CY - 300, 300, 200, brokenCircuit(0, 0, 80, CORAL, 1), WHITE, bubbleOp);
+  }
+
+  // YOU
+  s += stickFigure(youX, youY, 1, AMBER, 'observing', 1);
+
+  // Screen (transformed, simpler)
+  var screenFillOp = lerp(0.1, 0.3, ramp(u, 0.2, 0.5));
+  s += rrect(screenX, screenY, screenW, screenH, 20, BLUE, screenFillOp);
+  s += rrectStroke(screenX, screenY, screenW, screenH, 20, BLUE, 8, screenFillOp);
+
+  // Key icon appears
+  var keyOp = ramp(u, 0.3, 0.6);
+  if (keyOp > 0.01) {
+    s += keyIcon(screenX - 150, screenY, 80, BLUE, 'active', keyOp);
+  }
+
+  // Clock icon appears
+  var clockOp = ramp(u, 0.4, 0.7);
+  if (clockOp > 0.01) {
+    s += clockIcon(screenX + 150, screenY, 80, BLUE, u * Math.PI * 2 * 3, clockOp); // Ticks 3 times per 10s
+  }
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var youX = CX, youY = CY + 100;
+  var shieldX = CX, shieldY = CY;
+  var shieldW = 500, shieldH = 800;
+
+  // YOU
+  s += stickFigure(youX, youY, 1, AMBER, 'shielded', 1);
+
+  // Shield
+  var shieldOp = lerp(0.7, 0.9, Math.sin(u * Math.PI * 4) * 0.1 + 0.5); // Gentle glow
+  s += shield(shieldX, shieldY, shieldW, shieldH, BLUE, shieldOp);
+
+  // Attackers
+  for (var i = 0; i < 5; i++) {
+    var attackerX = shieldX + Math.cos(u * Math.PI * 2 + i * Math.PI / 2) * lerp(shieldW / 2 + 50, shieldW / 2 + 10, smooth(u));
+    var attackerY = shieldY - shieldH / 2 + 100 + i * 150 + Math.sin(u * Math.PI * 3 + i) * 20;
+    // Attackers move towards the shield and are blocked
+    var hitEffect = pulse(u, (i + 1) * 0.15, 0.05); // Staggered hits
+    s += stickFigure(attackerX, attackerY, 0.7, WHITE, 'attacking', 1 - hitEffect * 0.5); // Fade slightly on hit
+  }
+
+  // Broken key icon
+  var keyIconX = shieldX + lerp(0, 50, smooth(ramp(u, 0.4, 0.6)));
+  var keyIconY = shieldY - 250 + lerp(0, -20, smooth(ramp(u, 0.4, 0.6)));
+  var keyOp = ramp(u, 0.0, 0.4);
+  var brokenKeyOp = ramp(u, 0.5, 0.8);
+
+  if (keyOp > 0.01 && u < 0.5) { // Show active key first
+    s += keyIcon(keyIconX, keyIconY, 80, BLUE, 'active', keyOp);
+  }
+  if (brokenKeyOp > 0.01) { // Then show broken key
+    s += keyIcon(keyIconX, keyIconY, 80, CORAL, 'broken', brokenKeyOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.8, 0.92, smooth(clamp(u / 0.7, 0, 1)));
+  var youX = CX, youY = BOT - 200;
+  var screenX = CX, screenY = CY - 200;
+  var screenW = 600, screenH = 400;
+
+  s += '<g ' + camera(scale, 0, lerp(90, 0, smooth(u))) + '>';
+
+  // YOU
+  var youPose = 'sitting';
+  if (u > 0.7) youPose = 'nods';
+  s += stickFigure(youX, youY, 1, AMBER, youPose, 1);
+
+  // Screen
+  s += computerScreen(screenX, screenY, screenW, screenH, '', WHITE, 1);
+
+  // Key and Lock interaction
+  var keyOp = ramp(u, 0.0, 0.3);
+  var lockOp = ramp(u, 0.1, 0.4);
+  var keyInsert = smooth(ramp(u, 0.4, 0.7));
+
+  var keyPosX = screenX - 150 + lerp(0, 150, keyInsert);
+  var lockPosX = screenX + 150 - lerp(0, 150, keyInsert);
+
+  if (keyOp > 0.01) {
+    s += keyIcon(keyPosX, screenY, 80, BLUE, 'entering', keyOp);
+  }
+  if (lockOp > 0.01) {
+    s += lockIcon(lockPosX, screenY, 80, BLUE, 'receiving_key', lockOp);
+  }
+
+  // Successful login confirmation (checkmark)
+  var checkOp = ramp(u, 0.7, 0.9);
+  if (checkOp > 0.01) {
+    s += checkMark(screenX, screenY, 100, BLUE, checkOp);
+  }
+
+  // Lightbulb above YOU's head
+  var lightbulbOp = ramp(u, 0.8, 1.0);
+  if (lightbulbOp > 0.01) {
+    s += lightbulb(youX, youY - 180, 80, BLUE, lightbulbOp);
+  }
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

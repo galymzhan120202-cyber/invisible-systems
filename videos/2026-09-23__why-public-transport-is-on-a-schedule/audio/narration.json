@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You're trying to get somewhere. You arrive at the bus stop, phone in hand, expecting a quick ride. Public transport promises efficient movement through the city.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "But then you wait. The clock ticks, minutes turn into what feels like an eternity. Your bus isn't there, or maybe it just passed by, running late.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "Why is it like this? You might think it's bad luck, or that the system is just poorly managed, maybe even designed to make you suffer.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "The truth is, schedules are a clever optimization. They allow a finite number of vehicles to cover vast routes, ensuring overall coverage and predictable service.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "Your individual wait might feel long, but it’s a necessary trade-off. It minimizes total city-wide travel time and ensures reliability for thousands of other passengers.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "So next time you're standing there, watching the clock, you'll know it's not random. It's an invisible system, making the city move as smoothly as possible.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]
