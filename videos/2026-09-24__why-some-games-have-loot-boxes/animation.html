@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Games Have Loot Boxes</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / the box
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want
+var CORAL = "#FF5B5B";              // coral red    -> frustration / common items
+
+var DUR = 60;
+window.__duration = DUR;
+
+var FLOOR_Y = BOT - 100;
+var PLAYER_H = 180;
+var LOOTBOX_S = 200;
+var ITEM_S = 100;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, fill, op) {
+  return '<path d="' + d + '" fill="' + (fill || 'none') + '" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+/* stick figure player */
+function player(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = 26;
+  var bodyY = y - PLAYER_H / 2 + headR * 1.5;
+  var armLen = 60, legLen = 70;
+  var sw = 9;
+
+  g += dot(x, y - PLAYER_H / 2 + headR, headR, col); // Head
+
+  // Body
+  g += line(x, bodyY, x, bodyY + PLAYER_H * 0.4, col, sw);
+
+  if (pose === 'idle' || pose === 'hope') {
+    // Arms slightly bent, hands at hips or slightly up
+    g += line(x, bodyY + 20, x - armLen * 0.7, bodyY + armLen * 0.3, col, sw);
+    g += line(x, bodyY + 20, x + armLen * 0.7, bodyY + armLen * 0.3, col, sw);
+    // Legs slightly apart
+    g += line(x, bodyY + PLAYER_H * 0.4, x - 20, bodyY + PLAYER_H * 0.4 + legLen, col, sw);
+    g += line(x, bodyY + PLAYER_H * 0.4, x + 20, bodyY + PLAYER_H * 0.4 + legLen, col, sw);
+    if (pose === 'hope') { // Arms slightly raised
+      g += line(x - armLen * 0.7, bodyY + armLen * 0.3, x - armLen * 0.8, bodyY - armLen * 0.1, col, sw);
+      g += line(x + armLen * 0.7, bodyY + armLen * 0.3, x + armLen * 0.8, bodyY - armLen * 0.1, col, sw);
+    }
+  } else if (pose === 'frustrated') {
+    // Arms crossed
+    g += line(x, bodyY + 10, x - armLen * 0.8, bodyY + 30, col, sw);
+    g += line(x, bodyY + 10, x + armLen * 0.8, bodyY + 30, col, sw);
+    g += line(x - armLen * 0.8, bodyY + 30, x + armLen * 0.4, bodyY + 40, col, sw);
+    g += line(x + armLen * 0.8, bodyY + 30, x - armLen * 0.4, bodyY + 40, col, sw);
+    // Legs together
+    g += line(x, bodyY + PLAYER_H * 0.4, x, bodyY + PLAYER_H * 0.4 + legLen, col, sw);
+  } else if (pose === 'reach') {
+    // Arms reaching forward
+    g += line(x, bodyY + 20, x - 40, bodyY - 10, col, sw);
+    g += line(x, bodyY + 20, x + 40, bodyY - 10, col, sw);
+    g += line(x - 40, bodyY - 10, x - 20, bodyY - 40, col, sw);
+    g += line(x + 40, bodyY - 10, x + 20, bodyY - 40, col, sw);
+    // Legs slightly bent
+    g += line(x, bodyY + PLAYER_H * 0.4, x - 10, bodyY + PLAYER_H * 0.4 + legLen * 0.8, col, sw);
+    g += line(x, bodyY + PLAYER_H * 0.4, x + 10, bodyY + PLAYER_H * 0.4 + legLen * 0.8, col, sw);
+  } else if (pose === 'walk') {
+    // Arms swinging
+    g += line(x, bodyY + 20, x - 30, bodyY + 50, col, sw);
+    g += line(x, bodyY + 20, x + 30, bodyY - 10, col, sw);
+    // Legs striding
+    g += line(x, bodyY + PLAYER_H * 0.4, x - 40, bodyY + PLAYER_H * 0.4 + legLen * 0.8, col, sw);
+    g += line(x, bodyY + PLAYER_H * 0.4, x + 40, bodyY + PLAYER_H * 0.4 + legLen * 1.1, col, sw);
+  } else if (pose === 'excited') {
+    // Arms up in air
+    g += line(x, bodyY + 20, x - 40, bodyY - 60, col, sw);
+    g += line(x, bodyY + 20, x + 40, bodyY - 60, col, sw);
+    // Legs jumping
+    g += line(x, bodyY + PLAYER_H * 0.4, x - 20, bodyY + PLAYER_H * 0.4 + legLen * 0.4, col, sw);
+    g += line(x, bodyY + PLAYER_H * 0.4, x + 20, bodyY + PLAYER_H * 0.4 + legLen * 0.4, col, sw);
+  }
+
+  g += '</g>';
+  return g;
+}
+
+/* loot box: a cube with an opening lid */
+function lootBox(x, y, size, col, op, open_progress) {
+  op = (op == null ? 1 : op);
+  open_progress = clamp(open_progress || 0, 0, 1);
+  var g = '<g opacity="' + op + '">';
+  var sw = 10;
+  var half = size / 2;
+  var zDepth = size * 0.3; // Perspective depth
+
+  // Base of the box
+  g += rrect(x, y + half - zDepth * 0.2, size, size * 0.4, 10, col, op * 0.3); // Base shadow
+  g += rrectStroke(x, y + half - zDepth * 0.2, size, size * 0.4, 10, col, sw, op); // Base outline
+
+  // Sides of the box (front, left, right)
+  g += line(x - half, y + half - zDepth * 0.2, x - half, y - half, col, sw, op); // Front-left vertical
+  g += line(x + half, y + half - zDepth * 0.2, x + half, y - half, col, sw, op); // Front-right vertical
+  g += line(x - half, y - half, x + half, y - half, col, sw, op); // Top-front horizontal
+
+  // Lid of the box
+  var lidRotY = y - half;
+  var lidRotX = x;
+  var lidAngle = -open_progress * 80; // Rotate up to 80 degrees
+  var transform = 'rotate(' + lidAngle + ' ' + lidRotX + ' ' + lidRotY + ')';
+  g += '<g transform="' + transform + '">';
+  g += line(x - half, y - half, x - half + zDepth * 0.6, y - half - zDepth * 0.6, col, sw, op); // Top-left depth
+  g += line(x + half, y - half, x + half + zDepth * 0.6, y - half - zDepth * 0.6, col, sw, op); // Top-right depth
+  g += line(x - half + zDepth * 0.6, y - half - zDepth * 0.6, x + half + zDepth * 0.6, y - half - zDepth * 0.6, col, sw, op); // Top-back horizontal
+  g += '</g>';
+
+  return g;
+}
+
+/* item icons: star, sword, hat, common dot, common bar */
+function item(x, y, size, col, type, op) {
+  op = (op == null ? 1 : op);
+  var sw = 8;
+  var half = size / 2;
+
+  if (type === 'star') {
+    var d = "M " + x + " " + (y - half) +
+            " L " + (x + half * 0.25) + " " + (y - half * 0.25) +
+            " L " + (x + half) + " " + (y - half * 0.2) +
+            " L " + (x + half * 0.4) + " " + (y + half * 0.2) +
+            " L " + (x + half * 0.6) + " " + (y + half) +
+            " L " + x + " " + (y + half * 0.6) +
+            " L " + (x - half * 0.6) + " " + (y + half) +
+            " L " + (x - half * 0.4) + " " + (y + half * 0.2) +
+            " L " + (x - half) + " " + (y - half * 0.2) +
+            " L " + (x - half * 0.25) + " " + (y - half * 0.25) + " Z";
+    return pathTag(d, col, sw, col, op); // Filled star
+  } else if (type === 'sword') {
+    var d = "M " + x + " " + (y + half) +
+            " L " + x + " " + (y - half * 0.8) +
+            " L " + (x - half * 0.2) + " " + (y - half * 0.6) +
+            " L " + (x - half * 0.2) + " " + (y - half) +
+            " L " + (x + half * 0.2) + " " + (y - half) +
+            " L " + (x + half * 0.2) + " " + (y - half * 0.6) + " Z";
+    return pathTag(d, col, sw, col, op); // Filled sword
+  } else if (type === 'hat') {
+    var d = "M " + (x - half * 0.8) + " " + (y + half * 0.2) +
+            " L " + (x + half * 0.8) + " " + (y + half * 0.2) +
+            " L " + (x + half * 0.6) + " " + (y - half * 0.6) +
+            " L " + (x + half * 0.2) + " " + (y - half) +
+            " L " + (x - half * 0.2) + " " + (y - half) +
+            " L " + (x - half * 0.6) + " " + (y - half * 0.6) + " Z";
+    return pathTag(d, col, sw, col, op); // Filled hat
+  } else if (type === 'common_dot') {
+    return dot(x, y, half * 0.6, col, op);
+  } else if (type === 'common_bar') {
+    return rrect(x, y, size * 0.8, size * 0.4, size * 0.1, col, op);
+  }
+  return '';
+}
+
+/* simple sparkle effect */
+function sparkle(x, y, size, col, phase, op) {
+  op = (op == null ? 1 : op);
+  phase = phase % 1; // 0 to 1
+  var s = size * (0.5 + 0.5 * Math.sin(phase * Math.PI));
+  var sw = 6 + 6 * (1 - phase);
+  return line(x - s, y, x + s, y, col, sw, op * (1 - phase)) +
+         line(x, y - s, x, y + s, col, sw, op * (1 - phase));
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var playerX = lerp(CX - 400, CX - 200, smooth(ramp(u, 0.0, 0.2)));
+  var playerY = FLOOR_Y - PLAYER_H / 2;
+  var playerPose = 'idle';
+  if (u < 0.2) playerPose = 'walk';
+  if (u > 0.3 && u < 0.4) playerPose = 'hope'; // Look hopeful for desire
+  if (u > 0.4 && u < 0.6) playerPose = 'idle'; // Back to idle after desire fades
+
+  s += player(playerX, playerY, AMBER, playerPose, 1);
+
+  var desireOp = ramp(u, 0.2, 0.3) * (1 - ramp(u, 0.35, 0.5));
+  if (desireOp > 0.01) {
+    var itemY = playerY - PLAYER_H * 0.8;
+    s += item(playerX + 100, itemY, ITEM_S * 1.2, AMBER, 'star', desireOp);
+  }
+
+  // Faint background elements
+  s += rrect(CX, FLOOR_Y + 40, W * 0.8, 80, 20, DIM, 0.1);
+  s += line(CX - 300, FLOOR_Y + 40, CX + 300, FLOOR_Y + 40, WHITE, 4, 0.1);
+  
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var playerX = lerp(CX - 200, CX - 100, smooth(ramp(u, 0.2, 0.6)));
+  var playerY = FLOOR_Y - PLAYER_H / 2;
+  var playerPose = 'idle';
+  if (u > 0.2 && u < 0.6) playerPose = 'walk';
+  if (u >= 0.6) playerPose = 'reach';
+
+  var boxY = lerp(TOP - LOOTBOX_S, FLOOR_Y - LOOTBOX_S / 2, easeOut(ramp(u, 0.1, 0.3)));
+  var boxOp = ramp(u, 0.0, 0.15);
+
+  s += player(playerX, playerY, AMBER, playerPose, 1);
+  s += lootBox(CX + 200, boxY, LOOTBOX_S, BLUE, boxOp, 0);
+
+  // Faint background elements
+  s += rrect(CX, FLOOR_Y + 40, W * 0.8, 80, 20, DIM, 0.1);
+  s += line(CX - 300, FLOOR_Y + 40, CX + 300, FLOOR_Y + 40, WHITE, 4, 0.1);
+
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var playerX = CX - 100;
+  var playerY = FLOOR_Y - PLAYER_H / 2;
+  var boxX = CX + 200;
+  var boxY = FLOOR_Y - LOOTBOX_S / 2;
+
+  var openProg = ramp(u, 0.1, 0.3) - ramp(u, 0.7, 0.9);
+  var itemPop = ramp(u, 0.3, 0.4);
+  var itemFade = 1 - ramp(u, 0.5, 0.6);
+
+  var playerPose = 'reach';
+  if (u > 0.6) playerPose = 'frustrated';
+
+  s += player(playerX, playerY, AMBER, playerPose, 1);
+  s += lootBox(boxX, boxY, LOOTBOX_S, BLUE, 1, openProg);
+
+  if (itemPop > 0.01 && itemFade > 0.01) {
+    var currentItemY = lerp(boxY - LOOTBOX_S * 0.6, boxY - LOOTBOX_S * 1.2, easeOut(itemPop));
+    s += item(boxX, currentItemY, ITEM_S, WHITE, 'common_bar', itemFade);
+  }
+
+  // Faint background elements
+  s += rrect(CX, FLOOR_Y + 40, W * 0.8, 80, 20, DIM, 0.1);
+  s += line(CX - 300, FLOOR_Y + 40, CX + 300, FLOOR_Y + 40, WHITE, 4, 0.1);
+
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var playerX = CX - 100;
+  var playerY = FLOOR_Y - PLAYER_H / 2;
+  var boxX = CX + 200;
+  var boxY = FLOOR_Y - LOOTBOX_S / 2;
+
+  var openProg = ramp(u, 0.1, 0.25) - ramp(u, 0.7, 0.9);
+  var itemPop = ramp(u, 0.25, 0.35);
+  var itemFade = 1 - ramp(u, 0.4, 0.5);
+  var rareGlow = ramp(u, 0.45, 0.55) * (1 - ramp(u, 0.6, 0.7));
+
+  var playerPose = 'reach';
+  if (u > 0.3 && u < 0.45) playerPose = 'frustrated';
+  if (u > 0.45 && u < 0.6) playerPose = 'hope';
+  if (u > 0.7) playerPose = 'frustrated';
+
+  s += player(playerX, playerY, AMBER, playerPose, 1);
+  s += lootBox(boxX, boxY, LOOTBOX_S, BLUE, 1, openProg);
+
+  if (itemPop > 0.01 && itemFade > 0.01) {
+    var currentItemY = lerp(boxY - LOOTBOX_S * 0.6, boxY - LOOTBOX_S * 1.2, easeOut(itemPop));
+    s += item(boxX, currentItemY, ITEM_S, CORAL, 'common_dot', itemFade);
+  }
+
+  if (rareGlow > 0.01) {
+    s += ring(boxX, boxY - LOOTBOX_S * 0.2, LOOTBOX_S * 0.4, BLUE, 20, rareGlow * 0.2);
+    s += item(boxX, boxY - LOOTBOX_S * 0.2, ITEM_S * 0.8, AMBER, 'hat', rareGlow * 0.8);
+  }
+
+  // Faint background elements
+  s += rrect(CX, FLOOR_Y + 40, W * 0.8, 80, 20, DIM, 0.1);
+  s += line(CX - 300, FLOOR_Y + 40, CX + 300, FLOOR_Y + 40, WHITE, 4, 0.1);
+
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var playerX = CX - 100;
+  var playerY = FLOOR_Y - PLAYER_H / 2;
+  var boxX = CX + 200;
+  var boxY = FLOOR_Y - LOOTBOX_S / 2;
+
+  var cycleCount = 4;
+  var cycleDuration = 1 / cycleCount;
+  var currentCycle = Math.floor(u / cycleDuration);
+  var u_cycle = (u % cycleDuration) / cycleDuration; // Local time within a cycle
+
+  var openProg = ramp(u_cycle, 0.1, 0.3) - ramp(u_cycle, 0.7, 0.9);
+  var itemPop = ramp(u_cycle, 0.3, 0.4);
+  var itemFade = 1 - ramp(u_cycle, 0.5, 0.6);
+
+  var playerPose = 'reach';
+  if (u_cycle > 0.3 && u_cycle < 0.45) playerPose = 'frustrated';
+  if (u_cycle > 0.45 && u_cycle < 0.6) playerPose = 'hope';
+  if (u_cycle > 0.7) playerPose = 'frustrated';
+
+  s += player(playerX, playerY, AMBER, playerPose, 1);
+  s += lootBox(boxX, boxY, LOOTBOX_S, BLUE, 1, openProg);
+
+  // Stack of common items
+  var stackedItems = Math.floor(u * cycleCount * 0.8); // Stack grows over time
+  for (var i = 0; i < stackedItems; i++) {
+    var itemStackY = FLOOR_Y - 50 - i * 40;
+    s += item(CX - 300, itemStackY, ITEM_S * 0.8, CORAL, 'common_bar', 0.8);
+  }
+
+  if (itemPop > 0.01 && itemFade > 0.01) {
+    var currentItemY = lerp(boxY - LOOTBOX_S * 0.6, boxY - LOOTBOX_S * 1.2, easeOut(itemPop));
+    s += item(boxX, currentItemY, ITEM_S, CORAL, 'common_dot', itemFade);
+  }
+
+  // Brief flash of rare item to keep player hooked
+  if (u > 0.4 && u < 0.45) {
+    var flashOp = pulse(u, 0.425, 0.02);
+    s += item(boxX, boxY - LOOTBOX_S * 0.2, ITEM_S * 0.8, AMBER, 'sword', flashOp);
+  }
+
+  // Faint background elements
+  s += rrect(CX, FLOOR_Y + 40, W * 0.8, 80, 20, DIM, 0.1);
+  s += line(CX - 300, FLOOR_Y + 40, CX + 300, FLOOR_Y + 40, WHITE, 4, 0.1);
+
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var playerX = CX - 100;
+  var playerY = FLOOR_Y - PLAYER_H / 2;
+  var boxX = CX + 200;
+  var boxY = FLOOR_Y - LOOTBOX_S / 2;
+
+  var openProg = ramp(u, 0.1, 0.2);
+  var itemPop = ramp(u, 0.2, 0.3);
+  var playerExcited = ramp(u, 0.3, 0.5);
+
+  var playerPose = 'reach';
+  if (u > 0.3) playerPose = 'excited';
+
+  s += player(playerX, playerY, AMBER, playerPose, 1);
+  s += lootBox(boxX, boxY, LOOTBOX_S, BLUE, 1, openProg);
+
+  var finalItemY = lerp(boxY - LOOTBOX_S * 0.6, boxY - LOOTBOX_S * 1.2, easeOut(itemPop));
+  var finalItemOp = itemPop;
+  if (u > 0.3) finalItemOp = 1; // Item stays visible
+  s += item(boxX, finalItemY, ITEM_S * 1.2, AMBER, 'sword', finalItemOp);
+
+  if (playerExcited > 0.01) {
+    s += sparkle(boxX, finalItemY - ITEM_S * 0.8, ITEM_S * 0.6, AMBER, u * 3, playerExcited);
+  }
+  
+  // Faint background elements
+  s += rrect(CX, FLOOR_Y + 40, W * 0.8, 80, 20, DIM, 0.1);
+  s += line(CX - 300, FLOOR_Y + 40, CX + 300, FLOOR_Y + 40, WHITE, 4, 0.1);
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

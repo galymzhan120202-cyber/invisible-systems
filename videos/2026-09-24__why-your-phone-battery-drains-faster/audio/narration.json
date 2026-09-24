@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You just used your phone for a quick check, then put it down. You expect the battery to simply last, quietly preserving its charge.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "But hours later, you pick it up, and that battery bar is surprisingly lower. What did it *do* while you weren't even looking?",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "You check screen time, close apps, even restart. You blame the bright display or heavy gaming, yet the drain continues when idle.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "The real culprit isn't what you *see*. It's the invisible world of background apps and system processes constantly fetching, syncing, updating.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "Your phone is a tiny computer, always on call, performing silent tasks. Even when \"idle,\" it’s managing signals, location, notifications, and data.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "So next time your battery seems to vanish, remember: it wasn't resting. It was silently running your digital life. Now you see the invisible work.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]
