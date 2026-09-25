@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Free Trials Ask for Your Credit Card</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary elements
+var BLUE  = "#4C86F0";              // signal blue  -> the system / inertia
+var AMBER = "#F2A93B";              // warm amber   -> YOU / user desire
+var CORAL = "#FF5B5B";              // coral red    -> friction / cost / naive assumptions
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+// Helper for color interpolation
+function lerpColor(a, b, t) {
+  var ah = parseInt(a.replace(/#/, '0x'), 16),
+      ar = ah >> 16, ag = (ah >> 8) & 0xff, ab = ah & 0xff;
+  var bh = parseInt(b.replace(/#/, '0x'), 16),
+      br = bh >> 16, bg = (bh >> 8) & 0xff, bb = bh & 0xff;
+  var rr = Math.round(ar + t * (br - ar)).toString(16);
+  var rg = Math.round(ag + t * (bg - ag)).toString(16);
+  var rb = Math.round(ab + t * (bb - ab)).toString(16);
+  return '#' + (rr.length === 1 ? '0' + rr : rr) +
+               (rg.length === 1 ? '0' + rg : rg) +
+               (rb.length === 1 ? '0' + rb : rb);
+}
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+/* stick figure: head, body, two arms, two legs */
+function stickFigure(x, y, scale, col, pose, op) {
+  op = (op == null ? 1 : op);
+  scale = scale || 1;
+  var sw = 8 * scale;
+  var headR = 20 * scale;
+  var bodyLen = 60 * scale;
+  var armLen = 40 * scale;
+  var legLen = 50 * scale;
+
+  var g = '<g opacity="' + op + '">';
+  // Head
+  g += dot(x, y - bodyLen / 2 - headR, headR, col);
+  // Body
+  g += line(x, y - bodyLen / 2, x, y + bodyLen / 2, col, sw);
+
+  // Arms (pose: 0=down, 1=up, 2=point, 3=card-in, 4=shock, 5=crossed, 6=nod)
+  if (pose === 1) { // Arms up in excitement
+    g += line(x, y - bodyLen / 3, x - armLen, y - bodyLen / 3 - armLen, col, sw);
+    g += line(x, y - bodyLen / 3, x + armLen, y - bodyLen / 3 - armLen, col, sw);
+  } else if (pose === 2) { // Pointing
+    g += line(x, y - bodyLen / 3, x - armLen * 0.8, y - bodyLen / 3 + armLen * 0.2, col, sw); // left arm down
+    g += line(x, y - bodyLen / 3, x + armLen * 1.1, y - bodyLen / 3 - armLen * 0.4, col, sw); // right arm pointing
+  } else if (pose === 3) { // Arms forward, pushing card
+    g += line(x, y - bodyLen / 3, x - armLen * 0.6, y - bodyLen / 3 - armLen * 0.2, col, sw);
+    g += line(x, y - bodyLen / 3, x + armLen * 0.6, y - bodyLen / 3 - armLen * 0.2, col, sw);
+  } else if (pose === 4) { // Arms up in shock
+    g += line(x, y - bodyLen / 3, x - armLen * 0.8, y - bodyLen / 3 - armLen * 0.8, col, sw);
+    g += line(x, y - bodyLen / 3, x + armLen * 0.8, y - bodyLen / 3 - armLen * 0.8, col, sw);
+  } else if (pose === 5) { // Arms crossed (thinking/hesitating)
+    g += line(x, y - bodyLen / 3, x - armLen * 0.7, y - bodyLen / 3 + armLen * 0.2, col, sw);
+    g += line(x, y - bodyLen / 3, x + armLen * 0.7, y - bodyLen / 3 + armLen * 0.2, col, sw);
+    g += line(x - armLen * 0.7, y - bodyLen / 3 + armLen * 0.2, x + armLen * 0.7, y - bodyLen / 3 + armLen * 0.2, col, sw * 0.8); // crossing line
+  } else if (pose === 6) { // Arms relaxed, nodding
+    g += line(x, y - bodyLen / 3, x - armLen * 0.4, y - bodyLen / 3 + armLen * 0.4, col, sw);
+    g += line(x, y - bodyLen / 3, x + armLen * 0.4, y - bodyLen / 3 + armLen * 0.4, col, sw);
+    g += line(x, y - headR * 0.8, x, y - headR * 0.8 + 10 * scale, col, sw * 0.6); // slight nod
+  }
+  else { // Default: arms down
+    g += line(x, y - bodyLen / 3, x - armLen * 0.5, y + bodyLen / 3, col, sw);
+    g += line(x, y - bodyLen / 3, x + armLen * 0.5, y + bodyLen / 3, col, sw);
+  }
+  // Legs
+  g += line(x, y + bodyLen / 2, x - legLen * 0.5, y + bodyLen / 2 + legLen, col, sw);
+  g += line(x, y + bodyLen / 2, x + legLen * 0.5, y + bodyLen / 2 + legLen, col, sw);
+  g += '</g>';
+  return g;
+}
+
+/* Generic box, our hero element */
+function trialBox(x, y, w, h, rad, col, sw, op) {
+  return rrectStroke(x, y, w, h, rad, col, sw, op);
+}
+
+/* Credit card shape */
+function creditCard(x, y, w, h, rad, col, op) {
+  return rrect(x, y, w, h, rad, col, op);
+}
+
+/* Timer clock glyph */
+function clock(x, y, r, col, sw, handAngle, op) {
+  var g = ring(x, y, r, col, sw, op);
+  var hx = x + r * 0.6 * Math.sin(handAngle);
+  var hy = y - r * 0.6 * Math.cos(handAngle);
+  g += line(x, y, hx, hy, col, sw * 0.8, op);
+  return g;
+}
+
+/* Lock glyph */
+function lockGlyph(x, y, size, col, sw, op) {
+  var g = '';
+  g += line(x - size * 0.3, y - size * 0.3, x + size * 0.3, y - size * 0.3, col, sw, op);
+  g += pathTag("M " + (x - size * 0.3) + " " + (y - size * 0.3) + " A " + (size * 0.3) + " " + (size * 0.3) + " 0 0 1 " + (x + size * 0.3) + " " + (y - size * 0.3 - size * 0.4), col, sw, op);
+  g += rrect(x, y + size * 0.2, size * 0.8, size * 0.6, size * 0.1, col, op);
+  return g;
+}
+
+/* Money glyph (simple bar) */
+function moneyGlyph(x, y, size, col, sw, op) {
+  var g = '';
+  g += line(x, y - size * 0.4, x, y + size * 0.4, col, sw, op);
+  g += line(x - size * 0.2, y - size * 0.2, x + size * 0.2, y - size * 0.2, col, sw * 0.6, op);
+  g += line(x - size * 0.2, y + size * 0.2, x + size * 0.2, y + size * 0.2, col, sw * 0.6, op);
+  return g;
+}
+
+/* Desire arrow (simple chevron) */
+function desireArrow(x, y, size, col, op) {
+  var d = "M " + (x - size * 0.6) + " " + (y + size * 0.4) + " L " + x + " " + (y - size * 0.4) + " L " + (x + size * 0.6) + " " + (y + size * 0.4);
+  return pathTag(d, col, 10, op);
+}
+
+/* Question mark glyph */
+function questionMark(x, y, size, col, sw, op) {
+  var g = '';
+  g += pathTag("M " + x + " " + (y - size * 0.4) + " A " + (size * 0.2) + " " + (size * 0.2) + " 0 1 1 " + (x + size * 0.2) + " " + (y - size * 0.2) + " L " + (x + size * 0.1) + " " + (y + size * 0.1), col, sw, op);
+  g += dot(x + size * 0.05, y + size * 0.3, sw * 0.5, col, op);
+  return g;
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+var BOX_X = CX;
+var BOX_Y = CY - 100;
+var BOX_W = 400;
+var BOX_H = 600;
+var BOX_RAD = 40;
+var BOX_SW = 10;
+
+var FIGURE_X = CX;
+var FIGURE_Y = BOT - 280;
+var FIGURE_SCALE = 1.0;
+
+/* SCENE 1 (0-10): User sees a "Free Trial" offer. */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(0.9, 1.0, smooth(u));
+  var figY = lerp(BOT - 200, FIGURE_Y, easeOut(ramp(u, 0.0, 0.3)));
+  var boxY = lerp(BOX_Y + 100, BOX_Y, easeOut(ramp(u, 0.0, 0.3)));
+  var boxOp = ramp(u, 0.0, 0.2);
+
+  s += '<g ' + camera(scale, 0, 0) + '>';
+
+  // Hero: Trial Box appears
+  s += trialBox(BOX_X, boxY, BOX_W, BOX_H, BOX_RAD, WHITE, BOX_SW, boxOp);
+  // "Free" glyph: a small dot/circle
+  s += dot(BOX_X, boxY - BOX_H / 2 + 60, 20, AMBER, boxOp);
+
+  // User: stick figure approaches
+  s += stickFigure(FIGURE_X, figY, FIGURE_SCALE, AMBER, 0, ramp(u, 0.1, 0.4));
+
+  // Desire: thought bubbles/arrows
+  var arrOp = ramp(u, 0.4, 0.7);
+  var arrScale = lerp(0.5, 1.0, easeOut(ramp(u, 0.4, 0.7)));
+  s += '<g transform="translate(' + (BOX_X + 100) + ' ' + (BOX_Y - 150) + ') scale(' + arrScale + ') translate(' + (-(BOX_X + 100)) + ' ' + (-(BOX_Y - 150)) + ')">';
+  s += desireArrow(BOX_X + 100, BOX_Y - 150, 40, AMBER, arrOp);
+  s += desireArrow(BOX_X + 140, BOX_Y - 190, 30, AMBER, arrOp * 0.8);
+  s += '</g>';
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): User clicks, then sees "Enter Credit Card". */
+function scene2(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.95, smooth(u));
+  var figX = lerp(FIGURE_X, FIGURE_X - 150, easeOut(ramp(u, 0.5, 0.8)));
+  var figPose = 0;
+  if (u < 0.3) figPose = 2; // Pointing at box
+  else if (u > 0.6) figPose = 5; // Hesitating
+
+  s += '<g ' + camera(scale, 0, 0) + '>';
+
+  // Hero: Trial Box with CC slot
+  s += trialBox(BOX_X, BOX_Y, BOX_W, BOX_H, BOX_RAD, WHITE, BOX_SW);
+  var slotY = BOX_Y + 100;
+  var slotH = 60;
+  var slotW = BOX_W * 0.6;
+  var slotOp = ramp(u, 0.1, 0.4);
+  s += rrectStroke(BOX_X, slotY, slotW, slotH, 10, DIM, BOX_SW * 0.8, slotOp);
+
+  // User: stick figure hesitates
+  s += stickFigure(figX, FIGURE_Y, FIGURE_SCALE, AMBER, figPose);
+
+  // Friction: question mark glyph
+  var frictionOp = ramp(u, 0.5, 0.8);
+  var frictionScale = lerp(0.5, 1.0, easeOut(frictionOp));
+  s += '<g transform="translate(' + (BOX_X + 100) + ' ' + (slotY - 80) + ') scale(' + frictionScale + ') translate(' + (-(BOX_X + 100)) + ' ' + (-(slotY - 80)) + ')">';
+  s += questionMark(BOX_X + 100, slotY - 80, 50, CORAL, 10, frictionOp);
+  s += '</g>';
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): User debates, then reluctantly enters card. */
+function scene3(u) {
+  var s = '';
+  var scale = lerp(0.95, 1.0, smooth(u));
+  var figX = lerp(FIGURE_X - 150, FIGURE_X, easeOut(ramp(u, 0.3, 0.6)));
+  var figPose = 5; // Hesitating
+  if (u > 0.6) figPose = 3; // Pushing card
+
+  s += '<g ' + camera(scale, 0, 0) + '>';
+
+  // Hero: Trial Box with CC slot
+  s += trialBox(BOX_X, BOX_Y, BOX_W, BOX_H, BOX_RAD, WHITE, BOX_SW);
+  var slotY = BOX_Y + 100;
+  var slotH = 60;
+  var slotW = BOX_W * 0.6;
+  s += rrectStroke(BOX_X, slotY, slotW, slotH, 10, DIM, BOX_SW * 0.8);
+
+  // Credit card animation
+  var cardW = slotW * 0.9;
+  var cardH = slotH * 0.8;
+  var cardX = BOX_X;
+  var cardStartY = FIGURE_Y - 100;
+  var cardEndY = slotY;
+  var cardY = lerp(cardStartY, cardEndY, easeIn(ramp(u, 0.6, 0.9)));
+  var cardOp = ramp(u, 0.5, 0.7);
+  s += creditCard(cardX, cardY, cardW, cardH, 8, CORAL, cardOp);
+
+  // User: stick figure debates, then pushes card
+  s += stickFigure(figX, FIGURE_Y, FIGURE_SCALE, AMBER, figPose);
+
+  // Timer glyph appears
+  var timerOp = ramp(u, 0.8, 1.0);
+  var timerScale = lerp(0.5, 1.0, easeOut(timerOp));
+  s += '<g transform="translate(' + (BOX_X) + ' ' + (BOX_Y - BOX_H / 2 + 100) + ') scale(' + timerScale + ') translate(' + (-(BOX_X)) + ' ' + (-(BOX_Y - BOX_H / 2 + 100)) + ')">';
+  s += clock(BOX_X, BOX_Y - BOX_H / 2 + 100, 40, BLUE, 8, 0, timerOp);
+  s += '</g>';
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): User uses the trial, but not intensely. Time passes. */
+function scene4(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.8, smooth(u));
+  var figX = lerp(FIGURE_X, FIGURE_X + 200, easeOut(ramp(u, 0.0, 0.3)));
+  var figY = lerp(FIGURE_Y, FIGURE_Y + 100, easeOut(ramp(u, 0.0, 0.3)));
+
+  s += '<g ' + camera(scale, 0, 0) + '>';
+
+  // Hero: Trial Box with card in slot, timer running
+  s += trialBox(BOX_X, BOX_Y, BOX_W, BOX_H, BOX_RAD, WHITE, BOX_SW);
+  var slotY = BOX_Y + 100;
+  var slotH = 60;
+  var slotW = BOX_W * 0.6;
+  s += rrectStroke(BOX_X, slotY, slotW, slotH, 10, DIM, BOX_SW * 0.8);
+  var cardW = slotW * 0.9;
+  var cardH = slotH * 0.8;
+  s += creditCard(BOX_X, slotY, cardW, cardH, 8, CORAL, 1); // Card is in
+
+  // Timer runs down
+  var timerHandAngle = lerp(0, Math.PI * 1.8, smooth(u)); // Almost full circle
+  s += clock(BOX_X, BOX_Y - BOX_H / 2 + 100, 40, BLUE, 8, timerHandAngle, 1);
+
+  // User: stick figure is distracted
+  s += stickFigure(figX, figY, FIGURE_SCALE * 0.8, AMBER, 0);
+
+  // Distraction elements (small dots/lines)
+  for (var i = 0; i < 4; i++) {
+    var dx = CX + 100 + rnd(i) * 200;
+    var dy = CY + 300 + rnd(i + 10) * 200;
+    var dOp = Math.sin(u * Math.PI * 2 + i) * 0.4 + 0.6;
+    s += dot(dx, dy, 10, DIM, dOp);
+    s += line(dx - 20, dy, dx + 20, dy, DIM, 4, dOp * 0.7);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): Trial ends, subscription starts. User notices charge. */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(0.8, 1.0, smooth(u));
+  var figY = FIGURE_Y;
+  var figPose = 0;
+  if (u > 0.6) figPose = 4; // Shocked
+
+  s += '<g ' + camera(scale, 0, 0) + '>';
+
+  // Hero: Trial Box with card locked, now a "Subscription Box" (blue outline)
+  var boxCol = lerpColor(WHITE, BLUE, smooth(ramp(u, 0.0, 0.4)));
+  var boxSW = lerp(BOX_SW, BOX_SW * 1.2, smooth(ramp(u, 0.0, 0.4)));
+  s += trialBox(BOX_X, BOX_Y, BOX_W, BOX_H, BOX_RAD, boxCol, boxSW);
+
+  var slotY = BOX_Y + 100;
+  var slotH = 60;
+  var slotW = BOX_W * 0.6;
+  s += rrectStroke(BOX_X, slotY, slotW, slotH, 10, DIM, BOX_SW * 0.8);
+  var cardW = slotW * 0.9;
+  var cardH = slotH * 0.8;
+  s += creditCard(BOX_X, slotY, cardW, cardH, 8, CORAL, 1); // Card is in
+
+  // Lock glyph appears and snaps shut
+  var lockOp = ramp(u, 0.3, 0.6);
+  var lockScale = lerp(0.5, 1.0, easeOut(lockOp));
+  s += '<g transform="translate(' + (BOX_X) + ' ' + (slotY - 100) + ') scale(' + lockScale + ') translate(' + (-(BOX_X)) + ' ' + (-(slotY - 100)) + ')">';
+  s += lockGlyph(BOX_X, slotY - 100, 60, BLUE, 10, lockOp);
+  s += '</g>';
+
+  // Money glyph appears
+  var moneyOp = ramp(u, 0.6, 0.9);
+  var moneyScale = lerp(0.5, 1.0, easeOut(moneyOp));
+  s += '<g transform="translate(' + (BOX_X + 150) + ' ' + (BOX_Y + 200) + ') scale(' + moneyScale + ') translate(' + (-(BOX_X + 150)) + ' ' + (-(BOX_Y + 200)) + ')">';
+  s += moneyGlyph(BOX_X + 150, BOX_Y + 200, 50, CORAL, 10, moneyOp);
+  s += '</g>';
+
+  // User: stick figure reacts with shock
+  s += stickFigure(FIGURE_X, figY, FIGURE_SCALE, AMBER, figPose);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): The system (inertia) explained. User accepts/understands. */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.9, smooth(u));
+  var figPose = 6; // Nodding
+  var boxY = lerp(BOX_Y, CY - 200, smooth(u)); // Box moves up to integrate into system
+
+  s += '<g ' + camera(scale, 0, 0) + '>';
+
+  // Hero: Subscription Box (blue) integrates into a larger system
+  s += trialBox(BOX_X, boxY, BOX_W, BOX_H, BOX_RAD, BLUE, BOX_SW * 1.2, 1);
+  var slotY = boxY + 100;
+  var slotH = 60;
+  var slotW = BOX_W * 0.6;
+  s += rrectStroke(BOX_X, slotY, slotW, slotH, 10, DIM, BOX_SW * 0.8);
+  var cardW = slotW * 0.9;
+  var cardH = slotH * 0.8;
+  s += creditCard(BOX_X, slotY, cardW, cardH, 8, CORAL, 1); // Card is in
+  s += lockGlyph(BOX_X, slotY - 100, 60, BLUE, 10, 1);
+
+  // System elements (blue lines/gears)
+  var systemOp = ramp(u, 0.2, 0.7);
+  var gearR = 80;
+  var gearSW = 12;
+  // Left gear
+  s += ring(CX - 250, CY - 200, gearR, BLUE, gearSW, systemOp);
+  s += line(CX - 250 - gearR * 0.8, CY - 200, CX - 250 + gearR * 0.8, CY - 200, BLUE, gearSW, systemOp);
+  s += line(CX - 250, CY - 200 - gearR * 0.8, CX - 250, CY - 200 + gearR * 0.8, BLUE, gearSW, systemOp);
+  // Right gear
+  s += ring(CX + 250, CY - 200, gearR, BLUE, gearSW, systemOp);
+  s += line(CX + 250 - gearR * 0.8, CY - 200, CX + 250 + gearR * 0.8, CY - 200, BLUE, gearSW, systemOp);
+  s += line(CX + 250, CY - 200 - gearR * 0.8, CX + 250, CY - 200 + gearR * 0.8, BLUE, gearSW, systemOp);
+  // Connecting lines
+  s += line(CX - 250 + gearR, CY - 200, CX - BOX_W / 2 - 20, boxY, BLUE, gearSW * 0.6, systemOp);
+  s += line(CX + 250 - gearR, CY - 200, CX + BOX_W / 2 + 20, boxY, BLUE, gearSW * 0.6, systemOp);
+
+  // User: stick figure understands
+  s += stickFigure(FIGURE_X, FIGURE_Y, FIGURE_SCALE, AMBER, figPose);
+  s += dot(FIGURE_X, FIGURE_Y - 100, 15, AMBER, ramp(u, 0.7, 1.0)); // Lightbulb/understanding dot
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable at u=1
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR); // Loop playback for preview
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
