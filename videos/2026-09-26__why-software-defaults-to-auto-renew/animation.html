@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Software Subscriptions Auto-Renew</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / the wave
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want
+var CORAL = "#FF5B5B";              // coral red    -> the naive model / false signal
+
+var DUR = 60;
+window.__duration = DUR;
+
+// Screen and Desk dimensions
+var SCREEN_W = 680, SCREEN_H = 880;
+var SCREEN_X = CX, SCREEN_Y = CY - 200; // Centered horizontally, higher up
+var DESK_Y = SCREEN_Y + SCREEN_H / 2 + 120;
+var DESK_W = 780, DESK_H = 40;
+var FIGURE_X = CX, FIGURE_Y = DESK_Y + 180; // Stick figure sits below the desk
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+// Custom shapes for this animation
+function stickFigure(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += dot(x, y - 100, 24, col); // Head
+  g += line(x, y - 76, x, y + 20, col, 10); // Body
+
+  if (pose === 'sitting_desk') {
+    g += line(x - 50, y - 40, x + 50, y - 40, col, 10); // Arms on desk
+    g += line(x, y + 20, x - 30, y + 100, col, 10); // Left leg
+    g += line(x, y + 20, x + 30, y + 100, col, 10); // Right leg
+    g += dot(x - 50, y - 40, 10, col); // Hands
+    g += dot(x + 50, y - 40, 10, col);
+    // Gaze towards screen
+    g += line(x, y - 100, x + 10, y - 120, WHITE, 6);
+  } else if (pose === 'confused') {
+    g += line(x, y - 76, x - 60, y - 20, col, 10); // Left arm up
+    g += line(x, y - 76, x + 60, y - 20, col, 10); // Right arm up
+    g += line(x, y + 20, x - 30, y + 100, col, 10); // Left leg
+    g += line(x, y + 20, x + 30, y + 100, col, 10); // Right leg
+    // Confused gaze
+    g += line(x, y - 100, x - 15, y - 110, WHITE, 6);
+    g += line(x, y - 100, x + 5, y - 110, WHITE, 6);
+  } else if (pose === 'navigating') {
+    g += line(x, y - 76, x - 40, y - 10, col, 10); // Left arm
+    g += line(x, y - 76, x + 40, y - 10, col, 10); // Right arm
+    g += line(x, y + 20, x - 30, y + 100, col, 10); // Left leg
+    g += line(x, y + 20, x + 30, y + 100, col, 10); // Right leg
+    // Focused gaze
+    g += line(x, y - 100, x, y - 120, WHITE, 6);
+  } else if (pose === 'trapped') {
+    g += line(x, y - 76, x - 40, y + 10, col, 10); // Left arm down
+    g += line(x, y - 76, x + 40, y + 10, col, 10); // Right arm down
+    g += line(x, y + 20, x - 30, y + 100, col, 10); // Left leg
+    g += line(x, y + 20, x + 30, y + 100, col, 10); // Right leg
+    // Trapped gaze
+    g += line(x, y - 100, x, y - 110, WHITE, 6);
+    g += line(x, y - 100, x - 10, y - 110, WHITE, 6);
+  } else if (pose === 'nodding') {
+    g += line(x - 50, y - 40, x + 50, y - 40, col, 10); // Arms on desk
+    g += line(x, y + 20, x - 30, y + 100, col, 10); // Left leg
+    g += line(x, y + 20, x + 30, y + 100, col, 10); // Right leg
+    g += dot(x - 50, y - 40, 10, col); // Hands
+    g += dot(x + 50, y - 40, 10, col);
+    // Nodding gaze
+    g += line(x, y - 100, x + 10, y - 110, WHITE, 6);
+    g += line(x, y - 100, x + 20, y - 100, WHITE, 6); // Nodding motion
+  }
+  g += '</g>';
+  return g;
+}
+
+function desk(x, y, w, h, col, op) {
+  return rrect(x, y, w, h, 10, col, op);
+}
+
+function softwareScreen(x, y, w, h, col, op) {
+  return rrectStroke(x, y, w, h, 20, col, 12, op);
+}
+
+function appIcon(x, y, size, col, op) {
+  return rrect(x, y, size, size, size * 0.2, col, op);
+}
+
+// A badge with a '1' glyph (no text)
+function oneMonthBadge(x, y, w, h, col, op) {
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 10, col, 0.9);
+  // Glyph for '1'
+  g += line(x, y - h * 0.2, x, y + h * 0.2, WHITE, 12);
+  g += line(x - w * 0.1, y - h * 0.2, x, y - h * 0.2, WHITE, 12);
+  g += '</g>';
+  return g;
+}
+
+// Clock icon
+function clockIcon(x, y, r, col, handAngle, op) {
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, r, col, 10);
+  // Hour hand
+  var hx = x + r * 0.4 * Math.cos(handAngle - Math.PI / 2);
+  var hy = y + r * 0.4 * Math.sin(handAngle - Math.PI / 2);
+  g += line(x, y, hx, hy, col, 8);
+  // Minute hand
+  var mx = x + r * 0.7 * Math.cos(handAngle * 2 - Math.PI / 2);
+  var my = y + r * 0.7 * Math.sin(handAngle * 2 - Math.PI / 2);
+  g += line(x, y, mx, my, col, 8);
+  g += dot(x, y, 10, col); // Center dot
+  g += '</g>';
+  return g;
+}
+
+// Dollar bill icon (simplified glyph)
+function dollarIcon(x, y, w, h, col, op) {
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 8, col, 0.9);
+  g += line(x, y - h * 0.3, x, y + h * 0.3, WHITE, 8); // Vertical bar
+  g += line(x - w * 0.15, y - h * 0.2, x + w * 0.15, y - h * 0.2, WHITE, 8); // Top horizontal
+  g += line(x - w * 0.15, y + h * 0.2, x + w * 0.15, y + h * 0.2, WHITE, 8); // Bottom horizontal
+  g += '</g>';
+  return g;
+}
+
+// Toggle switch icon
+function toggleSwitch(x, y, w, h, state, col, op) { // state: 'on' or 'off'
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, h / 2, col, 0.3); // Background track
+  var knobX = (state === 'on') ? (x + w / 2 - h / 2) : (x - w / 2 + h / 2);
+  g += dot(knobX, y, h * 0.4, col); // Knob
+  // Glyph for state (check for on, X for off)
+  if (state === 'on') {
+    g += line(knobX - h * 0.15, y, knobX - h * 0.05, y + h * 0.15, WHITE, 6);
+    g += line(knobX - h * 0.05, y + h * 0.15, knobX + h * 0.15, y - h * 0.15, WHITE, 6);
+  } else {
+    g += line(knobX - h * 0.15, y - h * 0.15, knobX + h * 0.15, y + h * 0.15, WHITE, 6);
+    g += line(knobX - h * 0.15, y + h * 0.15, knobX + h * 0.15, y - h * 0.15, WHITE, 6);
+  }
+  g += '</g>';
+  return g;
+}
+
+// Maze of lines for cancellation friction
+function cancellationMaze(x, y, w, h, u, col, op) {
+  var g = '<g opacity="' + op + '">';
+  var numLines = 10;
+  var padding = 50;
+  for (var i = 0; i < numLines; i++) {
+    var x1 = x - w / 2 + padding + rnd(i) * (w - 2 * padding);
+    var y1 = y - h / 2 + padding + rnd(i + 10) * (h - 2 * padding);
+    var x2 = x - w / 2 + padding + rnd(i + 20) * (w - 2 * padding);
+    var y2 = y - h / 2 + padding + rnd(i + 30) * (h - 2 * padding);
+    // Add some animation based on u
+    var dx = Math.sin(u * 2 * Math.PI + i) * 20;
+    var dy = Math.cos(u * 2 * Math.PI + i * 0.5) * 20;
+    g += line(x1 + dx, y1 + dy, x2 - dx, y2 - dy, col, 8, 0.7);
+  }
+  return g;
+}
+
+// Simple 'X' glyph for cancel
+function cancelGlyph(x, y, size, col, sw, op) {
+  var g = '<g opacity="' + op + '">';
+  g += line(x - size / 2, y - size / 2, x + size / 2, y + size / 2, col, sw);
+  g += line(x - size / 2, y + size / 2, x + size / 2, y - size / 2, col, sw);
+  g += '</g>';
+  return g;
+}
+
+// Magnifying glass
+function magnifyingGlass(x, y, r, handleLen, col, sw, op) {
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, r, col, sw);
+  var handleX1 = x + r * Math.cos(Math.PI * 0.75);
+  var handleY1 = y + r * Math.sin(Math.PI * 0.75);
+  var handleX2 = x + (r + handleLen) * Math.cos(Math.PI * 0.75);
+  var handleY2 = y + (r + handleLen) * Math.sin(Math.PI * 0.75);
+  g += line(handleX1, handleY1, handleX2, handleY2, col, sw);
+  g += '</g>';
+  return g;
+}
+
+// Arrow
+function arrow(x1, y1, x2, y2, headSize, col, sw, op) {
+  var g = '<g opacity="' + op + '">';
+  g += line(x1, y1, x2, y2, col, sw);
+  var angle = Math.atan2(y2 - y1, x2 - x1);
+  var head1X = x2 - headSize * Math.cos(angle - Math.PI / 6);
+  var head1Y = y2 - headSize * Math.sin(angle - Math.PI / 6);
+  var head2X = x2 - headSize * Math.cos(angle + Math.PI / 6);
+  var head2Y = y2 - headSize * Math.sin(angle + Math.PI / 6);
+  g += line(x2, y2, head1X, head1Y, col, sw);
+  g += line(x2, y2, head2X, head2Y, col, sw);
+  g += '</g>';
+  return g;
+}
+
+// Hero elements that persist and morph
+function persistentElements(u, sceneIdx) {
+  var s = '';
+  // Desk
+  s += desk(FIGURE_X, DESK_Y, DESK_W, DESK_H, DIM, 0.8);
+  // Screen
+  s += softwareScreen(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, WHITE, 1);
+  return s;
+}
+
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  s += persistentElements(u, 1);
+
+  // Stick figure at desk, looking at screen
+  s += stickFigure(FIGURE_X, FIGURE_Y, AMBER, 'sitting_desk', 1);
+
+  // Generic app icon on screen
+  s += appIcon(SCREEN_X, SCREEN_Y - 100, 200, BLUE, 0.8);
+
+  // "1 MONTH TRIAL" badge appears
+  var badgeY = SCREEN_Y + 200;
+  var badgeOp = ramp(u, 0.0, 0.3);
+  s += oneMonthBadge(SCREEN_X, badgeY, 280, 100, AMBER, badgeOp);
+
+  // Abstract button click animation
+  var clickScale = lerp(1, 1.2, pulse(u, 0.38, 0.05));
+  s += rrect(SCREEN_X, SCREEN_Y + 380, 200 * clickScale, 80 * clickScale, 10, WHITE, 0.6 * ramp(u, 0.3, 0.5));
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.5, 0.3); // Shake when dollars appear
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+
+  s += persistentElements(u, 2);
+
+  // Stick figure confused
+  s += stickFigure(FIGURE_X, FIGURE_Y, AMBER, 'confused', 1);
+
+  // "1 MONTH TRIAL" badge transforms into clock, then dollar
+  var badgeToClock = ramp(u, 0.0, 0.2);
+  var clockToDollar = ramp(u, 0.2, 0.4);
+
+  var iconY = SCREEN_Y + 100;
+  if (u < 0.3) { // Badge -> Clock
+    var currentBadgeOp = 1 - badgeToClock;
+    if (currentBadgeOp > 0.05) s += oneMonthBadge(SCREEN_X, iconY, 280, 100, AMBER, currentBadgeOp);
+
+    var currentClockOp = badgeToClock;
+    if (currentClockOp > 0.05) s += clockIcon(SCREEN_X, iconY, 100, AMBER, u * Math.PI * 10, currentClockOp);
+  } else { // Clock -> Dollar
+    var currentClockOp = 1 - clockToDollar;
+    if (currentClockOp > 0.05) s += clockIcon(SCREEN_X, iconY, 100, AMBER, u * Math.PI * 10, currentClockOp);
+
+    var currentDollarOp = clockToDollar;
+    if (currentDollarOp > 0.05) s += dollarIcon(SCREEN_X, iconY, 120, 160, AMBER, currentDollarOp);
+  }
+
+  // Multiple dollar bill icons stack up
+  var stackStart = 0.4;
+  var stackEnd = 0.9;
+  var numDollars = 5;
+  for (var i = 0; i < numDollars; i++) {
+    var dollarU = ramp(u, stackStart + i * 0.08, stackStart + i * 0.08 + 0.1);
+    if (dollarU > 0) {
+      var dy = lerp(200, i * -80, easeOut(dollarU)); // Stack upwards
+      var dollarOp = lerp(0, 1, dollarU);
+      s += dollarIcon(SCREEN_X + (i % 2 == 0 ? -20 : 20), iconY + 100 + dy, 120, 160, CORAL, dollarOp);
+    }
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH — User tries to cancel, encounters friction. */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  s += persistentElements(u, 3);
+
+  // Stick figure navigating
+  s += stickFigure(FIGURE_X, FIGURE_Y, AMBER, 'navigating', 1);
+
+  // Coral red maze on screen
+  var mazeOp = ramp(u, 0.0, 0.3) * (1 - ramp(u, 0.8, 1.0));
+  s += cancellationMaze(SCREEN_X, SCREEN_Y, SCREEN_W * 0.9, SCREEN_H * 0.9, u * 2, CORAL, mazeOp);
+
+  // Tiny "Cancel" icon hidden deep within the maze
+  var cancelSize = lerp(20, 60, smooth(ramp(u, 0.7, 0.9)));
+  var cancelX = lerp(SCREEN_X + 200, SCREEN_X - 150, smooth(u));
+  var cancelY = lerp(SCREEN_Y + 300, SCREEN_Y + 200, smooth(u));
+  s += rrect(cancelX, cancelY, cancelSize * 1.5, cancelSize, 8, CORAL, ramp(u, 0.6, 0.9));
+  s += cancelGlyph(cancelX, cancelY, cancelSize * 0.8, WHITE, 8, ramp(u, 0.6, 0.9));
+
+  // Abstract clicks/interactions
+  var click1 = pulse(u, 0.45, 0.05);
+  s += dot(SCREEN_X - 100, SCREEN_Y - 200, 20 * (1 + click1), WHITE, click1 * 0.8);
+  var click2 = pulse(u, 0.75, 0.05);
+  s += dot(SCREEN_X + 180, SCREEN_Y + 100, 20 * (1 + click2), WHITE, click2 * 0.8);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND — The "auto-renew" default is revealed. */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  s += persistentElements(u, 4);
+
+  // Stick figure still navigating, then understanding
+  var figurePose = (u < 0.6) ? 'navigating' : 'nodding';
+  s += stickFigure(FIGURE_X, FIGURE_Y, AMBER, figurePose, 1);
+
+  // Coral red maze dissolves, revealing toggle switch
+  var mazeDissolve = ramp(u, 0.0, 0.2);
+  s += cancellationMaze(SCREEN_X, SCREEN_Y, SCREEN_W * 0.9, SCREEN_H * 0.9, u * 2, CORAL, 1 - mazeDissolve);
+
+  var toggleOp = ramp(u, 0.1, 0.4);
+  var toggleW = lerp(100, 240, toggleOp);
+  var toggleH = lerp(40, 100, toggleOp);
+  var toggleY = SCREEN_Y + 100;
+  s += toggleSwitch(SCREEN_X, toggleY, toggleW, toggleH, 'on', BLUE, toggleOp);
+
+  // Signal blue arrow points from toggle to dollar bills
+  var arrowOp = ramp(u, 0.5, 0.7);
+  var dollarStackY = toggleY + 200;
+  var dollarStackOp = ramp(u, 0.6, 0.8);
+  s += dollarIcon(SCREEN_X, dollarStackY, 120, 160, BLUE, dollarStackOp);
+  s += dollarIcon(SCREEN_X + 40, dollarStackY + 60, 120, 160, BLUE, dollarStackOp * 0.8);
+  s += dollarIcon(SCREEN_X - 40, dollarStackY + 120, 120, 160, BLUE, dollarStackOp * 0.6);
+
+  var arrowStart = { x: SCREEN_X + toggleW / 2 - toggleH / 2, y: toggleY };
+  var arrowEnd = { x: SCREEN_X + 40, y: dollarStackY + 60 };
+  s += arrow(arrowStart.x, arrowStart.y, lerp(arrowStart.x, arrowEnd.x, easeOut(arrowOp)), lerp(arrowStart.y, arrowEnd.y, easeOut(arrowOp)), 40, BLUE, 10, arrowOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE — The cost of this default is paid through unused subscriptions. */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.8, smooth(u));
+  s += '<g ' + camera(scale, 0, lerp(0, 90, smooth(u))) + '>';
+
+  s += persistentElements(u, 5);
+
+  // Stick figure trapped by growing stack of dollar bill icons
+  var figureTrappedY = FIGURE_Y + lerp(0, 100, smooth(u));
+  s += stickFigure(FIGURE_X, figureTrappedY, AMBER, 'trapped', 1);
+
+  var dollarStackBaseY = FIGURE_Y + 100;
+  var numDollars = 7;
+  for (var i = 0; i < numDollars; i++) {
+    var dollarOp = ramp(u, i * 0.1, i * 0.1 + 0.3);
+    if (dollarOp > 0) {
+      var dollarY = dollarStackBaseY - i * 60 + lerp(200, 0, easeOut(dollarOp));
+      var dollarX = FIGURE_X + (rnd(i) - 0.5) * 100;
+      s += dollarIcon(dollarX, dollarY, 120, 160, CORAL, dollarOp * 0.9);
+      // Also add a subtle ring around the figure to show being trapped
+      if (i === 0) s += ring(FIGURE_X, FIGURE_Y + 50, 180, CORAL, 8, dollarOp * 0.3);
+    }
+  }
+
+  // Large, heavy "CANCEL" button appears just out of reach
+  var cancelBtnX = FIGURE_X + 280;
+  var cancelBtnY = FIGURE_Y - 100;
+  var cancelBtnScale = lerp(0.5, 1.0, smooth(ramp(u, 0.4, 0.7)));
+  var cancelBtnOp = ramp(u, 0.4, 0.7);
+  s += rrect(cancelBtnX, cancelBtnY, 200 * cancelBtnScale, 100 * cancelBtnScale, 15, CORAL, cancelBtnOp);
+  s += cancelGlyph(cancelBtnX, cancelBtnY, 80 * cancelBtnScale, WHITE, 10, cancelBtnOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE — User is now aware and will approach subscriptions differently. */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.8, 1.0, smooth(clamp(u / 0.7, 0, 1)));
+  s += '<g ' + camera(scale, 0, lerp(90, 0, smooth(u))) + '>';
+
+  s += persistentElements(u, 6);
+
+  // Stick figure back at desk, nodding knowingly
+  s += stickFigure(FIGURE_X, FIGURE_Y, AMBER, 'nodding', 1);
+
+  // New "Sign Up" screen, generic app icon
+  s += appIcon(SCREEN_X, SCREEN_Y - 100, 200, BLUE, 0.8);
+  s += rrect(SCREEN_X, SCREEN_Y + 380, 200, 80, 10, DIM, 0.6); // Generic button
+
+  // "Auto-Renew" option clearly visible and highlighted
+  var toggleY = SCREEN_Y + 100;
+  s += toggleSwitch(SCREEN_X, toggleY, 240, 100, 'on', BLUE, 1);
+
+  // Magnifying glass highlights the "Auto-Renew" option
+  var magOp = ramp(u, 0.1, 0.4);
+  var magX = lerp(SCREEN_X + 300, SCREEN_X - 100, easeOut(magOp));
+  var magY = lerp(SCREEN_Y + 400, toggleY, easeOut(magOp));
+  var magPulse = Math.sin(u * Math.PI * 6) * 5;
+  s += magnifyingGlass(magX, magY, 80 + magPulse, 100, BLUE, 12, magOp);
+
+  // Subtle glow around the toggle
+  s += ring(SCREEN_X, toggleY, 130, BLUE, 6, ramp(u, 0.5, 0.8) * 0.4);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

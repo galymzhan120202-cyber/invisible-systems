@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "Buying online? You check reviews first, right? You want five-star ratings for quality, to make the best choice and avoid duds.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "Scrolling, something feels off. Glowing praise, generic language. Identical reviews for unknown products. This feels like artificial enthusiasm.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "You try to spot fakes: vague phrases, bad grammar, no details. Bots or eager fans? No, the pattern is too widespread and organized.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "The real system: incentives. High ratings mean sales. Businesses pay for positive reviews—with products, discounts, or cash. Trust becomes a traded commodity.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "The cost? Wasted time, eroded trust. That five-star rating, once reliable, now feels like a paid ad. The system pollutes information, making decisions harder.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "Tomorrow, you'll read reviews. But you'll see the tells: vague praise, rating spikes. You're a detective now, wise to these hidden incentives.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

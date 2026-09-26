@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why We Feel Pressured to Tip</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / rules
+var AMBER = "#F2A93B";              // warm amber   -> YOU / desire / cost
+var CORAL = "#FF5B5B";              // coral red    -> naive model / friction
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+// --- NEW HELPERS FOR THIS ANIMATION ---
+
+// Stick figure hand (YOU)
+function stickHand(x, y, scale, rotation, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ') rotate(' + rotation + ') scale(' + scale + ')">';
+  // Palm
+  g += rrect(0, 0, 60, 80, 18, col);
+  // Thumb
+  g += line(-30, 20, -50, 0, col, 10);
+  // Fingers
+  g += line(0, -40, 0, -60, col, 10);
+  g += line(20, -40, 20, -60, col, 10);
+  g += line(-20, -40, -20, -60, col, 10);
+  g += '</g>';
+  return g;
+}
+
+// Bill element
+function billRect(x, y, w, h, rad, col, sw, fillCol, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, rad, fillCol, op);
+  g += rrectStroke(x, y, w, h, rad, col, sw, op);
+  g += '</g>';
+  return g;
+}
+
+// Tip line on a bill
+function billTipLine(x, y, w, col, sw, op, dashed) {
+  var d = "M " + (x - w / 2 + 20) + " " + y + " L " + (x + w / 2 - 20) + " " + y;
+  var dashArray = dashed ? "20 10" : "none";
+  return '<path d="' + d + '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '" stroke-dasharray="' + dashArray + '"/>';
+}
+
+// Generic glyphs
+function questionMark(x, y, size, col, sw, op) {
+  var d = "M " + x + " " + (y - size / 2) +
+          " A " + (size / 4) + " " + (size / 4) + " 0 1 1 " + (x - size / 4) + " " + (y - size / 4) +
+          " L " + (x - size / 4) + " " + (y + size / 8) +
+          " M " + x + " " + (y + size / 4);
+  return pathTag(d, col, sw, op);
+}
+
+function checkMark(x, y, size, col, sw, op) {
+  var d = "M " + (x - size / 2) + " " + (y - size / 8) +
+          " L " + (x - size / 8) + " " + (y + size / 4) +
+          " L " + (x + size / 2) + " " + (y - size / 2);
+  return pathTag(d, col, sw, op);
+}
+
+function arrowUp(x, y, size, col, sw, op) {
+  var d = "M " + x + " " + (y + size/2) + " L " + x + " " + (y - size/2) +
+          " M " + (x - size/4) + " " + (y - size/8) + " L " + x + " " + (y - size/2) +
+          " L " + (x + size/4) + " " + (y - size/8);
+  return pathTag(d, col, sw, op);
+}
+
+function eyeGlyph(x, y, size, col, sw, op) {
+    var r_outer = size / 2;
+    var r_inner = size / 6;
+    var d = "M " + (x - r_outer) + " " + y +
+            " A " + r_outer + " " + r_outer / 2 + " 0 0 1 " + (x + r_outer) + " " + y +
+            " M " + (x + r_outer) + " " + y +
+            " A " + r_outer + " " + r_outer / 2 + " 0 0 1 " + (x - r_outer) + " " + y;
+    return pathTag(d, col, sw, op) + dot(x, y, r_inner, col, op);
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+var BILL_W = 300, BILL_H = 400, BILL_RAD = 30;
+var HAND_SCALE = 1.6;
+var HAND_Y_REST = BOT - 300;
+var BILL_Y_REST = CY + 100;
+var BILL_TIP_LINE_OFFSET = 100; // From bill bottom
+
+/* SCENE 1 (0-10): YOU + Bill presented */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  var handX = CX;
+  var handY = lerp(BOT + 100, HAND_Y_REST, easeOut(ramp(u, 0.0, 0.3)));
+  var billY = lerp(BOT + 200, BILL_Y_REST, easeOut(ramp(u, 0.0, 0.3)));
+  var handRot = lerp(20, 0, smooth(ramp(u, 0.0, 0.3)));
+
+  s += billRect(CX, billY, BILL_W, BILL_H, BILL_RAD, WHITE, 8, WHITE, 1);
+  s += billTipLine(CX, billY + BILL_H / 2 - BILL_TIP_LINE_OFFSET, BILL_W - 40, DIM, 7, 0.8, true);
+
+  s += stickHand(handX, handY, HAND_SCALE, handRot, AMBER, 1);
+
+  // Subtle pulse on tip line
+  var pulseOp = pulse(u, 0.6, 0.3) * 0.4;
+  s += billTipLine(CX, billY + BILL_H / 2 - BILL_TIP_LINE_OFFSET, BILL_W - 40, AMBER, 10, pulseOp, false);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): Decision pressure */
+function scene2(u) {
+  var s = '';
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14);
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+
+  var handX = CX;
+  var handY = HAND_Y_REST - lerp(0, 30, smooth(u)); // Hand slightly lifts
+  var billY = BILL_Y_REST;
+  var handRot = lerp(0, -15, smooth(u)); // Hand tilts slightly
+
+  var tipLineY = billY + BILL_H / 2 - BILL_TIP_LINE_OFFSET;
+  s += billRect(CX, billY, BILL_W, BILL_H, BILL_RAD, WHITE, 8, WHITE, 1);
+  s += billTipLine(CX, tipLineY, BILL_W - 40, DIM, 7, 0.8, true);
+
+  // Ghost options / hesitation marks
+  var ghostOp = smooth(ramp(u, 0.2, 0.6)) * (1 - smooth(ramp(u, 0.7, 1.0)));
+  if (ghostOp > 0.01) {
+    s += dot(CX - 80, tipLineY - 30, 12, DIM, ghostOp * 0.6);
+    s += dot(CX, tipLineY - 50, 12, DIM, ghostOp * 0.8);
+    s += dot(CX + 80, tipLineY - 30, 12, DIM, ghostOp * 0.6);
+    s += questionMark(CX, tipLineY - 120, 40, DIM, 8, ghostOp);
+  }
+
+  // Subtle external gaze
+  var eyeOp = smooth(ramp(u, 0.4, 0.8)) * (1 - smooth(ramp(u, 0.8, 1.0)));
+  if (eyeOp > 0.01) {
+      s += eyeGlyph(CX - 200, TOP + 100, 60, DIM, 4, eyeOp * 0.5);
+      s += eyeGlyph(CX + 200, TOP + 100, 60, DIM, 4, eyeOp * 0.5);
+  }
+
+  s += stickHand(handX, handY, HAND_SCALE, handRot, AMBER, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): The "implicit contract" emerges */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var handX = CX;
+  var handY = HAND_Y_REST - 30;
+  var handRot = -15;
+
+  var billY = BILL_Y_REST;
+  var billMorph = smooth(ramp(u, 0.0, 0.6));
+
+  // Bill morphs into a system structure
+  var systemBillW = lerp(BILL_W, BILL_W * 1.2, billMorph);
+  var systemBillH = lerp(BILL_H, BOT - TOP - 100, billMorph);
+  var systemBillY = lerp(BILL_Y_REST, CY, billMorph);
+  var systemBillRad = lerp(BILL_RAD, 10, billMorph);
+
+  // Outer structure (bill frame)
+  s += rrectStroke(CX, systemBillY, systemBillW, systemBillH, systemBillRad, WHITE, 8, 1);
+
+  // Inner "contract" lines (BLUE)
+  var contractOp = billMorph;
+  if (contractOp > 0.01) {
+    // Vertical lines
+    s += line(CX - systemBillW / 2 + 50, systemBillY - systemBillH / 2 + 50, CX - systemBillW / 2 + 50, systemBillY + systemBillH / 2 - 50, BLUE, 6, contractOp);
+    s += line(CX + systemBillW / 2 - 50, systemBillY - systemBillH / 2 + 50, CX + systemBillW / 2 - 50, systemBillY + systemBillH / 2 - 50, BLUE, 6, contractOp);
+    // Horizontal connections (representing implicit agreement)
+    s += line(CX - systemBillW / 2 + 50, systemBillY - systemBillH / 4, CX + systemBillW / 2 - 50, systemBillY - systemBillH / 4, BLUE, 6, contractOp);
+    s += line(CX - systemBillW / 2 + 50, systemBillY + systemBillH / 4, CX + systemBillW / 2 - 50, systemBillY + systemBillH / 4, BLUE, 6, contractOp);
+
+    // Central "balance" or "handshake" glyph
+    var glyphSize = lerp(0, 80, smooth(ramp(u, 0.4, 0.8)));
+    if (glyphSize > 0) {
+        // Simple balance scale representation
+        s += line(CX - glyphSize/2, systemBillY - glyphSize/4, CX + glyphSize/2, systemBillY - glyphSize/4, BLUE, 8, contractOp);
+        s += line(CX, systemBillY - glyphSize/4, CX, systemBillY + glyphSize/4, BLUE, 8, contractOp);
+        s += dot(CX - glyphSize/2, systemBillY - glyphSize/4, 8, BLUE, contractOp);
+        s += dot(CX + glyphSize/2, systemBillY - glyphSize/4, 8, BLUE, contractOp);
+    }
+  }
+
+  // Hand tries to interact
+  var handMoveX = lerp(0, 100, smooth(ramp(u, 0.2, 0.7)));
+  var handMoveY = lerp(0, -50, smooth(ramp(u, 0.2, 0.7)));
+  s += stickHand(handX + handMoveX, handY + handMoveY, HAND_SCALE, handRot + lerp(0, 20, smooth(ramp(u, 0.2, 0.7))), AMBER, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): Feeling the pressure, the cost */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var handX = CX;
+  var handY = HAND_Y_REST - 30;
+  var handRot = -15;
+
+  var billY = CY;
+  var systemBillW = BILL_W * 1.2;
+  var systemBillH = BOT - TOP - 100;
+
+  // The system as a solid block
+  s += rrect(CX, billY, systemBillW, systemBillH, 10, BLUE, 0.34);
+  s += rrectStroke(CX, billY, systemBillW, systemBillH, 10, WHITE, 8, 1);
+
+  // Pressure / cost indicator (CORAL)
+  var pressureGrowth = smooth(ramp(u, 0.1, 0.7));
+  var pressureH = lerp(0, systemBillH * 0.6, pressureGrowth);
+  var pressureY = billY + systemBillH / 2 - pressureH / 2;
+  s += rrect(CX, pressureY, systemBillW - 40, pressureH, 10, CORAL, 0.6);
+  s += arrowUp(CX, pressureY + pressureH/2 - 40, 60, WHITE, 10, pressureGrowth);
+
+  // Hand being pressed down
+  var handPress = lerp(0, 80, smooth(ramp(u, 0.2, 0.8)));
+  s += stickHand(handX, handY + handPress, HAND_SCALE, handRot + lerp(0, 10, smooth(ramp(u, 0.2, 0.8))), AMBER, 1);
+
+  // Small dots representing individual "lost" moments or costs
+  for (var i = 0; i < 5; i++) {
+    var dy = (rnd(i) * 0.8 + 0.2) * pressureH;
+    var dx = (rnd(i + 10) * 2 - 1) * (systemBillW / 2 - 80);
+    s += dot(CX + dx, pressureY - pressureH/2 + dy, 10, WHITE, 0.7 * pressureGrowth);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): Losing moments stack into a tall coral memory column */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.8, smooth(u));
+  s += '<g ' + camera(scale, 0, lerp(0, 90, smooth(u))) + '>';
+
+  var handX = CX;
+  var handY = HAND_Y_REST - 30;
+  var handRot = -15;
+
+  var colX = CX, colY = CY;
+  var colW = BILL_W * 0.8, colH = BOT - TOP - 100;
+  var numBlocks = 10;
+  var blockHeight = colH / numBlocks;
+
+  // The system as a column outline
+  s += rrectStroke(colX, colY, colW + 20, colH + 20, 10, BLUE, 8, 0.4);
+
+  // Stacking coral blocks (representing individual contributions/costs)
+  var stackProg = smooth(ramp(u, 0.05, 0.82)) * numBlocks;
+  var stacked = Math.floor(stackProg);
+
+  for (var i = 0; i < numBlocks; i++) {
+    var blockY = colY + colH / 2 - (i + 0.5) * blockHeight;
+    if (i < stacked) {
+      s += rrect(colX, blockY, colW - 20, blockHeight - 10, 8, CORAL, 0.92);
+    } else {
+      var fp = clamp(stackProg - i, 0, 1);
+      if (fp > 0) {
+        var fx = lerp(handX + 100, colX, easeOut(fp));
+        var fy = lerp(handY - 100 - rnd(i) * 80, blockY, easeOut(fp));
+        s += rrect(fx, fy, colW - 20, blockHeight - 10, 8, CORAL, fp * 0.92);
+      }
+    }
+  }
+
+  // Hand is at the base, pushing up
+  var handPushY = lerp(0, -blockHeight * 0.5, smooth(ramp(u, 0.0, 0.2)));
+  s += stickHand(handX, handY + handPushY, HAND_SCALE, handRot, AMBER, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE — one shared finish line, then snap back to plain lanes */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.8, 0.92, smooth(clamp(u / 0.7, 0, 1)));
+  s += '<g ' + camera(scale, 0, lerp(90, 0, smooth(u))) + '>';
+
+  var handX = CX;
+  var handY = HAND_Y_REST;
+  var handRot = 0;
+
+  var colX = CX, colY = CY;
+  var colW = BILL_W * 0.8, colH = BOT - TOP - 100;
+  var numBlocks = 10;
+  var blockHeight = colH / numBlocks;
+
+  // Column dissolves
+  var dissolve = smooth(ramp(u, 0.0, 0.4));
+  if (dissolve < 1) {
+    s += rrectStroke(colX, colY, colW + 20, colH + 20, 10, BLUE, 8, 0.4 * (1 - dissolve));
+    for (var i = 0; i < numBlocks; i++) {
+      var blockY = colY + colH / 2 - (i + 0.5) * blockHeight;
+      s += rrect(colX, blockY, colW - 20, blockHeight - 10, 8, CORAL, 0.92 * (1 - dissolve));
+    }
+  }
+
+  // Two paths emerge (representing options/understanding)
+  var pathsOp = smooth(ramp(u, 0.2, 0.6));
+  var pathWidth = lerp(0, 200, pathsOp);
+  var pathY = CY + 100;
+  if (pathsOp > 0.01) {
+    s += rrect(CX - pathWidth/2 - 100, pathY, pathWidth, 120, 15, BLUE, 0.2 * pathsOp); // Path 1
+    s += rrect(CX + pathWidth/2 + 100, pathY, pathWidth, 120, 15, DIM, 0.2 * pathsOp);  // Path 2 (alternative)
+    s += line(CX - pathWidth/2 - 100, pathY - 40, CX - pathWidth/2 - 100, pathY + 40, WHITE, 8, pathsOp); // Glyph for path 1
+    s += line(CX + pathWidth/2 + 100 - 30, pathY - 30, CX + pathWidth/2 + 100 + 30, pathY + 30, WHITE, 8, pathsOp * 0.5); // Glyph for path 2
+  }
+
+  // Hand makes a choice and new bill appears
+  var newBillAppear = smooth(ramp(u, 0.5, 0.8));
+  var finalBillY = lerp(CY + 300, BILL_Y_REST, newBillAppear);
+  var finalHandY = lerp(HAND_Y_REST + 100, HAND_Y_REST, newBillAppear);
+  var finalHandX = lerp(CX, CX - 100, newBillAppear); // Hand moves to new bill
+
+  s += billRect(CX, finalBillY, BILL_W, BILL_H, BILL_RAD, WHITE, 8, WHITE, newBillAppear);
+  s += billTipLine(CX, finalBillY + BILL_H / 2 - BILL_TIP_LINE_OFFSET, BILL_W - 40, DIM, 7, newBillAppear * 0.8, true);
+
+  s += stickHand(finalHandX, finalHandY, HAND_SCALE, handRot, AMBER, 1);
+
+  // Checkmark on the tip line
+  var checkOp = smooth(ramp(u, 0.8, 0.95));
+  if (checkOp > 0.01) {
+    s += checkMark(CX, finalBillY + BILL_H / 2 - BILL_TIP_LINE_OFFSET, 40, AMBER, 10, checkOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure last frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
