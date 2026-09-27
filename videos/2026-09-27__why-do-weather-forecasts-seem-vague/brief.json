@@ -1,0 +1,15 @@
+{
+  "id": "why-do-weather-forecasts-seem-vague",
+  "slug": "2026-09-27__why-do-weather-forecasts-seem-vague",
+  "title_working": "Why Weather Forecasts Are Often Vague",
+  "system": "communicating uncertainty and probabilities",
+  "cluster": "nature-and-emergent-order",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-09-27T12:07:31+00:00",
+  "produced_at": "2026-09-27T12:14:16+00:00",
+  "verify": "PASS",
+  "takeaway": "Understanding that weather forecasts communicate probabilities, not certainties, allows you to plan more effectively for various outcomes.",
+  "animation_source": "llm"
+}

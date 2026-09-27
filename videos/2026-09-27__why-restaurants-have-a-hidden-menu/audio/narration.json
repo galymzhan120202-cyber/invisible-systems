@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You're at a restaurant, scanning the menu, wishing for something unique, a dish that truly stands out from the usual options.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "Then, you hear whispers: a friend, an online forum, or a server subtly hints at hidden options, a special item not listed anywhere.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "Excited, you try to order it, perhaps feeling awkward or foolish as you ask for something that doesn't officially exist.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "But the \"secret\" isn't a hidden list. It's a clever system of exclusivity, designed to make you feel like an insider, part of a select group.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "The cost? You paid for that feeling of special access, for the story, more than for any truly unique culinary masterpiece.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "Now, when you next spot a \"secret menu\" item, you'll understand the invisible system at play: a subtle dance of status and clever marketing.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

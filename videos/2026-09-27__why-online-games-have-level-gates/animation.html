@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Games Block Your Progress</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var PLAYER_X = CX;
+var PLAYER_Y = BOT - 200;
+var PLAYER_H = 220; // Player height
+var PLAYER_W = 120; // Player width
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary elements
+var BLUE  = "#4C86F0";              // signal blue  -> the system / gate
+var AMBER = "#F2A93B";              // warm amber   -> YOU / player
+var CORAL = "#FF5B5B";              // coral red    -> frustration / grind
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+// Player stick figure
+function player(x, y, scale, col, op, pose, u_pose) {
+  op = (op == null ? 1 : op);
+  u_pose = (u_pose == null ? 0 : u_pose); // Local time for pose animation
+
+  var headR = 24 * scale;
+  var bodyLen = 80 * scale;
+  var armLen = 60 * scale;
+  var legLen = 90 * scale;
+  var sw = 8 * scale;
+
+  var g = '<g opacity="' + op + '">';
+
+  // Head
+  g += dot(x, y - headR - bodyLen / 2, headR, col);
+
+  // Body
+  var bodyY1 = y - bodyLen / 2;
+  var bodyY2 = y + bodyLen / 2;
+
+  var arm1Y1 = bodyY1 + bodyLen * 0.1;
+  var arm2Y1 = bodyY1 + bodyLen * 0.1;
+  var leg1Y1 = bodyY2;
+  var leg2Y1 = bodyY2;
+
+  switch (pose) {
+    case "run":
+      var runPhase = Math.sin(u_pose * Math.PI * 4); // 2 full cycles per u_pose
+      var bodyLean = runPhase * 5 * scale;
+
+      var arm1X2 = x + armLen * Math.sin(Math.PI / 2 + runPhase * 0.6);
+      var arm1Y2 = arm1Y1 + armLen * Math.cos(Math.PI / 2 + runPhase * 0.6);
+      var arm2X2 = x + armLen * Math.sin(Math.PI / 2 - runPhase * 0.6);
+      var arm2Y2 = arm2Y1 + armLen * Math.cos(Math.PI / 2 - runPhase * 0.6);
+
+      var leg1X2 = x + legLen * Math.sin(Math.PI / 2 + runPhase * 0.8);
+      var leg1Y2 = leg1Y1 + legLen * Math.cos(Math.PI / 2 + runPhase * 0.8);
+      var leg2X2 = x + legLen * Math.sin(Math.PI / 2 - runPhase * 0.8);
+      var leg2Y2 = leg2Y1 + legLen * Math.cos(Math.PI / 2 - runPhase * 0.8);
+
+      g += line(x + bodyLean, bodyY1, x + bodyLean, bodyY2, col, sw);
+      g += line(x + bodyLean, arm1Y1, arm1X2 + bodyLean, arm1Y2, col, sw);
+      g += line(x + bodyLean, arm2Y1, arm2X2 + bodyLean, arm2Y2, col, sw);
+      g += line(x + bodyLean, leg1Y1, leg1X2 + bodyLean, leg1Y2, col, sw);
+      g += line(x + bodyLean, leg2Y1, leg2X2 + bodyLean, leg2Y2, col, sw);
+      break;
+
+    case "bump":
+      var bumpOffset = Math.sin(u_pose * Math.PI) * 10 * scale; // Bumps forward then recoils
+      g += line(x + bumpOffset, bodyY1, x + bumpOffset, bodyY2, col, sw);
+      g += line(x + bumpOffset, arm1Y1, x + bumpOffset + armLen * 0.3, arm1Y1 + armLen * 0.7, col, sw); // Arms forward
+      g += line(x + bumpOffset, arm2Y1, x + bumpOffset - armLen * 0.3, arm2Y1 + armLen * 0.7, col, sw);
+      g += line(x + bumpOffset, leg1Y1, x + bumpOffset, leg1Y1 + legLen * 0.3, col, sw); // Legs bent
+      g += line(x + bumpOffset, leg2Y1, x + bumpOffset, leg2Y1 + legLen * 0.3, col, sw);
+      break;
+
+    case "push":
+      var pushLean = lerp(0, 20 * scale, smooth(u_pose));
+      var armPush = lerp(0, 40 * scale, smooth(u_pose));
+      g += line(x + pushLean, bodyY1, x + pushLean, bodyY2, col, sw);
+      g += line(x + pushLean, arm1Y1, x + pushLean + armPush, arm1Y1 - armLen * 0.2, col, sw); // Arms forward
+      g += line(x + pushLean, arm2Y1, x + pushLean + armPush, arm2Y1 - armLen * 0.2, col, sw);
+      g += line(x + pushLean, leg1Y1, x + pushLean, leg1Y1 + legLen * 0.2, col, sw); // Legs bent
+      g += line(x + pushLean, leg2Y1, x + pushLean, leg2Y1 + legLen * 0.2, col, sw);
+      break;
+
+    case "tired":
+      var slump = lerp(0, 15 * scale, smooth(u_pose));
+      g += line(x, bodyY1 + slump, x, bodyY2 + slump, col, sw); // Body slumped
+      g += line(x, arm1Y1 + slump, x + armLen * 0.4, arm1Y1 + armLen * 0.4 + slump, col, sw); // Arms down
+      g += line(x, arm2Y1 + slump, x - armLen * 0.4, arm2Y1 + armLen * 0.4 + slump, col, sw);
+      g += line(x, leg1Y1 + slump, x, leg1Y1 + legLen * 0.2 + slump, col, sw); // Legs slightly bent
+      g += line(x, leg2Y1 + slump, x, leg2Y1 + legLen * 0.2 + slump, col, sw);
+      break;
+
+    case "pay":
+      var payArm = lerp(0, 40 * scale, easeOut(u_pose));
+      g += line(x, bodyY1, x, bodyY2, col, sw);
+      g += line(x, arm1Y1, x + payArm, arm1Y1 - payArm, col, sw); // Arm extended up
+      g += line(x, arm2Y1, x - armLen * 0.4, arm2Y1 + armLen * 0.4, col, sw); // Other arm down
+      g += line(x, leg1Y1, x, leg1Y1 + legLen * 0.2, col, sw);
+      g += line(x, leg2Y1, x, leg2Y1 + legLen * 0.2, col, sw);
+      break;
+
+    case "happy": // Default standing/happy
+    default:
+      g += line(x, bodyY1, x, bodyY2, col, sw);
+      g += line(x, arm1Y1, x + armLen * 0.4, arm1Y1 + armLen * 0.4, col, sw);
+      g += line(x, arm2Y1, x - armLen * 0.4, arm2Y1 + armLen * 0.4, col, sw);
+      g += line(x, leg1Y1, x, leg1Y1 + legLen, col, sw);
+      g += line(x, leg2Y1, x, leg2Y1 + legLen, col, sw);
+      break;
+  }
+  g += '</g>';
+  return g;
+}
+
+// Star icon for progress
+function star(x, y, size, col, op) {
+  var s = size / 2;
+  var d = "M " + x + " " + (y - s) +
+          " L " + (x + s * 0.25) + " " + (y - s * 0.25) +
+          " L " + (x + s) + " " + y +
+          " L " + (x + s * 0.25) + " " + (y + s * 0.25) +
+          " L " + x + " " + (y + s) +
+          " L " + (x - s * 0.25) + " " + (y + s * 0.25) +
+          " L " + (x - s) + " " + y +
+          " L " + (x - s * 0.25) + " " + (y - s * 0.25) + " Z";
+  return '<path d="' + d + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+// Broken Pickaxe icon for frustration
+function brokenPickaxe(x, y, size, col, op) {
+  var s = size / 2;
+  var d = "M " + (x - s * 0.8) + " " + (y + s * 0.8) + // Handle bottom
+          " L " + (x - s * 0.6) + " " + (y + s * 0.6) +
+          " L " + (x - s * 0.2) + " " + (y + s * 0.2) +
+          " L " + (x + s * 0.2) + " " + (y - s * 0.2) + // Pickaxe head
+          " L " + (x + s * 0.8) + " " + (y - s * 0.4) +
+          " L " + (x + s * 0.5) + " " + (y - s * 0.7) +
+          " L " + (x + s * 0.2) + " " + (y - s * 0.5) +
+          " L " + (x - s * 0.5) + " " + (y + s * 0.5) + " Z";
+  var crack = "M " + (x + s * 0.1) + " " + (y - s * 0.1) + " L " + (x + s * 0.3) + " " + (y + s * 0.1); // Crack
+  return '<g opacity="' + (op == null ? 1 : op) + '">' +
+         '<path d="' + d + '" fill="' + col + '"/>' +
+         '<path d="' + crack + '" stroke="' + WHITE + '" stroke-width="' + (s * 0.15) + '" stroke-linecap="round"/>' +
+         '</g>';
+}
+
+// Amber Coin icon
+function amberCoin(x, y, size, col, op) {
+  var r = size / 2;
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>' +
+         '<line x1="' + (x - r * 0.4) + '" y1="' + y + '" x2="' + (x + r * 0.4) + '" y2="' + y +
+         '" stroke="' + WHITE + '" stroke-width="' + (r * 0.2) + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+// Persistent winding path segment
+function windingPath(yOffset, pathOp, sw) {
+  sw = (sw == null ? 12 : sw);
+  pathOp = (pathOp == null ? 1 : pathOp);
+  var pathD = "M " + CX + " " + (BOT + yOffset) +
+              " C " + (CX + 200) + " " + (BOT - 300 + yOffset) +
+              " " + (CX - 200) + " " + (BOT - 600 + yOffset) +
+              " " + CX + " " + (BOT - 900 + yOffset) +
+              " C " + (CX + 200) + " " + (TOP + 400 + yOffset) +
+              " " + (CX - 200) + " " + (TOP + 100 + yOffset) +
+              " " + CX + " " + (TOP + yOffset);
+  return pathTag(pathD, WHITE, sw, pathOp);
+}
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var cameraScale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var cameraY = lerp(-24, 0, smooth(u * 0.9));
+
+  // Player position along path
+  var playerProgress = u * 0.8; // Player doesn't reach the very top
+  var playerPathY = lerp(PLAYER_Y, TOP + 100, easeOut(playerProgress));
+  var playerPathX = CX + Math.sin(playerProgress * Math.PI * 3) * 100; // Winding motion
+
+  s += '<g ' + camera(cameraScale, 0, cameraY) + '>';
+  s += windingPath(0, 1, 12);
+
+  // Stars popping up
+  for (var i = 0; i < 5; i++) {
+    var starU = (u * 1.5 + i * 0.2) % 1;
+    if (starU < 0.8) { // Stars appear and fade
+      var starY = lerp(PLAYER_Y - 100, TOP + 100, easeOut(starU));
+      var starX = CX + Math.sin(starU * Math.PI * 3) * 100 + rnd(i) * 60 - 30;
+      var starOpacity = pulse(starU, 0.5, 0.4);
+      s += star(starX, starY, 24, WHITE, starOpacity * 0.8);
+    }
+  }
+
+  // Player running
+  s += player(playerPathX, playerPathY, 1, AMBER, 1, "run", u * 2);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var pathYOffset = lerp(0, -900, smooth(u * 0.1)); // Path scrolls up slightly to meet gate
+  var gateY = lerp(BOT - 900, CY, smooth(u * 0.2)); // Gate rises
+  var gateH = 800;
+  var gateW = 400;
+
+  var playerY = PLAYER_Y - pathYOffset;
+  var playerX = CX + Math.sin(0.8 * Math.PI * 3) * 100; // Player stops at end of path
+
+  var bumpU = ramp(u, 0.1, 0.3); // Player bumps into gate
+  var playerBumpY = playerY - 30 * Math.sin(bumpU * Math.PI);
+  var playerBumpX = playerX + 10 * Math.sin(bumpU * Math.PI * 2);
+
+  var cameraZoom = lerp(1.0, 1.1, smooth(ramp(u, 0.2, 0.6)));
+  var cameraPanY = lerp(0, -100, smooth(ramp(u, 0.2, 0.6)));
+
+  s += '<g ' + camera(cameraZoom, 0, cameraPanY) + '>';
+  s += windingPath(pathYOffset, 1, 12);
+
+  // The gate appears
+  s += rrect(CX, gateY, gateW, gateH, 40, BLUE, 1);
+  s += rrectStroke(CX, gateY, gateW, gateH, 40, WHITE, 8, 1);
+
+  // Player bumps into the gate
+  s += player(playerBumpX, playerBumpY, 1, AMBER, 1, "bump", bumpU * 4);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var gateY = CY;
+  var gateH = 800;
+  var gateW = 400;
+
+  var playerY = PLAYER_Y - 900;
+  var playerX = CX + Math.sin(0.8 * Math.PI * 3) * 100;
+
+  var pushU = ramp(u, 0.1, 0.8); // Player pushes against gate
+  var playerPushX = playerX + lerp(0, -30, smooth(pushU));
+  var playerPushY = playerY + lerp(0, 10, smooth(pushU));
+
+  var frustrationOp = pulse(u, 0.5, 0.4); // Frustration lines pulse
+  var pickaxeOp = ramp(u, 0.4, 0.7) * (1 - ramp(u, 0.8, 1.0)); // Pickaxe appears and fades
+
+  s += '<g ' + camera(1.1, 0, -100) + '>';
+  s += windingPath(-900, 1, 12);
+
+  // The gate
+  s += rrect(CX, gateY, gateW, gateH, 40, BLUE, 1);
+  s += rrectStroke(CX, gateY, gateW, gateH, 40, WHITE, 8, 1);
+
+  // Frustration lines
+  if (frustrationOp > 0.05) {
+    for (var i = 0; i < 4; i++) {
+      var angle = Math.PI / 2 + (i - 1.5) * (Math.PI / 8);
+      var startR = 60;
+      var endR = 120;
+      var fx1 = playerPushX + startR * Math.cos(angle);
+      var fy1 = playerPushY + startR * Math.sin(angle);
+      var fx2 = playerPushX + endR * Math.cos(angle);
+      var fy2 = playerPushY + endR * Math.sin(angle);
+      s += line(fx1, fy1, fx2, fy2, CORAL, 8, frustrationOp * 0.8);
+    }
+  }
+
+  // Broken pickaxe icon
+  if (pickaxeOp > 0.05) {
+    s += brokenPickaxe(playerPushX - 80, playerPushY - 140, 60, CORAL, pickaxeOp);
+  }
+
+  // Player pushing
+  s += player(playerPushX, playerPushY, 1, AMBER, 1, "push", pushU);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40s): FIND */
+function scene4(u) {
+  var s = '';
+  var gateY = CY;
+  var gateH = 800;
+  var gateW = 400;
+
+  var playerY = PLAYER_Y - 900;
+  var playerX = CX + Math.sin(0.8 * Math.PI * 3) * 100;
+
+  var transformU = smooth(ramp(u, 0.1, 0.6)); // Gate transformation progress
+  var gateOp = lerp(1, 0, transformU); // Old gate fades out
+  var pathOp = lerp(0, 1, transformU); // New paths fade in
+
+  var grindPathWidth = lerp(0, 180, pathOp);
+  var payPathWidth = lerp(0, 120, pathOp);
+
+  var cameraPanX = lerp(0, -80, smooth(ramp(u, 0.4, 0.8))); // Pan to show both paths
+
+  s += '<g ' + camera(1.1, cameraPanX, -100) + '>';
+  s += windingPath(-900, 1, 12); // Base path
+
+  // Old gate fading out
+  s += rrect(CX, gateY, gateW, gateH, 40, BLUE, gateOp);
+  s += rrectStroke(CX, gateY, gateW, gateH, 40, WHITE, 8, gateOp);
+
+  // New paths forming
+  var grindPathX = CX - 160;
+  var payPathX = CX + 160;
+
+  // Grind path (long, winding coral)
+  var grindPathD = "M " + grindPathX + " " + (gateY + gateH / 2) +
+                   " C " + (grindPathX - 100) + " " + (gateY + gateH / 2 - 200) +
+                   " " + (grindPathX + 100) + " " + (gateY + gateH / 2 - 400) +
+                   " " + (grindPathX - 50) + " " + (gateY - gateH / 2 - 100);
+  s += pathTag(grindPathD, CORAL, grindPathWidth, pathOp);
+
+  // Pay path (short, direct amber)
+  var payPathD = "M " + payPathX + " " + (gateY + gateH / 2) +
+                 " L " + payPathX + " " + (gateY - gateH / 2 + 100);
+  s += pathTag(payPathD, AMBER, payPathWidth, pathOp);
+
+  // Amber coin icon on pay path
+  var coinY = gateY - gateH / 2 + 50;
+  s += amberCoin(payPathX, coinY, 60, AMBER, pathOp);
+
+  // Player at the split
+  s += player(playerX, playerY, 1, AMBER, 1, "happy", 0);
+  s += line(playerX, playerY - PLAYER_H/2 - 20, playerX + 30, playerY - PLAYER_H/2 - 60, WHITE, 7, 0.9); // Gaze up
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50s): TAKE */
+function scene5(u) {
+  var s = '';
+  var gateY = CY;
+  var gateH = 800;
+
+  var playerY = PLAYER_Y - 900;
+  var playerX = CX + Math.sin(0.8 * Math.PI * 3) * 100;
+
+  var grindPathX = CX - 160;
+  var payPathX = CX + 160;
+  var coinY = gateY - gateH / 2 + 50;
+
+  // Paths are fully visible
+  s += windingPath(-900, 1, 12);
+
+  var grindPathD = "M " + grindPathX + " " + (gateY + gateH / 2) +
+                   " C " + (grindPathX - 100) + " " + (gateY + gateH / 2 - 200) +
+                   " " + (grindPathX + 100) + " " + (gateY + gateH / 2 - 400) +
+                   " " + (grindPathX - 50) + " " + (gateY - gateH / 2 - 100);
+  s += pathTag(grindPathD, CORAL, 180, 1);
+
+  var payPathD = "M " + payPathX + " " + (gateY + gateH / 2) +
+                 " L " + payPathX + " " + (gateY - gateH / 2 + 100);
+  s += pathTag(payPathD, AMBER, 120, 1);
+
+  // Player choice animation
+  var choiceU = ramp(u, 0.1, 0.8);
+  var playerChoiceX, playerChoiceY;
+  var playerPose = "happy";
+  var coinOp = 1;
+
+  // Player starts at original position, moves to pay path, coin disappears
+  playerChoiceX = lerp(playerX, payPathX, easeOut(choiceU));
+  playerChoiceY = lerp(playerY, coinY + 60, easeOut(choiceU));
+  playerPose = "pay";
+  coinOp = 1 - smooth(ramp(u, 0.5, 0.9)); // Coin disappears after player reaches it
+
+  s += amberCoin(payPathX, coinY, 60, AMBER, coinOp);
+  s += player(playerChoiceX, playerChoiceY, 1, AMBER, 1, playerPose, choiceU);
+
+  // Tired player on grind path (alternative visualization)
+  var tiredPlayerX = grindPathX - 100;
+  var tiredPlayerY = gateY + gateH / 2 + 100;
+  var tiredOp = ramp(u, 0.0, 0.2) * (1 - ramp(u, 0.8, 1.0)); // Fades in and out
+  s += player(tiredPlayerX, tiredPlayerY, 0.8, CORAL, tiredOp, "tired", u * 0.5);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60s): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var cameraScale = lerp(1.1, 1.0, smooth(u));
+  var cameraPanY = lerp(-100, 0, smooth(u));
+  var cameraPanX = lerp(-80, 0, smooth(u));
+
+  var playerY = PLAYER_Y - 900;
+  var playerX = CX + Math.sin(0.8 * Math.PI * 3) * 100;
+
+  var transformBackU = smooth(ramp(u, 0.2, 0.8)); // Paths merge back
+
+  // Paths merging back
+  var grindPathX = CX - 160;
+  var payPathX = CX + 160;
+
+  var mergeW_grind = lerp(180, 0, transformBackU);
+  var mergeW_pay = lerp(120, 0, transformBackU);
+
+  // Grind path (fading out)
+  var grindPathD = "M " + grindPathX + " " + (CY + 400) +
+                   " C " + (grindPathX - 100) + " " + (CY + 200) +
+                   " " + (grindPathX + 100) + " " + (CY) +
+                   " " + (grindPathX - 50) + " " + (CY - 300);
+  s += pathTag(grindPathD, CORAL, mergeW_grind, 1 - transformBackU);
+
+  // Pay path (fading out)
+  var payPathD = "M " + payPathX + " " + (CY + 400) +
+                 " L " + payPathX + " " + (CY - 300 + 100);
+  s += pathTag(payPathD, AMBER, mergeW_pay, 1 - transformBackU);
+
+  // Main path reappearing/continuing
+  s += windingPath(lerp(-900, 0, transformBackU), 1, 12);
+
+  // Player moves past the gate area
+  var playerMoveU = ramp(u, 0.1, 0.9);
+  var playerCurrentX = lerp(payPathX, CX + Math.sin(playerMoveU * Math.PI * 3) * 100, playerMoveU);
+  var playerCurrentY = lerp(CY + 400 + 60, PLAYER_Y, playerMoveU);
+
+  s += player(playerCurrentX, playerCurrentY, 1, AMBER, 1, "run", u * 2);
+
+  // Faint future gates in the distance
+  var gateOp = ramp(u, 0.6, 1.0);
+  if (gateOp > 0.05) {
+    s += rrect(CX + 150, TOP + 300, 200, 300, 20, BLUE, gateOp * 0.15);
+    s += rrect(CX - 150, TOP + 100, 200, 300, 20, BLUE, gateOp * 0.1);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

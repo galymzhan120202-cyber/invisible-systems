@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Weather Forecasts Are Often Vague</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue  -> the system / probabilistic models
+var AMBER = "#F2A93B";              // warm amber   -> YOU
+var CORAL = "#FF5B5B";              // coral red    -> naive model / frustration / explicit uncertainty
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom elements ---------- */
+// Stick figure constants
+var FIG_HEAD_R = 25;
+var FIG_BODY_H = 100;
+var FIG_ARM_L = 70;
+var FIG_LEG_L = 80;
+var FIG_STROKE = 10;
+
+function stickFigure(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+
+  var headY = y - FIG_BODY_H / 2 - FIG_HEAD_R;
+  var bodyTopY = y - FIG_BODY_H / 2;
+  var bodyBotY = y + FIG_BODY_H / 2;
+
+  var armL1X, armL1Y, armL2X, armL2Y; // Left arm
+  var armR1X, armR1Y, armR2X, armR2Y; // Right arm
+  var legL1X, legL1Y, legL2X, legL2Y; // Left leg
+  var legR1X, legR1Y, legR2X, legR2Y; // Right leg
+
+  var headTilt = 0; // degrees
+  var bodyLean = 0; // x offset
+
+  // Default pose: standing, arms slightly out
+  armL1X = x - 10; armL1Y = bodyTopY + 20; armL2X = x - FIG_ARM_L * 0.7; armL2Y = bodyTopY + 40;
+  armR1X = x + 10; armR1Y = bodyTopY + 20; armR2X = x + FIG_ARM_L * 0.7; armR2Y = bodyTopY + 40;
+  legL1X = x - 10; legL1Y = bodyBotY; legL2X = x - 30; legL2Y = bodyBotY + FIG_LEG_L;
+  legR1X = x + 10; legR1Y = bodyBotY; legR2X = x + 30; legR2Y = bodyBotY + FIG_LEG_L;
+
+  if (pose === 'happy') {
+    armL2X = x - FIG_ARM_L * 0.8; armL2Y = bodyTopY - FIG_ARM_L * 0.6;
+    armR2X = x + FIG_ARM_L * 0.8; armR2Y = bodyTopY - FIG_ARM_L * 0.6;
+  } else if (pose === 'confused') {
+    armL1X = x - 10; armL1Y = bodyTopY + 20; armL2X = x - 30; armL2Y = headY - FIG_HEAD_R / 2; // Hand to head
+    armR1X = x + 10; armR1Y = bodyTopY + 20; armR2X = x + FIG_ARM_L * 0.7; armR2Y = bodyTopY + 50; // Other arm relaxed
+    bodyLean = -10;
+    headTilt = -15;
+  } else if (pose === 'thinking') {
+    armR1X = x + 10; armR1Y = bodyTopY + 20; armR2X = x + 20; armR2Y = headY + 10; // Hand to chin
+    armL1X = x - 10; armL1Y = bodyTopY + 20; armL2X = x - FIG_ARM_L * 0.6; armL2Y = bodyTopY + 50; // Other arm on hip
+    headTilt = 10;
+  } else if (pose === 'nodding' || pose === 'understanding') {
+    armL1X = x - 10; armL1Y = bodyTopY + 20; armL2X = x + 20; armL2Y = bodyTopY + 50; // Crossed arms
+    armR1X = x + 10; armR1Y = bodyTopY + 20; armR2X = x - 20; armR2Y = bodyTopY + 50;
+  } else if (pose === 'confident') {
+    armL1X = x - 10; armL1Y = bodyTopY + 20; armL2X = x - FIG_ARM_L * 0.5; armL2Y = bodyTopY + 60; // Hands on hips
+    armR1X = x + 10; armR1Y = bodyTopY + 20; armR2X = x + FIG_ARM_L * 0.5; armR2Y = bodyTopY + 60;
+    legL2X = x - 40; legR2X = x + 40; // slightly wider stance
+  }
+
+  g += '<g transform="translate(' + bodyLean + ' 0)">';
+  g += line(armL1X, armL1Y, armL2X, armL2Y, col, FIG_STROKE);
+  g += line(armR1X, armR1Y, armR2X, armR2Y, col, FIG_STROKE);
+  g += line(legL1X, legL1Y, legL2X, legL2Y, col, FIG_STROKE);
+  g += line(legR1X, legR1Y, legR2X, legR2Y, col, FIG_STROKE);
+  g += '</g>';
+
+  // Re-add head with tilt
+  g += '<g transform="translate(' + bodyLean + ' 0) rotate(' + headTilt + ' ' + x + ' ' + headY + ')">';
+  g += dot(x, headY, FIG_HEAD_R, col);
+  g += '</g>';
+
+  g += '</g>';
+  return g;
+}
+
+// Phone constants
+var PHONE_W = 200, PHONE_H = 360;
+var SCREEN_PAD = 20;
+var SCREEN_W = PHONE_W - SCREEN_PAD * 2;
+var SCREEN_H = PHONE_H - SCREEN_PAD * 2;
+var PHONE_RAD = 30;
+
+function phone(x, y, screenContent, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  // Phone body
+  g += rrect(x, y, PHONE_W, PHONE_H, PHONE_RAD, WHITE, 0.9);
+  // Screen
+  g += rrect(x, y, SCREEN_W, SCREEN_H, PHONE_RAD * 0.6, '#000000', 1);
+  // Screen content
+  g += '<g transform="translate(' + (x - SCREEN_W / 2) + ' ' + (y - SCREEN_H / 2) + ')">';
+  g += screenContent;
+  g += '</g>';
+  g += '</g>';
+  return g;
+}
+
+function sunIcon(x, y, r, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += dot(x, y, r, col);
+  for (var i = 0; i < 8; i++) {
+    var angle = i * Math.PI / 4;
+    var x1 = x + r * 1.2 * Math.cos(angle);
+    var y1 = y + r * 1.2 * Math.sin(angle);
+    var x2 = x + r * 2.2 * Math.cos(angle);
+    var y2 = y + r * 2.2 * Math.sin(angle);
+    g += line(x1, y1, x2, y2, col, 8);
+  }
+  g += '</g>';
+  return g;
+}
+
+function cloudShape(x, y, scale, col, op) {
+  op = (op == null ? 1 : op);
+  var d = "M " + (x - 60 * scale) + " " + (y + 10 * scale) +
+          " Q " + (x - 100 * scale) + " " + (y - 30 * scale) + " " + (x - 60 * scale) + " " + (y - 70 * scale) +
+          " C " + (x - 60 * scale) + " " + (y - 120 * scale) + " " + (x + 60 * scale) + " " + (y - 120 * scale) + " " + (x + 60 * scale) + " " + (y - 70 * scale) +
+          " Q " + (x + 100 * scale) + " " + (y - 30 * scale) + " " + (x + 60 * scale) + " " + (y + 10 * scale) +
+          " Q " + (x + 20 * scale) + " " + (y + 50 * scale) + " " + (x - 20 * scale) + " " + (y + 50 * scale) +
+          " Q " + (x - 60 * scale) + " " + (y + 10 * scale) + " Z";
+  return '<path d="' + d + '" fill="' + col + '" opacity="' + op + '"/>';
+}
+
+function rainCloudIcon(x, y, scale, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += cloudShape(x, y - 20 * scale, scale, col, 1);
+  // Rain drops
+  g += line(x - 25 * scale, y + 40 * scale, x - 25 * scale, y + 60 * scale, col, 6);
+  g += line(x + 0 * scale, y + 50 * scale, x + 0 * scale, y + 70 * scale, col, 6);
+  g += line(x + 25 * scale, y + 40 * scale, x + 25 * scale, y + 60 * scale, col, 6);
+  g += '</g>';
+  return g;
+}
+
+function questionMark(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var d = "M " + x + " " + (y - size) +
+          " A " + (size * 0.5) + " " + (size * 0.5) + " 0 1 1 " + (x - size * 0.5) + " " + (y - size * 0.5) +
+          " L " + (x - size * 0.5) + " " + (y + size * 0.2) +
+          " M " + (x - size * 0.5) + " " + (y + size * 0.5) +
+          " L " + (x - size * 0.5 + 1) + " " + (y + size * 0.5 + 1); // small dot
+  return pathTag(d, col, 10, op);
+}
+
+function percentBar(x, y, w, h, percent, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, h / 2, WHITE, 4); // Outline
+  g += rrect(x - w / 2 + (w * percent) / 2, y, w * percent, h, h / 2, col); // Filled part
+  g += '</g>';
+  return g;
+}
+
+// Global position for stick figure
+var FIG_X = CX;
+var FIG_Y = CY + 100; // Base of the stick figure
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var phoneScale = lerp(0.8, 1.0, easeOut(ramp(u, 0.0, 0.2)));
+  var sunOpacity = ramp(u, 0.1, 0.4);
+  var phoneX = FIG_X + 180;
+  var phoneY = FIG_Y - FIG_BODY_H / 2 - FIG_HEAD_R - PHONE_H / 2 - 40; // Above head
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += stickFigure(FIG_X, FIG_Y, AMBER, 'happy', 1);
+  s += phone(phoneX, phoneY, sunIcon(SCREEN_W / 2, SCREEN_H / 2, 40, AMBER, sunOpacity), phoneScale);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var phoneX = FIG_X + 180;
+  var phoneY = FIG_Y - FIG_BODY_H / 2 - FIG_HEAD_R - PHONE_H / 2 - 40;
+
+  var slump = smooth(ramp(u, 0.2, 0.6));
+  var figPose = slump > 0.5 ? 'confused' : 'happy';
+  var figY_anim = FIG_Y + slump * 20;
+
+  var forecastMorph = ramp(u, 0.0, 0.4); // 0 = sun, 1 = rain cloud + bar
+  var sunOp = 1 - forecastMorph;
+  var rainOp = forecastMorph;
+
+  var barOpacity = ramp(u, 0.4, 0.7);
+
+  var screenContent = '';
+  screenContent += sunIcon(SCREEN_W / 2, SCREEN_H / 2, 40, AMBER, sunOp);
+  screenContent += rainCloudIcon(SCREEN_W / 2, SCREEN_H / 2 - 20, 0.7, WHITE, rainOp);
+  screenContent += percentBar(SCREEN_W / 2, SCREEN_H / 2 + 80, SCREEN_W * 0.7, 30, 0.4, CORAL, barOpacity);
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += stickFigure(FIG_X, figY_anim, AMBER, figPose, 1);
+  s += phone(phoneX, phoneY, screenContent, 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var phoneX = FIG_X + 180;
+  var phoneY = FIG_Y - FIG_BODY_H / 2 - FIG_HEAD_R - PHONE_H / 2 - 40;
+
+  var thinkOp = ramp(u, 0.0, 0.3);
+  var figPose = thinkOp > 0.5 ? 'thinking' : 'confused';
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += stickFigure(FIG_X, FIG_Y, AMBER, figPose, 1);
+
+  // Phone fades out, question marks appear
+  s += phone(phoneX, phoneY, '', 1 - thinkOp);
+
+  var qmBaseX = FIG_X + 80;
+  var qmBaseY = FIG_Y - 200;
+  for (var i = 0; i < 3; i++) {
+    var qmPhase = (u * 0.8 + i * 0.3) % 1;
+    var qmY = qmBaseY - qmPhase * 80;
+    var qmOp = (1 - qmPhase) * ramp(u, 0.1, 0.8);
+    s += questionMark(qmBaseX + rnd(i) * 30, qmY + rnd(i + 10) * 20, 40, CORAL, qmOp);
+  }
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var figX = FIG_X - 200;
+  var figY = FIG_Y;
+
+  var pathAnim = ramp(u, 0.0, 0.6);
+  var cloudGrow = ramp(u, 0.2, 0.9);
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += stickFigure(figX, figY, AMBER, 'understanding', 1);
+
+  var centerX = CX + 200;
+  var centerY = CY;
+  var pathLength = BOT - TOP;
+  var numPaths = 7;
+  var divergence = 120; // Max spread at bottom
+
+  // Chaotic swirling cloud behind
+  var cloudScale = lerp(0.2, 1.0, cloudGrow);
+  var cloudOpacity = lerp(0.0, 0.3, cloudGrow);
+  s += cloudShape(centerX, centerY - 100, cloudScale * 2, BLUE, cloudOpacity);
+  s += cloudShape(centerX + 80, centerY + 50, cloudScale * 1.5, BLUE, cloudOpacity * 0.8);
+  s += cloudShape(centerX - 120, centerY + 30, cloudScale * 1.8, BLUE, cloudOpacity * 0.9);
+
+  // Single line splitting into multiple diverging paths
+  var startX = centerX;
+  var startY = TOP + 100;
+  var endY = BOT - 100;
+
+  // Main path that splits
+  var mainPathOpacity = 1 - pathAnim;
+  s += line(startX, startY, startX, endY, BLUE, 8, mainPathOpacity);
+
+  // Diverging paths
+  for (var i = 0; i < numPaths; i++) {
+    var offset = (i - (numPaths - 1) / 2) * (divergence / numPaths);
+    var targetX = centerX + offset;
+    var currentX = lerp(startX, targetX, pathAnim);
+    var currentY = lerp(startY, endY, pathAnim);
+    var pathOp = ramp(pathAnim, 0.2, 0.8) * 0.7; // Fade in as they diverge
+
+    // Path segment from start to current point
+    s += line(startX, startY, currentX, currentY, BLUE, 4, pathOp);
+  }
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var figX = FIG_X - 200;
+  var figY = FIG_Y;
+
+  var coalesce = smooth(ramp(u, 0.0, 0.5));
+  var highlight = ramp(u, 0.4, 0.8);
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += stickFigure(figX, figY, AMBER, 'nodding', 1);
+
+  var cloudX = CX + 200;
+  var cloudY = CY - 100;
+  var cloudScale = 2.5;
+
+  // Probabilistic cloud (coalesced from diverging paths)
+  var cloudFillOp = lerp(0.3, 0.8, coalesce);
+  s += cloudShape(cloudX, cloudY, cloudScale, BLUE, cloudFillOp);
+
+  // Highlighted section for "40% chance"
+  var highlightW = 180 * cloudScale * 0.4;
+  var highlightH = 100 * cloudScale;
+  var highlightX = cloudX - cloudScale * 60; // Offset to left part of cloud
+  var highlightY = cloudY + cloudScale * 20;
+
+  s += '<rect x="' + (highlightX - highlightW / 2) + '" y="' + (highlightY - highlightH / 2) + '" width="' + highlightW + '" height="' + highlightH +
+       '" rx="10" fill="' + CORAL + '" opacity="' + (0.6 * highlight) + '"/>';
+
+  // Rain drops within the highlighted section
+  if (highlight > 0.1) {
+    s += line(highlightX - 40, highlightY + 30, highlightX - 40, highlightY + 60, WHITE, 6, highlight);
+    s += line(highlightX + 0, highlightY + 40, highlightX + 0, highlightY + 70, WHITE, 6, highlight);
+    s += line(highlightX + 40, highlightY + 30, highlightX + 40, highlightY + 60, WHITE, 6, highlight);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var figX = CX;
+  var figY = FIG_Y;
+
+  var pathsAppear = ramp(u, 0.1, 0.6);
+  var cloudSettle = smooth(ramp(u, 0.0, 0.8));
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += stickFigure(figX, figY, AMBER, 'confident', 1);
+
+  var pathOriginX = CX;
+  var pathOriginY = FIG_Y - 200;
+  var pathLength = 180;
+  var pathSpread = 100;
+
+  // Left path (sun)
+  var sunPathX1 = pathOriginX - lerp(0, pathSpread * 0.5, pathsAppear);
+  var sunPathX2 = pathOriginX - lerp(0, pathSpread, pathsAppear);
+  var sunPathY1 = pathOriginY;
+  var sunPathY2 = pathOriginY - pathLength;
+  s += line(sunPathX1, sunPathY1, sunPathX2, sunPathY2, BLUE, 6, pathsAppear);
+  s += sunIcon(sunPathX2, sunPathY2 - 40, 20, AMBER, pathsAppear);
+
+  // Right path (rain)
+  var rainPathX1 = pathOriginX + lerp(0, pathSpread * 0.5, pathsAppear);
+  var rainPathX2 = pathOriginX + lerp(0, pathSpread, pathsAppear);
+  var rainPathY1 = pathOriginY;
+  var rainPathY2 = pathOriginY - pathLength;
+  s += line(rainPathX1, rainPathY1, rainPathX2, rainPathY2, BLUE, 6, pathsAppear);
+  s += rainCloudIcon(rainPathX2, rainPathY2 - 40, 0.4, WHITE, pathsAppear);
+
+  // Blended cloud above
+  var cloudX = CX;
+  var cloudY = TOP + 150;
+  var cloudScale = 2.0;
+  var cloudOp = lerp(0.0, 0.5, cloudSettle);
+  s += cloudShape(cloudX, cloudY, cloudScale, BLUE, cloudOp);
+  s += cloudShape(cloudX + 50, cloudY + 30, cloudScale * 0.8, WHITE, cloudOp * 0.8);
+  s += cloudShape(cloudX - 60, cloudY - 20, cloudScale * 0.7, WHITE, cloudOp * 0.7);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
