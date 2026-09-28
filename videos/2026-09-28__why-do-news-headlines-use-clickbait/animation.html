@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why News Headlines Are So Clickbaity</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+// var DIM   = "#8A93A6";              // muted grey (not used in this specific animation)
+var BLUE  = "#4C86F0";              // signal blue  -> algorithms / system
+var AMBER = "#F2A93B";              // warm amber   -> YOU / desire for information
+var CORAL = "#FF5B5B";              // coral red    -> naive assumptions / frustration
+
+var DUR = 60;
+window.__duration = DUR;
+
+// Scene specific constants
+var YOU_X = CX;
+var YOU_Y = 1400; // Base Y for YOU
+var HEADLINE_W = 680;
+var HEADLINE_H = 240;
+var HEADLINE_GAP = 300; // Gap between headline tiles
+var SCROLL_SPEED = 180; // Pixels per second for background scroll
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* Stick figure (YOU) */
+function stickFigure(x, y, color, pose_id, scale, aura_op, op) {
+  op = (op == null ? 1 : op);
+  scale = (scale == null ? 1 : scale);
+  aura_op = (aura_op == null ? 0 : aura_op);
+  var g = '<g transform="translate(' + x + ' ' + y + ') scale(' + scale + ')" opacity="' + op + '">';
+
+  // Aura for knowing pose
+  if (aura_op > 0) {
+    g += ring(0, 0, 100, BLUE, 10, aura_op * 0.4);
+    g += ring(0, 0, 120, BLUE, 6, aura_op * 0.2);
+  }
+
+  // Head
+  g += dot(0, -60, 20, color);
+  // Body
+  g += line(0, -40, 0, 40, color, 10);
+
+  // Arms and Legs based on pose_id
+  switch (pose_id) {
+    case 0: // Scrolling
+      g += line(-30, 0, -10, -20, color, 10); // Left arm up
+      g += line(30, 0, 10, -20, color, 10);  // Right arm up
+      g += line(-15, 40, -35, 80, color, 10); // Left leg bent
+      g += line(15, 40, 35, 80, color, 10);  // Right leg bent
+      break;
+    case 1: // Expectant
+      g += line(-30, -10, -10, 10, color, 10); // Arms slightly forward
+      g += line(30, -10, 10, 10, color, 10);
+      g += line(-15, 40, -15, 80, color, 10);
+      g += line(15, 40, 15, 80, color, 10);
+      break;
+    case 2: // Confused
+      g += line(-30, -10, -5, -30, color, 10); // Left arm to head
+      g += line(30, 0, 10, 20, color, 10);     // Right arm down
+      g += line(-15, 40, -15, 80, color, 10);
+      g += line(15, 40, 15, 80, color, 10);
+      g += line(-10, -70, 10, -70, color, 5); // Confused brow
+      break;
+    case 3: // Frustrated (hands up)
+      g += line(-30, 0, -50, -40, color, 10); // Left arm up
+      g += line(30, 0, 50, -40, color, 10);  // Right arm up
+      g += line(-15, 40, -15, 80, color, 10);
+      g += line(15, 40, 15, 80, color, 10);
+      g += line(-10, -70, 10, -70, color, 5); // Frustrated brow
+      break;
+    case 4: // Thinking (hand on chin)
+      g += line(-30, 0, -10, 20, color, 10); // Left arm down
+      g += line(30, 0, 10, 10, color, 10); // Right arm to chin
+      g += line(10, 10, 20, 0, color, 10); // Hand to chin
+      g += line(-15, 40, -15, 80, color, 10);
+      g += line(15, 40, 15, 80, color, 10);
+      break;
+    case 5: // Intrigued (leaning forward, hands out)
+      g += line(-30, 0, -10, 20, color, 10); // Arms slightly forward
+      g += line(30, 0, 10, 20, color, 10);
+      g += line(-15, 40, -30, 70, color, 10); // Legs slightly bent
+      g += line(15, 40, 30, 70, color, 10);
+      break;
+    case 6: // Disappointed (slumped, hands down)
+      g += line(-30, 0, -30, 30, color, 10); // Arms down
+      g += line(30, 0, 30, 30, color, 10);
+      g += line(-15, 40, -15, 80, color, 10);
+      g += line(15, 40, 15, 80, color, 10);
+      g += line(-10, -50, 10, -50, color, 5); // Sad mouth
+      break;
+    case 7: // Knowing / Critical (confident, hands on hips)
+      g += line(-30, 10, -50, 0, color, 10); // Arms on hips
+      g += line(30, 10, 50, 0, color, 10);
+      g += line(-15, 40, -15, 80, color, 10);
+      g += line(15, 40, 15, 80, color, 10);
+      g += line(-10, -50, 10, -50, color, 5); // Confident mouth
+      break;
+  }
+  g += '</g>';
+  return g;
+}
+
+/* Headline Tile */
+function headlineTile(x, y, w, h, border_col, sw, rx, content_type, op, highlight_col, highlight_op) {
+  op = (op == null ? 1 : op);
+  highlight_op = (highlight_op == null ? 0 : highlight_op);
+  var g = '<g opacity="' + op + '">';
+
+  // Dark background for the tile
+  g += rrect(x, y, w, h, rx, "#111111", op); 
+
+  // Highlight/glow layer
+  if (highlight_op > 0 && highlight_col) {
+    g += rrect(x, y, w + 20, h + 20, rx + 10, highlight_col, highlight_op * 0.1); // Soft glow
+    g += rrectStroke(x, y, w, h, rx, highlight_col, sw + 8, highlight_op * 0.4); // Inner glow
+  }
+
+  // Border
+  g += rrectStroke(x, y, w, h, rx, border_col, sw, 1);
+
+  // Content (text placeholders)
+  var line_h = h / 5;
+  var line_y_start = y - h / 2 + line_h;
+  var line_w_base = w * 0.7;
+
+  for (var i = 0; i < 3; i++) {
+    var current_y = line_y_start + i * line_h * 1.2;
+    var current_w = line_w_base * (1 - i * 0.1); // Shorter lines for lower text
+
+    if (content_type === 0) { // Simple lines
+      g += line(x - current_w / 2, current_y, x + current_w / 2, current_y, WHITE, 8);
+    } else if (content_type === 1) { // Wavy lines (exaggerated)
+      var d = "M " + (x - current_w / 2) + " " + current_y;
+      d += " Q " + (x - current_w / 4) + " " + (current_y - 10) + " " + x + " " + current_y;
+      d += " Q " + (x + current_w / 4) + " " + (current_y + 10) + " " + (x + current_w / 2) + " " + current_y;
+      g += pathTag(d, WHITE, 8);
+    } else if (content_type === 2) { // Cracked lines (fragmented)
+        g += line(x - current_w / 2, current_y, x + current_w / 2, current_y, WHITE, 8);
+        // Add some cracks
+        g += line(x - current_w * 0.2, current_y - 10, x - current_w * 0.1, current_y + 10, CORAL, 4, 0.8);
+        g += line(x + current_w * 0.3, current_y + 8, x + current_w * 0.4, current_y - 12, CORAL, 4, 0.8);
+    }
+  }
+  g += '</g>';
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scroll_offset = u * SCROLL_SPEED * 10; // Total scroll over 10 seconds
+  var you_pose = (u < 0.7) ? 0 : 1; // Scrolling then expectant
+  var you_y_offset = (u < 0.7) ? Math.sin(u * Math.PI * 4) * 8 : 0; // Bobbing while scrolling
+  var you_scale = lerp(1, 1.05, smooth(ramp(u, 0.7, 0.9)));
+  var you_x = YOU_X;
+
+  // Camera pan
+  var cam_y = lerp(0, -100, smooth(ramp(u, 0.7, 0.9)));
+  s += '<g ' + camera(1, 0, cam_y) + '>';
+
+  // Headline tiles
+  for (var i = 0; i < 5; i++) {
+    var tile_y = BOT - 100 - i * HEADLINE_GAP + scroll_offset;
+    if (tile_y > TOP - HEADLINE_H / 2 && tile_y < BOT + HEADLINE_H / 2) {
+      s += headlineTile(CX, tile_y, HEADLINE_W, HEADLINE_H, WHITE, 8, 20, 0, 1);
+    }
+  }
+
+  // YOU
+  s += stickFigure(you_x, YOU_Y + you_y_offset, AMBER, you_pose, you_scale, 0, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var you_pose = (u < 0.4) ? 2 : 3; // Confused then frustrated
+  var you_scale = 1;
+  var you_x = YOU_X;
+
+  var current_tile_y = CY; // Main tile is centered
+  var distortion_amount = smooth(ramp(u, 0.1, 0.6));
+  var tile_w = lerp(HEADLINE_W, HEADLINE_W * 1.2, distortion_amount);
+  var tile_h = lerp(HEADLINE_H, HEADLINE_H * 1.5, distortion_amount);
+  var tile_sw = lerp(8, 14, distortion_amount);
+  var tile_rx = lerp(20, 10, distortion_amount);
+  var coral_op = distortion_amount * 0.8;
+
+  var shake_x = Math.sin(u * 42) * 5 * pulse(u, 0.4, 0.3);
+  var shake_y = Math.cos(u * 38) * 5 * pulse(u, 0.4, 0.3);
+
+  var cam_zoom = lerp(1, 1.1, smooth(ramp(u, 0.2, 0.5)));
+  s += '<g ' + camera(cam_zoom, shake_x, shake_y) + '>';
+
+  // Distorted main headline tile
+  s += headlineTile(CX, current_tile_y, tile_w, tile_h, WHITE, tile_sw, tile_rx, 1, 1, CORAL, coral_op);
+
+  // Other distorted tiles sliding past quickly
+  var scroll_offset = u * SCROLL_SPEED * 20; // Faster scroll
+  for (var i = 0; i < 3; i++) {
+    var other_tile_y = current_tile_y + HEADLINE_GAP * (i + 1) - scroll_offset;
+    if (other_tile_y > TOP - HEADLINE_H / 2 && other_tile_y < BOT + HEADLINE_H / 2) {
+        var other_distort = Math.min(1, Math.abs(other_tile_y - current_tile_y) / (HEADLINE_GAP * 1.5));
+        var other_w = lerp(HEADLINE_W, HEADLINE_W * 1.1, other_distort);
+        var other_h = lerp(HEADLINE_H, HEADLINE_H * 1.3, other_distort);
+        var other_sw = lerp(8, 12, other_distort);
+        s += headlineTile(CX, other_tile_y, other_w, other_h, WHITE, other_sw, 20, 1, 0.6, CORAL, other_distort * 0.6);
+    }
+  }
+
+  // YOU
+  s += stickFigure(you_x, YOU_Y, AMBER, you_pose, you_scale, 0, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var you_pose = 4; // Thinking
+  var you_x = YOU_X;
+
+  var current_tile_y = CY;
+  var distortion_fade = 1 - smooth(ramp(u, 0.0, 0.3)); // Distortion fades out
+  var tile_w = lerp(HEADLINE_W * 1.2, HEADLINE_W, distortion_fade);
+  var tile_h = lerp(HEADLINE_H * 1.5, HEADLINE_H, distortion_fade);
+  var tile_sw = lerp(14, 8, distortion_fade);
+  var tile_rx = lerp(10, 20, distortion_fade);
+  var coral_glow_op = pulse(u, 0.2, 0.1) * 0.8; // Brief coral shimmer
+
+  // Thought bubble for YOU
+  var bubble_op = smooth(ramp(u, 0.1, 0.4)) * (1 - smooth(ramp(u, 0.7, 0.9)));
+  if (bubble_op > 0.02) {
+    var bubble_x = YOU_X + 150;
+    var bubble_y = YOU_Y - 300;
+    var bubble_r = 100;
+    s += rrect(bubble_x, bubble_y, bubble_r * 2, bubble_r * 1.5, WHITE, bubble_op);
+    s += dot(bubble_x - 80, bubble_y + 80, 20, WHITE, bubble_op); // Tail of bubble
+
+    // Journalist figure inside thought bubble
+    var journo_x = bubble_x;
+    var journo_y = bubble_y + 10;
+    var journo_scale = 0.6;
+    var g = '<g transform="translate(' + journo_x + ' ' + journo_y + ') scale(' + journo_scale + ')" opacity="' + bubble_op + '">';
+    g += dot(0, -60, 20, CORAL); // Head
+    g += line(0, -40, 0, 40, CORAL, 10); // Body
+    g += line(-30, 0, -50, -20, CORAL, 10); // Arm holding pen
+    g += line(30, 0, 50, 20, CORAL, 10); // Other arm
+    g += line(-15, 40, -15, 80, CORAL, 10); // Legs
+    g += line(15, 40, 15, 80, CORAL, 10);
+    g += line(-10, -70, 10, -70, CORAL, 5); // Sinister brow
+    g += '</g>';
+    s += g;
+  }
+
+  // Headline tile, fading distortion, brief coral glow
+  s += headlineTile(CX, current_tile_y, tile_w, tile_h, WHITE, tile_sw, tile_rx, 0, 1, CORAL, coral_glow_op);
+
+  // YOU
+  s += stickFigure(you_x, YOU_Y, AMBER, you_pose, 1, 0, 1);
+
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var you_pose = 5; // Intrigued
+  var you_x = YOU_X;
+  var current_tile_y = CY;
+
+  // Tile transformation
+  var transform_progress = smooth(ramp(u, 0.0, 0.4));
+  var tile_w = lerp(HEADLINE_W, HEADLINE_W * 1.1, transform_progress);
+  var tile_h = lerp(HEADLINE_H, HEADLINE_H * 1.1, transform_progress);
+  var tile_sw = lerp(8, 12, transform_progress);
+  var tile_rx = lerp(20, 15, transform_progress);
+  var blue_glow_op = transform_progress * 0.9;
+
+  s += headlineTile(CX, current_tile_y, tile_w, tile_h, BLUE, tile_sw, tile_rx, 0, 1, BLUE, blue_glow_op);
+
+  // Signal blue lines and arrows (algorithms/network)
+  var network_op = transform_progress * 0.7;
+  if (network_op > 0.02) {
+    var network_size = lerp(0, 120, transform_progress);
+    s += line(CX - tile_w / 2 - network_size, current_tile_y, CX + tile_w / 2 + network_size, current_tile_y, BLUE, 4, network_op);
+    s += line(CX, current_tile_y - tile_h / 2 - network_size, CX, current_tile_y + tile_h / 2 + network_size, BLUE, 4, network_op);
+    s += line(CX - tile_w / 2 - network_size * 0.7, current_tile_y - tile_h / 2 - network_size * 0.7, CX + tile_w / 2 + network_size * 0.7, current_tile_y + tile_h / 2 + network_size * 0.7, BLUE, 4, network_op * 0.7);
+    s += line(CX + tile_w / 2 + network_size * 0.7, current_tile_y - tile_h / 2 - network_size * 0.7, CX - tile_w / 2 - network_size * 0.7, current_tile_y + tile_h / 2 + network_size * 0.7, BLUE, 4, network_op * 0.7);
+
+    // Arrows pointing to tile
+    var arrow_size = 30;
+    var arrow_op = network_op * 0.8;
+    s += pathTag("M " + (CX - 100) + " " + (current_tile_y - 120) + " L " + (CX - 80) + " " + (current_tile_y - 100) + " L " + (CX - 100) + " " + (current_tile_y - 80), BLUE, 8, arrow_op);
+    s += pathTag("M " + (CX + 100) + " " + (current_tile_y + 120) + " L " + (CX + 80) + " " + (current_tile_y + 100) + " L " + (CX + 100) + " " + (current_tile_y + 80), BLUE, 8, arrow_op);
+  }
+
+  // Warm amber dots (clicks/attention) flowing from YOU towards the tile
+  var dot_flow_op = smooth(ramp(u, 0.3, 0.7));
+  if (dot_flow_op > 0.02) {
+    for (var i = 0; i < 10; i++) {
+      var p = (u * 1.5 + rnd(i)) % 1; // Animation phase for each dot
+      var dot_x = lerp(you_x, CX, easeOut(p));
+      var dot_y = lerp(YOU_Y, current_tile_y, easeOut(p));
+      s += dot(dot_x, dot_y, 10, AMBER, dot_flow_op * (1 - p));
+    }
+  }
+
+  // YOU
+  s += stickFigure(you_x, YOU_Y, AMBER, you_pose, 1, 0, 1);
+
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var you_pose = 6; // Disappointed
+  var you_x = YOU_X;
+  var current_tile_y = CY;
+
+  // Tile cracking and fragmenting
+  var crack_progress = smooth(ramp(u, 0.0, 0.6));
+  var tile_w = HEADLINE_W * 1.1;
+  var tile_h = HEADLINE_H * 1.1;
+  var tile_sw = 12;
+  var tile_rx = 15;
+  var blue_glow_op = lerp(0.9, 0, crack_progress); // Blue glow fades
+  var tile_op = lerp(1, 0.6, crack_progress); // Tile overall opacity
+
+  s += headlineTile(CX, current_tile_y, tile_w, tile_h, WHITE, tile_sw, tile_rx, 2, tile_op, BLUE, blue_glow_op);
+
+  // Signal blue network breaking apart
+  var network_break_op = lerp(0.7, 0, crack_progress);
+  if (network_break_op > 0.02) {
+    var network_size = 120;
+    s += line(CX - tile_w / 2 - network_size, current_tile_y, CX + tile_w / 2 + network_size, current_tile_y, BLUE, 4, network_break_op);
+    s += line(CX, current_tile_y - tile_h / 2 - network_size, CX, current_tile_y + tile_h / 2 + network_size, BLUE, 4, network_break_op);
+  }
+
+  // Warm amber dots bouncing off fragmented surface
+  var bounce_op = smooth(ramp(u, 0.2, 0.8));
+  if (bounce_op > 0.02) {
+    for (var i = 0; i < 15; i++) {
+      var p = (u * 2 + rnd(i)) % 1;
+      var start_x = YOU_X + rnd(i * 2) * 100 - 50;
+      var start_y = YOU_Y + rnd(i * 3) * 100 - 50;
+      var target_x = CX + rnd(i * 4) * 200 - 100;
+      var target_y = current_tile_y + rnd(i * 5) * 200 - 100;
+
+      var dot_x = lerp(start_x, target_x, easeOut(p));
+      var dot_y = lerp(start_y, target_y, easeOut(p));
+      var dot_r = lerp(10, 5, p);
+      s += dot(dot_x, dot_y, dot_r, AMBER, bounce_op * (1 - p));
+    }
+  }
+
+  // YOU
+  s += stickFigure(you_x, YOU_Y, AMBER, you_pose, 1, 0, 1);
+
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var you_pose = 7; // Knowing/Critical
+  var you_x = YOU_X;
+  var you_aura_op = smooth(ramp(u, 0.1, 0.5)); // Aura grows
+  var you_scale = 1;
+
+  var scroll_offset = u * SCROLL_SPEED * 10; // Scrolling again
+  var cam_y = lerp(0, -100, smooth(ramp(u, 0.0, 0.3))); // Slight pan at start
+  s += '<g ' + camera(1, 0, cam_y) + '>';
+
+  // Headline tiles, simple white, scrolling past
+  for (var i = 0; i < 5; i++) {
+    var tile_y = BOT - 100 - i * HEADLINE_GAP + scroll_offset;
+    if (tile_y > TOP - HEADLINE_H / 2 && tile_y < BOT + HEADLINE_H / 2) {
+      s += headlineTile(CX, tile_y, HEADLINE_W, HEADLINE_H, WHITE, 8, 20, 0, 1);
+    }
+  }
+
+  // YOU, with aura
+  s += stickFigure(you_x, YOU_Y, AMBER, you_pose, you_scale, you_aura_op, 1);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

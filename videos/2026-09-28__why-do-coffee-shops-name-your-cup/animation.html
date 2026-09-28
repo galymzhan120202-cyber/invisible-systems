@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Coffee Shops Write Your Name on Cups</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / connection
+var AMBER = "#F2A93B";              // warm amber   -> YOU / loyalty
+var CORAL = "#FF5B5B";              // coral red    -> naive assumptions
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+/* ---------- custom shape builders ---------- */
+function stickFigure(x, y, scale, color, pose, op) {
+  op = (op == null ? 1 : op);
+  scale = scale || 1;
+  var sw = 7 * scale;
+  var headR = 20 * scale;
+  var bodyH = 80 * scale;
+  var armL = 50 * scale;
+  var legL = 60 * scale;
+
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ')">';
+  g += dot(0, -headR - bodyH / 2, headR, color); // Head
+
+  if (pose === 'walking') {
+    g += line(0, -bodyH / 2, 0, bodyH / 2, color, sw); // Body
+    g += line(0, -bodyH / 4, armL * 0.7, -armL * 0.2, color, sw); // Arm back
+    g += line(0, -bodyH / 4, -armL * 0.7, armL * 0.2, color, sw); // Arm forward
+    g += line(0, bodyH / 2, legL * 0.6, legL * 0.4, color, sw); // Leg back
+    g += line(0, bodyH / 2, -legL * 0.6, legL * 0.4, color, sw); // Leg forward
+  } else if (pose === 'standing') {
+    g += line(0, -bodyH / 2, 0, bodyH / 2, color, sw); // Body
+    g += line(0, -bodyH / 4, armL * 0.5, -armL * 0.2, color, sw); // Arm
+    g += line(0, -bodyH / 4, -armL * 0.5, -armL * 0.2, color, sw); // Arm
+    g += line(0, bodyH / 2, 0, bodyH / 2 + legL, color, sw); // Legs straight
+    g += line(0, bodyH / 2 + legL * 0.5, -20 * scale, bodyH / 2 + legL * 0.5, color, sw); // Feet
+    g += line(0, bodyH / 2 + legL * 0.5, 20 * scale, bodyH / 2 + legL * 0.5, color, sw); // Feet
+  } else if (pose === 'pointing') {
+    g += line(0, -bodyH / 2, 0, bodyH / 2, color, sw); // Body
+    g += line(0, -bodyH / 4, armL * 0.8, -armL * 0.4, color, sw); // Pointing arm
+    g += line(armL * 0.8, -armL * 0.4, armL * 0.8 + 10 * scale, -armL * 0.4, color, sw); // Finger
+    g += line(0, -bodyH / 4, -armL * 0.5, -armL * 0.2, color, sw); // Other arm
+    g += line(0, bodyH / 2, 0, bodyH / 2 + legL, color, sw); // Legs straight
+    g += line(0, bodyH / 2 + legL * 0.5, -20 * scale, bodyH / 2 + legL * 0.5, color, sw); // Feet
+    g += line(0, bodyH / 2 + legL * 0.5, 20 * scale, bodyH / 2 + legL * 0.5, color, sw); // Feet
+  } else if (pose === 'puzzled') {
+    g += line(0, -bodyH / 2, 0, bodyH / 2, color, sw); // Body
+    g += line(0, -bodyH / 4, armL * 0.4, -armL * 0.1, color, sw); // Arm
+    g += line(0, -bodyH / 4, -armL * 0.4, -armL * 0.1, color, sw); // Arm
+    g += line(0, bodyH / 2, 0, bodyH / 2 + legL, color, sw); // Legs straight
+    g += line(0, bodyH / 2 + legL * 0.5, -20 * scale, bodyH / 2 + legL * 0.5, color, sw); // Feet
+    g += line(0, bodyH / 2 + legL * 0.5, 20 * scale, bodyH / 2 + legL * 0.5, color, sw); // Feet
+    g += line(-headR * 0.4, -headR - bodyH / 2 - headR * 0.4, headR * 0.4, -headR - bodyH / 2 - headR * 0.4, color, sw * 0.7); // Eyebrows
+  } else if (pose === 'holding_cup') {
+    g += line(0, -bodyH / 2, 0, bodyH / 2, color, sw); // Body
+    g += line(0, -bodyH / 4, armL * 0.5, armL * 0.2, color, sw); // Arm holding cup
+    g += line(0, -bodyH / 4, -armL * 0.5, armL * 0.2, color, sw); // Other arm
+    g += line(0, bodyH / 2, 0, bodyH / 2 + legL, color, sw); // Legs straight
+    g += line(0, bodyH / 2 + legL * 0.5, -20 * scale, bodyH / 2 + legL * 0.5, color, sw); // Feet
+    g += line(0, bodyH / 2 + legL * 0.5, 20 * scale, bodyH / 2 + legL * 0.5, color, sw); // Feet
+  } else if (pose === 'barista') {
+    g += line(0, -bodyH / 2, 0, bodyH / 2, color, sw); // Body
+    g += line(0, -bodyH / 4, armL * 0.6, -armL * 0.1, color, sw); // Arm holding pen
+    g += line(0, -bodyH / 4, -armL * 0.6, -armL * 0.1, color, sw); // Other arm
+    g += line(0, bodyH / 2, 0, bodyH / 2 + legL, color, sw); // Legs straight
+    g += line(0, bodyH / 2 + legL * 0.5, -20 * scale, bodyH / 2 + legL * 0.5, color, sw); // Feet
+    g += line(0, bodyH / 2 + legL * 0.5, 20 * scale, bodyH / 2 + legL * 0.5, color, sw); // Feet
+  }
+  g += '</g>';
+  return g;
+}
+
+function coffeeCup(x, y, scale, color, hasName, isGlowing, glowColor, op) {
+  op = (op == null ? 1 : op);
+  scale = scale || 1;
+  var sw = 6 * scale;
+  var cupW = 80 * scale;
+  var cupH = 100 * scale;
+  var handleR = 20 * scale;
+
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ')">';
+  // Cup body
+  g += rrect(0, 0, cupW, cupH, 12 * scale, color);
+  // Handle
+  g += ring(cupW / 2 + handleR * 0.7, 0, handleR, color, sw);
+
+  if (hasName) {
+    // Scribble for name (stylized, no actual letters)
+    g += line(-cupW * 0.2, -cupH * 0.2, cupW * 0.2, -cupH * 0.2, DIM, sw * 0.7);
+    g += line(-cupW * 0.2, 0, cupW * 0.2, 0, DIM, sw * 0.7);
+    g += line(-cupW * 0.2, cupH * 0.2, cupW * 0.2, cupH * 0.2, DIM, sw * 0.7);
+  }
+  if (isGlowing) {
+    g += ring(0, 0, cupW * 0.7, glowColor, sw * 0.8, 0.2);
+    g += ring(0, 0, cupW * 0.8, glowColor, sw * 0.6, 0.1);
+  }
+  g += '</g>';
+  return g;
+}
+
+function shopOutline(x, y, w, h, op) {
+  op = (op == null ? 1 : op);
+  var sw = 8;
+  var g = '<g opacity="' + op + '">';
+  // Main building
+  g += rrectStroke(x, y, w, h, 20, WHITE, sw);
+  // Doorway (simple opening)
+  g += line(x - w / 4, y + h / 2, x - w / 4, y + h / 2 - h / 3, WHITE, sw);
+  g += line(x + w / 4, y + h / 2, x + w / 4, y + h / 2 - h / 3, WHITE, sw);
+  g += line(x - w / 4, y + h / 2 - h / 3, x + w / 4, y + h / 2 - h / 3, WHITE, sw);
+  // Roof peak (simple triangle)
+  g += line(x - w / 2, y - h / 2, x, y - h / 2 - 60, WHITE, sw);
+  g += line(x + w / 2, y - h / 2, x, y - h / 2 - 60, WHITE, sw);
+  g += '</g>';
+  return g;
+}
+
+function thoughtBubble(x, y, iconType, color, op) {
+  op = (op == null ? 1 : op);
+  var bubbleR = 60;
+  var tailL = 40;
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, bubbleR, color, 6);
+  g += dot(x - bubbleR - tailL * 0.7, y + bubbleR * 0.8, 12, color);
+  g += dot(x - bubbleR - tailL * 0.4, y + bubbleR * 0.6, 8, color);
+
+  if (iconType === 'coffee') {
+    // Coffee cup icon
+    g += coffeeCup(x, y, 0.6, color, false, false, null, 1);
+  } else if (iconType === 'order') {
+    // Generic "order" icon: a list/receipt
+    g += rrect(x, y, 40, 60, 6, color);
+    g += line(x - 15, y - 15, x + 15, y - 15, WHITE, 4);
+    g += line(x - 15, y, x + 15, y, WHITE, 4);
+    g += line(x - 15, y + 15, x + 15, y + 15, WHITE, 4);
+  } else if (iconType === 'face') {
+    // Smiling face icon (no text)
+    g += ring(x, y, 30, color, 4);
+    g += dot(x - 12, y - 10, 4, color);
+    g += dot(x + 12, y - 10, 4, color);
+    g += pathTag("M " + (x - 15) + " " + (y + 10) + " Q " + x + " " + (y + 20) + " " + (x + 15) + " " + (y + 10), color, 4);
+  } else if (iconType === 'insight') {
+    // Lightbulb / insight icon
+    g += pathTag("M " + x + " " + (y + 30) + " C " + (x - 20) + " " + (y + 10) + " " + (x - 20) + " " + (y - 20) + " " + x + " " + (y - 40) +
+                 " C " + (x + 20) + " " + (y - 20) + " " + (x + 20) + " " + (y + 10) + " " + x + " " + (y + 30) + " Z", color, 6);
+    g += line(x - 10, y + 36, x + 10, y + 36, color, 6);
+  }
+  g += '</g>';
+  return g;
+}
+
+function loyaltyBar(x, y, w, h, fill, color, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, 10, color, 4);
+  g += '<rect x="' + (x - w / 2) + '" y="' + (y + h / 2 - h * fill) + '" width="' + w + '" height="' + (h * fill) + '" rx="10" fill="' + color + '"/>';
+  g += '</g>';
+  return g;
+}
+
+/* ---------- scene constants ---------- */
+var YOU_X = CX - 200, YOU_Y = BOT - 180;
+var BARISTA_X = CX + 200, BARISTA_Y = BOT - 180;
+var COUNTER_Y = BOT - 280;
+var CUP_X = BARISTA_X - 60, CUP_Y = COUNTER_Y - 50;
+var SHOP_X = CX + 200, SHOP_Y = CY + 100, SHOP_W = 400, SHOP_H = 400;
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var walkDist = lerp(W * 0.8, 0, smooth(ramp(u, 0.0, 0.6)));
+  var youCurrentX = YOU_X - W * 0.4 + walkDist;
+  var youCurrentY = YOU_Y;
+  var bob = Math.sin(u * Math.PI * 4) * 8 * (1 - smooth(ramp(u, 0.6, 0.8))); // Bobbing stops when walking stops
+
+  s += shopOutline(SHOP_X, SHOP_Y, SHOP_W, SHOP_H, 1);
+  s += stickFigure(youCurrentX, youCurrentY + bob, 1, AMBER, u < 0.7 ? 'walking' : 'standing');
+
+  var bubbleOp = ramp(u, 0.7, 0.9);
+  var bubbleY = lerp(youCurrentY - 100, youCurrentY - 200, easeOut(ramp(u, 0.7, 0.9)));
+  if (bubbleOp > 0.01) {
+    s += thoughtBubble(youCurrentX + 80, bubbleY, 'coffee', WHITE, bubbleOp);
+  }
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  s += shopOutline(SHOP_X, SHOP_Y, SHOP_W, SHOP_H, 1);
+  s += stickFigure(YOU_X, YOU_Y, 1, AMBER, 'pointing');
+
+  // Counter
+  s += rrect(CX, COUNTER_Y, 600, 80, 10, DIM, 0.8);
+
+  var baristaSlide = lerp(W * 0.4, 0, smooth(ramp(u, 0.0, 0.3)));
+  s += stickFigure(BARISTA_X + W * 0.2 - baristaSlide, BARISTA_Y, 1, WHITE, 'barista');
+
+  // Plain cup appears on counter, barista scribbles
+  var cupOp = ramp(u, 0.2, 0.4);
+  var scribbleProg = ramp(u, 0.5, 0.8);
+  if (cupOp > 0.01) {
+    s += coffeeCup(CUP_X, CUP_Y, 1, WHITE, scribbleProg > 0.01, false, null, cupOp);
+  }
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  s += shopOutline(SHOP_X, SHOP_Y, SHOP_W, SHOP_H, 1);
+  s += rrect(CX, COUNTER_Y, 600, 80, 10, DIM, 0.8);
+  s += stickFigure(BARISTA_X, BARISTA_Y, 1, WHITE, 'barista');
+  s += coffeeCup(CUP_X, CUP_Y, 1, WHITE, true, false, null, 1); // Cup with name persists
+
+  s += stickFigure(YOU_X, YOU_Y, 1, AMBER, 'puzzled');
+
+  var bubble1Op = ramp(u, 0.1, 0.4);
+  var bubble2Op = ramp(u, 0.4, 0.7);
+  var bubble1Y = lerp(YOU_Y - 100, YOU_Y - 200, easeOut(ramp(u, 0.1, 0.4)));
+  var bubble2Y = lerp(YOU_Y - 100, YOU_Y - 200, easeOut(ramp(u, 0.4, 0.7)));
+
+  if (bubble1Op > 0.01) {
+    s += thoughtBubble(YOU_X + 80, bubble1Y, 'order', CORAL, bubble1Op);
+  }
+  if (bubble2Op > 0.01) {
+    s += thoughtBubble(YOU_X + 200, bubble2Y, 'face', CORAL, bubble2Op);
+  }
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  s += shopOutline(SHOP_X, SHOP_Y, SHOP_W, SHOP_H, 1);
+  s += rrect(CX, COUNTER_Y, 600, 80, 10, DIM, 0.8);
+  s += stickFigure(BARISTA_X, BARISTA_Y, 1, WHITE, 'barista');
+
+  // Coral bubbles dissolve
+  var coralFade = 1 - smooth(ramp(u, 0.0, 0.2));
+  if (coralFade > 0.01) {
+    s += thoughtBubble(YOU_X + 80, YOU_Y - 200, 'order', CORAL, coralFade);
+    s += thoughtBubble(YOU_X + 200, YOU_Y - 200, 'face', CORAL, coralFade);
+  }
+
+  s += stickFigure(YOU_X, YOU_Y, 1, AMBER, 'standing');
+
+  // Signal blue line emerges
+  var lineDraw = ramp(u, 0.3, 0.6);
+  var lineOp = ramp(u, 0.3, 0.8);
+  var baristaHandX = BARISTA_X + 30, baristaHandY = BARISTA_Y - 40;
+  var youHandX = YOU_X + 30, youHandY = YOU_Y - 40;
+  var cupCenter = { x: CUP_X, y: CUP_Y };
+
+  if (lineDraw > 0.01) {
+    var p1x = baristaHandX, p1y = baristaHandY;
+    var p2x = lerp(baristaHandX, youHandX, lineDraw);
+    var p2y = lerp(baristaHandY, youHandY, lineDraw);
+    s += line(p1x, p1y, p2x, p2y, BLUE, 8, lineOp);
+
+    if (lineDraw > 0.5) { // Connect to cup after connecting to YOU
+      var cupConnectProg = ramp(u, 0.5, 0.8);
+      var p3x = lerp(youHandX, cupCenter.x, cupConnectProg);
+      var p3y = lerp(youHandY, cupCenter.y, cupConnectProg);
+      s += line(youHandX, youHandY, p3x, p3y, BLUE, 8, lineOp);
+    }
+  }
+
+  // Cup glows signal blue
+  var glowProg = ramp(u, 0.7, 1.0);
+  s += coffeeCup(CUP_X, CUP_Y, 1, WHITE, true, glowProg > 0.01, BLUE, 1);
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+var LOYALTY_BAR_X = YOU_X - 250, LOYALTY_BAR_Y = CY, LOYALTY_BAR_W = 40, LOYALTY_BAR_H = 400;
+var SHOP_ICON_X = LOYALTY_BAR_X, SHOP_ICON_Y = LOYALTY_BAR_Y - LOYALTY_BAR_H / 2 - 60;
+
+function scene5(u) {
+  var s = '';
+  s += shopOutline(SHOP_X, SHOP_Y, SHOP_W, SHOP_H, 1);
+  s += rrect(CX, COUNTER_Y, 600, 80, 10, DIM, 0.8);
+  s += stickFigure(BARISTA_X, BARISTA_Y, 1, WHITE, 'barista');
+
+  // YOU moves to hold the cup
+  var youMoveProg = smooth(ramp(u, 0.0, 0.3));
+  var youX = lerp(YOU_X, YOU_X - 100, youMoveProg);
+  var cupHeldX = lerp(CUP_X, youX + 60, youMoveProg);
+  var cupHeldY = lerp(CUP_Y, YOU_Y - 20, youMoveProg);
+
+  s += stickFigure(youX, YOU_Y, 1, AMBER, 'holding_cup');
+  s += coffeeCup(cupHeldX, cupHeldY, 1, WHITE, true, true, BLUE, 1);
+
+  // Loyalty bar fills up
+  var loyaltyFill = smooth(ramp(u, 0.4, 0.9));
+  s += loyaltyBar(LOYALTY_BAR_X, LOYALTY_BAR_Y, LOYALTY_BAR_W, LOYALTY_BAR_H, loyaltyFill, AMBER, 1);
+
+  // Stylized shop icon above loyalty bar
+  var shopIconOp = ramp(u, 0.3, 0.6);
+  if (shopIconOp > 0.01) {
+    s += shopOutline(SHOP_ICON_X, SHOP_ICON_Y, 80, 80, shopIconOp);
+  }
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  s += rrect(CX, COUNTER_Y, 600, 80, 10, DIM, 0.8);
+  s += stickFigure(BARISTA_X, BARISTA_Y, 1, WHITE, 'barista');
+
+  // YOU walks out of the shop
+  var walkOutProg = smooth(ramp(u, 0.0, 0.7));
+  var youX = lerp(YOU_X - 100, W + 200, walkOutProg);
+  var bob = Math.sin(u * Math.PI * 4) * 8 * (1 - smooth(ramp(u, 0.7, 0.9)));
+  var youPose = u < 0.8 ? 'walking' : 'standing'; // Keep walking until off-screen
+
+  s += shopOutline(SHOP_X, SHOP_Y, SHOP_W, SHOP_H, 1);
+
+  // Insight icon appears above YOU's head
+  var insightOp = ramp(u, 0.5, 0.8);
+  var insightY = lerp(YOU_Y - 100, YOU_Y - 200, easeOut(ramp(u, 0.5, 0.8)));
+  if (insightOp > 0.01) {
+    s += thoughtBubble(youX + 80, insightY, 'insight', BLUE, insightOp);
+  }
+
+  s += stickFigure(youX, YOU_Y + bob, 1, AMBER, youPose);
+  s += coffeeCup(youX + 60, YOU_Y - 20, 1, WHITE, true, true, BLUE, 1); // YOU holds the glowing cup
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
