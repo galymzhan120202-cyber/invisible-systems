@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why We Pick the Second Cheapest Option</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue  -> the system / decoy
+var AMBER = "#F2A93B";              // warm amber   -> YOU / desired value
+var CORAL = "#FF5B5B";              // coral red    -> naive thinking / cost
+
+var DUR = 60;
+window.__duration = DUR;
+
+// Custom constants for this animation
+var BOX_W = 240, BOX_H = 180, BOX_RAD = 20;
+var BOX_Y = 600;
+var BOX_X_LEFT = CX - 300;
+var BOX_X_MID = CX;
+var BOX_X_RIGHT = CX + 300;
+
+var FIGURE_Y = 1400;
+var FIGURE_H = 220; // height of stick figure from feet to top of head
+var STROKE_W = 9;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+function checkmark(x, y, size, col, sw, op) {
+  var d = "M " + (x - size * 0.6) + " " + (y + size * 0.1) +
+          " L " + (x - size * 0.1) + " " + (y + size * 0.6) +
+          " L " + (x + size * 0.6) + " " + (y - size * 0.6);
+  return pathTag(d, col, sw, op);
+}
+
+function animatedArrow(x1, y1, x2, y2, col, sw, progress, op) {
+  op = (op == null ? 1 : op);
+  var currentX = lerp(x1, x2, progress);
+  var currentY = lerp(y1, y2, progress);
+
+  var headSize = 20;
+  var angle = Math.atan2(y2 - y1, x2 - x1);
+
+  var d = "M " + x1 + " " + y1 + " L " + currentX + " " + currentY;
+
+  // Draw arrow head only when progress is near 1
+  if (progress > 0.8) {
+    var headDrawProgress = ramp(progress, 0.8, 1.0);
+    var actualHeadSize = headSize * headDrawProgress;
+    d += " M " + currentX + " " + currentY + " L " + (currentX - actualHeadSize * Math.cos(angle - Math.PI / 6)) + " " + (currentY - actualHeadSize * Math.sin(angle - Math.PI / 6));
+    d += " M " + currentX + " " + currentY + " L " + (currentX - actualHeadSize * Math.cos(angle + Math.PI / 6)) + " " + (currentY - actualHeadSize * Math.sin(angle + Math.PI / 6));
+  }
+  return pathTag(d, col, sw, op);
+}
+
+/* Stick figure helper */
+function stickFigure(x, y, col, pose, u_scene, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = FIGURE_H * 0.1;
+  var headY = y - FIGURE_H * 0.85;
+  var bodyTopY = headY + headR * 0.8;
+  var bodyBotY = y - FIGURE_H * 0.2;
+  var armLen = FIGURE_H * 0.4;
+  var legLen = FIGURE_H * 0.4;
+  var bodyWidth = FIGURE_H * 0.15;
+
+  var currentHeadX = x;
+  var currentHeadY = headY;
+  var headRotation = 0; // degrees
+
+  // Body
+  g += line(x, bodyTopY, x, bodyBotY, col, STROKE_W);
+
+  // Arms and Legs default (neutral)
+  var leftArm = { x1: x - bodyWidth / 2, y1: bodyTopY + FIGURE_H * 0.05, x2: x - bodyWidth / 2 - armLen * 0.6, y2: bodyTopY + FIGURE_H * 0.05 + armLen * 0.8 };
+  var rightArm = { x1: x + bodyWidth / 2, y1: bodyTopY + FIGURE_H * 0.05, x2: x + bodyWidth / 2 + armLen * 0.6, y2: bodyTopY + FIGURE_H * 0.05 + armLen * 0.8 };
+  var leftLeg = { x1: x - bodyWidth / 2, y1: bodyBotY, x2: x - bodyWidth / 2 - legLen * 0.3, y2: y };
+  var rightLeg = { x1: x + bodyWidth / 2, y1: bodyBotY, x2: x + bodyWidth / 2 + legLen * 0.3, y2: y };
+
+  var drawArms = true;
+
+  switch (pose) {
+    case 'neutral':
+      var tilt = Math.sin(u_scene * Math.PI * 2) * 0.05; // Subtle head tilt
+      headRotation = tilt * 180 / Math.PI;
+      break;
+    case 'point_mid':
+      rightArm.x1 = x + bodyWidth / 2 + 10;
+      rightArm.y1 = bodyTopY + 20;
+      rightArm.x2 = BOX_X_MID + BOX_W / 2 - 20;
+      rightArm.y2 = BOX_Y + BOX_H / 2;
+      break;
+    case 'confident':
+      drawArms = false; // Custom crossed arms
+      g += line(x - bodyWidth / 2 - 10, bodyTopY + FIGURE_H * 0.15, x + bodyWidth / 2 + 10, bodyTopY + FIGURE_H * 0.25, col, STROKE_W);
+      g += line(x + bodyWidth / 2 + 10, bodyTopY + FIGURE_H * 0.15, x - bodyWidth / 2 - 10, bodyTopY + FIGURE_H * 0.25, col, STROKE_W);
+      break;
+    case 'surprised':
+      headRotation = -10; // Tilt head back slightly
+      currentHeadX += 5; // Shift head slightly
+      break;
+    case 'look_left_right':
+      var lookPhase = smooth(u_scene); // Easing for look
+      currentHeadX = lerp(x - 20, x + 20, lookPhase);
+      break;
+    case 'look_left':
+      currentHeadX = x - 20;
+      break;
+    case 'look_right':
+      currentHeadX = x + 20;
+      break;
+  }
+
+  // Arms
+  if (drawArms) {
+    g += line(leftArm.x1, leftArm.y1, leftArm.x2, leftArm.y2, col, STROKE_W);
+    g += line(rightArm.x1, rightArm.y1, rightArm.x2, rightArm.y2, col, STROKE_W);
+  }
+
+  // Legs
+  g += line(leftLeg.x1, leftLeg.y1, leftLeg.x2, leftLeg.y2, col, STROKE_W);
+  g += line(rightLeg.x1, rightLeg.y1, rightLeg.x2, rightLeg.y2, col, STROKE_W);
+
+  // Head (with potential rotation/translation)
+  g += '<g transform="translate(' + currentHeadX + ' ' + currentHeadY + ') rotate(' + headRotation + ') translate(' + (-currentHeadX) + ' ' + (-currentHeadY) + ')">';
+  g += dot(currentHeadX, currentHeadY, headR, col);
+  g += '</g>';
+
+  g += '</g>';
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var cameraScale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var cameraDriftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(cameraScale, 0, cameraDriftY) + '>';
+
+  // Choice boxes appearing one by one
+  s += rrectStroke(BOX_X_LEFT, BOX_Y, BOX_W, BOX_H, BOX_RAD, WHITE, STROKE_W, ramp(u, 0.0, 0.2));
+  s += rrectStroke(BOX_X_MID, BOX_Y, BOX_W, BOX_H, BOX_RAD, WHITE, STROKE_W, ramp(u, 0.1, 0.3));
+  s += rrectStroke(BOX_X_RIGHT, BOX_Y, BOX_W, BOX_H, BOX_RAD, WHITE, STROKE_W, ramp(u, 0.2, 0.4));
+
+  // Stick figure
+  s += stickFigure(CX, FIGURE_Y, AMBER, 'neutral', u);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var camScale = lerp(1.0, 1.05, smooth(ramp(u, 0.0, 0.5)));
+  s += '<g ' + camera(camScale, 0, 0) + '>';
+
+  s += rrectStroke(BOX_X_LEFT, BOX_Y, BOX_W, BOX_H, BOX_RAD, WHITE, STROKE_W);
+
+  // Middle box pulses with amber glow
+  var midBoxGlow = 0;
+  if (u > 0.1) { // Start glow after arm extends
+    midBoxGlow = 0.5 + 0.5 * Math.sin((u - 0.1) * Math.PI * 8); // Continuous pulse
+  }
+  var midBoxSW = lerp(STROKE_W, STROKE_W * 1.5, midBoxGlow);
+  s += rrectStroke(BOX_X_MID, BOX_Y, BOX_W, BOX_H, BOX_RAD, AMBER, midBoxSW, 0.8 + 0.2 * midBoxGlow);
+
+  s += rrectStroke(BOX_X_RIGHT, BOX_Y, BOX_W, BOX_H, BOX_RAD, WHITE, STROKE_W);
+
+  // Stick figure arm extension
+  var pose = (u < 0.3) ? 'neutral' : 'point_mid';
+  s += stickFigure(CX, FIGURE_Y, AMBER, pose, u);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  s += rrectStroke(BOX_X_LEFT, BOX_Y, BOX_W, BOX_H, BOX_RAD, WHITE, STROKE_W);
+  s += rrectStroke(BOX_X_MID, BOX_Y, BOX_W, BOX_H, BOX_RAD, WHITE, STROKE_W);
+  s += rrectStroke(BOX_X_RIGHT, BOX_Y, BOX_W, BOX_H, BOX_RAD, WHITE, STROKE_W);
+
+  // Stick figure pose transition
+  var pose = (u < 0.3) ? 'neutral' : 'confident';
+  s += stickFigure(CX, FIGURE_Y, AMBER, pose, u);
+
+  // Thought bubble with checkmark
+  var bubbleX = BOX_X_MID;
+  var bubbleY = BOX_Y - BOX_H / 2 - 100;
+  var bubbleW = BOX_W * 0.8;
+  var bubbleH = BOX_H * 0.8;
+  var bubbleOp = ramp(u, 0.3, 0.5);
+  var fillOp = ramp(u, 0.5, 0.7);
+  var checkOp = ramp(u, 0.7, 0.9);
+
+  if (bubbleOp > 0.01) {
+    s += rrect(bubbleX, bubbleY, bubbleW, bubbleH, BOX_RAD, CORAL, bubbleOp * fillOp);
+    s += rrectStroke(bubbleX, bubbleY, bubbleW, bubbleH, BOX_RAD, CORAL, STROKE_W, bubbleOp);
+    if (checkOp > 0.01) {
+      s += checkmark(bubbleX, bubbleY, bubbleW * 0.3, WHITE, STROKE_W, checkOp);
+    }
+  }
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  s += rrectStroke(BOX_X_LEFT, BOX_Y, BOX_W, BOX_H, BOX_RAD, WHITE, STROKE_W);
+
+  // Middle box stays amber
+  s += rrect(BOX_X_MID, BOX_Y, BOX_W, BOX_H, BOX_RAD, AMBER, 0.9);
+  s += rrectStroke(BOX_X_MID, BOX_Y, BOX_W, BOX_H, BOX_RAD, AMBER, STROKE_W);
+
+  // Right box turns blue
+  var rightBoxColOp = ramp(u, 0.0, 0.2);
+  s += rrect(BOX_X_RIGHT, BOX_Y, BOX_W, BOX_H, BOX_RAD, BLUE, rightBoxColOp * 0.9);
+  s += rrectStroke(BOX_X_RIGHT, BOX_Y, BOX_W, BOX_H, BOX_RAD, BLUE, STROKE_W, rightBoxColOp);
+
+  // Blue arrow from right to middle
+  var arrowProgress = ramp(u, 0.2, 0.5);
+  if (arrowProgress > 0.01) {
+    s += animatedArrow(BOX_X_RIGHT, BOX_Y, BOX_X_MID, BOX_Y, BLUE, STROKE_W + 2, arrowProgress, 1);
+  }
+
+  // Stick figure pose transition
+  var pose = (u < 0.3) ? 'confident' : 'surprised';
+  s += stickFigure(CX, FIGURE_Y, AMBER, pose, u);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var shrinkProgress = smooth(ramp(u, 0.0, 0.5));
+  var midBoxScale = lerp(1.0, 0.9, shrinkProgress);
+  var midBoxY = lerp(BOX_Y, BOX_Y + 20, shrinkProgress);
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Left box shrinks and fades
+  var leftBoxOp = lerp(1.0, 0.0, shrinkProgress);
+  var leftBoxW = lerp(BOX_W, 0, shrinkProgress);
+  var leftBoxH = lerp(BOX_H, 0, shrinkProgress);
+  if (leftBoxOp > 0.01) {
+    s += rrectStroke(BOX_X_LEFT, BOX_Y, leftBoxW, leftBoxH, BOX_RAD, WHITE, STROKE_W, leftBoxOp);
+  }
+
+  // Middle box stays amber, slightly scales
+  s += rrect(BOX_X_MID, midBoxY, BOX_W * midBoxScale, BOX_H * midBoxScale, BOX_RAD, AMBER, 0.9);
+  s += rrectStroke(BOX_X_MID, midBoxY, BOX_W * midBoxScale, BOX_H * midBoxScale, BOX_RAD, AMBER, STROKE_W);
+
+  // Right (blue) box shrinks to a dot
+  var blueDotR = lerp(BOX_W / 2, 15, shrinkProgress);
+  var blueDotOp = lerp(1.0, 0.8, shrinkProgress);
+  s += dot(BOX_X_RIGHT, BOX_Y, blueDotR, BLUE, blueDotOp);
+
+  s += stickFigure(CX, FIGURE_Y, AMBER, 'look_left_right', u);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var rearrangeProgress = smooth(ramp(u, 0.0, 0.3));
+  var newCoralAppear = ramp(u, 0.3, 0.5);
+
+  // Blue dot (decoy) moves left to its new position
+  var blueDotX_final = BOX_X_LEFT; // Leftmost position
+  var blueDotX = lerp(BOX_X_RIGHT, blueDotX_final, rearrangeProgress);
+  s += dot(blueDotX, BOX_Y, 15, BLUE, 0.8);
+
+  // New Coral box (actual cheapest) appears in the middle
+  var coralBoxX_final = BOX_X_MID; // Middle position for new coral
+  var coralBoxOp = newCoralAppear;
+  if (coralBoxOp > 0.01) {
+    s += rrect(coralBoxX_final, BOX_Y, BOX_W, BOX_H, BOX_RAD, CORAL, coralBoxOp * 0.9);
+    s += rrectStroke(coralBoxX_final, BOX_Y, BOX_W, BOX_H, BOX_RAD, CORAL, STROKE_W, coralBoxOp);
+  }
+
+  // Amber box (chosen) moves right to its new position
+  var amberBoxX_final = BOX_X_RIGHT; // Rightmost position for amber
+  var amberBoxX = lerp(BOX_X_MID, amberBoxX_final, rearrangeProgress);
+  s += rrect(amberBoxX, BOX_Y, BOX_W, BOX_H, BOX_RAD, AMBER, 0.9);
+  s += rrectStroke(amberBoxX, BOX_Y, BOX_W, BOX_H, BOX_RAD, AMBER, STROKE_W);
+
+  // Stick figure looks
+  var figurePose = 'neutral';
+  if (u < 0.4) { // Initial look left
+    figurePose = 'look_left';
+  } else if (u < 0.6) { // Then look right
+    figurePose = 'look_right';
+  } else { // Finally confident
+    figurePose = 'confident';
+  }
+  s += stickFigure(CX, FIGURE_Y, AMBER, figurePose, u);
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

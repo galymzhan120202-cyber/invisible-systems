@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "Shopping? You want good value. Not the cheapest, not the most expensive. Just that sensible, perfect middle ground.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "You see three options: Basic, Pro, Premium. Small, Medium, Large. Your eyes and hand instinctively drift to that attractive middle choice.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "You rationalize: 'Cheapest is risky. Priciest is overkill. This middle option is the perfect, rational choice for *me*.'",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "Here's the invisible system: the most expensive option is often a 'decoy.' Not meant to sell, it makes the *second* most expensive look like a steal.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "You spent more than intended, but feel like a savvy shopper who snagged a bargain. The system, invisibly, guided your choice.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "Next time, you'll spot this decoy effect. You might still pick the middle, but now you understand *why* it feels right. You see the invisible system.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

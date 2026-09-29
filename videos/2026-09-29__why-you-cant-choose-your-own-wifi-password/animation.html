@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why You Can't Choose Your Own WiFi Password</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+var PERSON_Y = BOT - 280;            // stick figure resting height
+var ROUTER_Y = CY - 100;             // router/mechanism resting height
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / the wave
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want
+var CORAL = "#FF5B5B";              // coral red    -> the naive model / false signal
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, fill) {
+  return '<path d="' + d + '" fill="' + (fill || 'none') + '" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+/* stick figure person */
+function person(x, y, col, pose, op) { // pose: 'idle', 'excited', 'tap', 'frustrated', 'scratch', 'nod'
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = 26;
+  var bodyLen = 100;
+  var armLen = 70;
+  var legLen = 90;
+  var sw = 9;
+
+  g += dot(x, y - headR - bodyLen / 2, headR, col); // Head
+
+  // Body
+  g += line(x, y - bodyLen / 2, x, y + bodyLen / 2, col, sw);
+
+  // Arms & Legs based on pose
+  switch (pose) {
+    case 'excited':
+      g += line(x, y - bodyLen / 3, x - armLen * 0.7, y - bodyLen / 3 - armLen * 0.7, col, sw); // Left arm up
+      g += line(x, y - bodyLen / 3, x + armLen * 0.7, y - bodyLen / 3 - armLen * 0.7, col, sw); // Right arm up
+      g += line(x, y + bodyLen / 2, x - legLen * 0.3, y + bodyLen / 2 + legLen, col, sw); // Left leg
+      g += line(x, y + bodyLen / 2, x + legLen * 0.3, y + bodyLen / 2 + legLen, col, sw); // Right leg
+      break;
+    case 'tap':
+      g += line(x, y - bodyLen / 3, x - armLen * 0.8, y - bodyLen / 3 + armLen * 0.2, col, sw); // Left arm
+      g += line(x, y - bodyLen / 3, x + armLen * 0.5, y - bodyLen / 3 - armLen * 0.4, col, sw); // Right arm tapping
+      g += dot(x + armLen * 0.5, y - bodyLen / 3 - armLen * 0.4, 10, col); // Tapping hand
+      g += line(x, y + bodyLen / 2, x - legLen * 0.3, y + bodyLen / 2 + legLen, col, sw); // Left leg
+      g += line(x, y + bodyLen / 2, x + legLen * 0.3, y + bodyLen / 2 + legLen, col, sw); // Right leg
+      break;
+    case 'frustrated':
+      g += line(x, y - bodyLen / 3, x - armLen * 0.6, y - bodyLen / 3 + armLen * 0.4, col, sw); // Left arm down
+      g += line(x, y - bodyLen / 3, x + armLen * 0.6, y - bodyLen / 3 + armLen * 0.4, col, sw); // Right arm down
+      g += line(x, y + bodyLen / 2, x - legLen * 0.3, y + bodyLen / 2 + legLen, col, sw); // Left leg
+      g += line(x, y + bodyLen / 2, x + legLen * 0.3, y + bodyLen / 2 + legLen, col, sw); // Right leg
+      g += line(x - headR * 0.5, y - headR - bodyLen / 2 + headR * 0.2, x + headR * 0.5, y - headR - bodyLen / 2 + headR * 0.2, col, sw/2); // Frown
+      break;
+    case 'scratch':
+      g += line(x, y - bodyLen / 3, x - armLen * 0.8, y - bodyLen / 3 + armLen * 0.2, col, sw); // Left arm
+      g += line(x, y - bodyLen / 3, x + armLen * 0.3, y - headR - bodyLen / 2 - headR * 0.5, col, sw); // Right arm scratching head
+      g += dot(x + armLen * 0.3, y - headR - bodyLen / 2 - headR * 0.5, 10, col); // Scratching hand
+      g += line(x, y + bodyLen / 2, x - legLen * 0.3, y + bodyLen / 2 + legLen, col, sw); // Left leg
+      g += line(x, y + bodyLen / 2, x + legLen * 0.3, y + bodyLen / 2 + legLen, col, sw); // Right leg
+      break;
+    case 'nod':
+      g += line(x, y - bodyLen / 3, x - armLen * 0.6, y - bodyLen / 3 + armLen * 0.4, col, sw); // Left arm down
+      g += line(x, y - bodyLen / 3, x + armLen * 0.6, y - bodyLen / 3 + armLen * 0.4, col, sw); // Right arm down
+      g += line(x, y + bodyLen / 2, x - legLen * 0.3, y + bodyLen / 2 + legLen, col, sw); // Left leg
+      g += line(x, y + bodyLen / 2, x + legLen * 0.3, y + bodyLen / 2 + legLen, col, sw); // Right leg
+      g += line(x - headR * 0.5, y - headR - bodyLen / 2 + headR * 0.4, x + headR * 0.5, y - headR - bodyLen / 2 + headR * 0.4, col, sw/2); // Smile
+      break;
+    default: // idle
+      g += line(x, y - bodyLen / 3, x - armLen * 0.6, y - bodyLen / 3 + armLen * 0.4, col, sw); // Left arm
+      g += line(x, y - bodyLen / 3, x + armLen * 0.6, y - bodyLen / 3 + armLen * 0.4, col, sw); // Right arm
+      g += line(x, y + bodyLen / 2, x - legLen * 0.3, y + bodyLen / 2 + legLen, col, sw); // Left leg
+      g += line(x, y + bodyLen / 2, x + legLen * 0.3, y + bodyLen / 2 + legLen, col, sw); // Right leg
+      break;
+  }
+  g += '</g>';
+  return g;
+}
+
+/* simple router box */
+function routerBox(x, y, w, h, col, sw, op) {
+  return rrectStroke(x, y, w, h, 20, col, sw, op);
+}
+
+/* password field */
+function passwordField(x, y, w, h, state, col, sw, op) { // state: 'blank', 'filled', 'locked'
+  var g = '';
+  var rad = 10;
+  var fieldCol = WHITE;
+  var charCol = DIM;
+
+  g += rrect(x, y, w, h, rad, fieldCol, op);
+  g += rrectStroke(x, y, w, h, rad, col, sw, op);
+
+  if (state === 'filled' || state === 'locked') {
+    // Simulate random characters with dots and short lines
+    var charCount = 8;
+    var charSpacing = (w - 2 * rad) / (charCount + 1);
+    for (var i = 0; i < charCount; i++) {
+      var charX = x - w / 2 + rad + (i + 1) * charSpacing - charSpacing / 2;
+      var charY = y + (rnd(i) - 0.5) * h * 0.2;
+      var charType = Math.floor(rnd(i + 100) * 3); // 0: dot, 1: short line, 2: small rect
+      if (charType === 0) {
+        g += dot(charX, charY, 6, charCol, op);
+      } else if (charType === 1) {
+        g += line(charX - 8, charY, charX + 8, charY, charCol, 4, op);
+      } else {
+        g += rrect(charX, charY, 12, 8, 2, charCol, op);
+      }
+    }
+  }
+
+  if (state === 'locked') {
+    // Lock icon
+    var lockX = x + w / 2 - 30;
+    var lockY = y;
+    g += lockIcon(lockX, lockY, 20, col, op);
+  }
+  return g;
+}
+
+/* lock icon */
+function lockIcon(x, y, size, col, op) {
+  var sw = size / 5;
+  var bodyW = size * 0.8;
+  var bodyH = size * 0.7;
+  var shackleR = size * 0.4;
+  var shackleY = y - bodyH / 2 - shackleR * 0.6;
+  var g = '';
+  g += rrect(x, y + bodyH / 2 - bodyH * 0.1, bodyW, bodyH, size * 0.1, col, op); // Lock body
+  g += pathTag("M " + (x - shackleR) + " " + shackleY +
+               " A " + shackleR + " " + shackleR + " 0 0 1 " + (x + shackleR) + " " + shackleY +
+               " V " + (y - bodyH / 2 + shackleR * 0.2) +
+               " M " + (x - shackleR) + " " + shackleY +
+               " V " + (y - bodyH / 2 + shackleR * 0.2), col, sw, op); // Shackle
+  return g;
+}
+
+/* thought bubble */
+function thoughtBubble(x, y, w, h, col, sw, op, content) {
+  var bubblePath = "M " + (x - w / 2) + " " + (y - h / 2) +
+                   " Q " + (x - w / 2 - 20) + " " + (y - h / 2 - 20) + " " + (x - w / 2) + " " + (y - h / 2 - 40) +
+                   " A " + w / 2 + " " + h / 2 + " 0 0 1 " + (x + w / 2) + " " + (y - h / 2 - 40) +
+                   " Q " + (x + w / 2 + 20) + " " + (y - h / 2 - 20) + " " + (x + w / 2) + " " + (y - h / 2) +
+                   " Z";
+  var g = pathTag(bubblePath, col, sw, op, WHITE);
+  g += content;
+  return g;
+}
+
+/* security mechanism - abstract blue gears and lines */
+function securityMechanism(x, y, w, h, u, col, sw, op) {
+  var g = '';
+  g += rrect(x, y, w, h, 30, col, 0.2 * op); // Base plate
+  g += rrectStroke(x, y, w, h, 30, col, sw, op);
+
+  var gearCount = 3;
+  var gearSize = w / 4;
+  for (var i = 0; i < gearCount; i++) {
+    var gx = x - w / 3 + i * (w / 3);
+    var gy = y + (rnd(i + 50) - 0.5) * h * 0.2;
+    g += gear(gx, gy, gearSize, col, sw, op, u * 360 * (i % 2 === 0 ? 1 : -1));
+  }
+
+  // Interconnecting lines
+  var lineOp = 0.6 * op;
+  g += line(x - w / 2 + 20, y - h / 2 + 20, x + w / 2 - 20, y + h / 2 - 20, col, sw / 2, lineOp);
+  g += line(x - w / 2 + 20, y + h / 2 - 20, x + w / 2 - 20, y - h / 2 + 20, col, sw / 2, lineOp);
+  g += ring(x, y, w / 4, col, sw / 2, lineOp);
+
+  // Key generator slot (conceptual)
+  var slotW = w * 0.4, slotH = h * 0.2;
+  g += rrectStroke(x, y + h / 2 - slotH / 2 - 20, slotW, slotH, 10, WHITE, sw, op);
+  return g;
+}
+
+/* single gear */
+function gear(x, y, r, col, sw, op, rot) {
+  var teeth = 8;
+  var d = '';
+  for (var i = 0; i < teeth; i++) {
+    var angle = (i / teeth) * Math.PI * 2;
+    var outerX = x + r * Math.cos(angle);
+    var outerY = y + r * Math.sin(angle);
+    var innerX = x + r * 0.7 * Math.cos(angle + Math.PI / teeth);
+    var innerY = y + r * 0.7 * Math.sin(angle + Math.PI / teeth);
+    if (i === 0) d += "M " + outerX + " " + outerY;
+    else d += " L " + outerX + " " + outerY;
+    d += " L " + innerX + " " + innerY;
+  }
+  d += " Z";
+  return '<g transform="rotate(' + rot + ' ' + x + ' ' + y + ')">' + pathTag(d, col, sw, op) + '</g>';
+}
+
+/* abstract key shape */
+function keyShape(x, y, size, col, sw, op) {
+  var d = "M " + x + " " + (y - size) +
+          " L " + (x + size * 0.4) + " " + (y - size * 0.6) +
+          " L " + (x + size * 0.2) + " " + (y - size * 0.4) +
+          " L " + (x + size * 0.6) + " " + (y) +
+          " L " + (x + size * 0.4) + " " + (y + size * 0.2) +
+          " L " + (x + size * 0.8) + " " + (y + size * 0.4) +
+          " L " + (x + size * 0.6) + " " + (y + size * 0.6) +
+          " L " + (x + size * 1.0) + " " + (y + size * 0.8) +
+          " L " + (x + size * 0.8) + " " + (y + size * 1.0) +
+          " L " + (x - size * 0.8) + " " + (y + size * 1.0) +
+          " Z";
+  return pathTag(d, col, sw, op);
+}
+
+/* protective dome/field */
+function protectiveDome(x, y, r, col, sw, op) {
+  return ring(x, y, r, col, sw, op);
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var userX = CX - 300, userY = PERSON_Y;
+  var routerW = 300, routerH = 200;
+  var routerX = CX + 200;
+  var routerY = ROUTER_Y;
+
+  // Router slides in from right
+  var routerOffset = lerp(W / 2, 0, easeOut(ramp(u, 0.0, 0.3)));
+  s += routerBox(routerX + routerOffset, routerY, routerW, routerH, WHITE, 10, 1);
+
+  // User unboxes / excited
+  s += person(userX, userY, AMBER, 'excited', 1);
+
+  // Thought bubble appears
+  var bubbleX = userX + 100, bubbleY = userY - 300;
+  var bubbleW = 300, bubbleH = 200;
+  var bubbleOp = ramp(u, 0.2, 0.6);
+  if (bubbleOp > 0.01) {
+    var bubbleContent = '';
+    // Network name field
+    bubbleContent += rrect(bubbleX, bubbleY - 40, 200, 40, 8, WHITE, bubbleOp);
+    bubbleContent += line(bubbleX - 60, bubbleY - 40, bubbleX + 60, bubbleY - 40, DIM, 6, bubbleOp); // Placeholder text
+    // Password field (blank)
+    var passFieldY = bubbleY + 60;
+    var passFieldOp = ramp(u, 0.5, 0.9);
+    bubbleContent += passwordField(bubbleX, passFieldY, 200, 40, 'blank', WHITE, 6, passFieldOp);
+    s += thoughtBubble(bubbleX, bubbleY, bubbleW, bubbleH, WHITE, 7, bubbleOp, bubbleContent);
+  }
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var userX = CX - 300, userY = PERSON_Y;
+  var routerW = 300, routerH = 200;
+  var routerX = CX + 200;
+  var routerY = ROUTER_Y;
+
+  s += routerBox(routerX, routerY, routerW, routerH, WHITE, 10, 1);
+
+  // User tapping, then frustrated
+  var personPose = u < 0.4 ? 'tap' : 'frustrated';
+  s += person(userX, userY, AMBER, personPose, 1);
+
+  // Password field autofills and locks
+  var passFieldY = ROUTER_Y + routerH / 2 + 80;
+  var passFieldW = 280, passFieldH = 50;
+  var fieldState = u < 0.3 ? 'blank' : (u < 0.6 ? 'filled' : 'locked');
+  s += passwordField(routerX, passFieldY, passFieldW, passFieldH, fieldState, WHITE, 7, 1);
+
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var userX = CX - 300, userY = PERSON_Y;
+  var routerW = 300, routerH = 200;
+  var routerX = CX + 200;
+  var routerY = ROUTER_Y;
+
+  s += routerBox(routerX, routerY, routerW, routerH, WHITE, 10, 1);
+
+  // User scratching head
+  s += person(userX, userY, AMBER, 'scratch', 1);
+
+  // Coral thought bubble with weak password appears
+  var bubbleX = userX + 100, bubbleY = userY - 300;
+  var bubbleW = 300, bubbleH = 200;
+  var bubbleOp = ramp(u, 0.0, 0.4) * (1 - ramp(u, 0.8, 1.0));
+  if (bubbleOp > 0.01) {
+    var bubbleContent = '';
+    // "password123" placeholder
+    var charCount = 8;
+    var charSpacing = (bubbleW - 2 * 20) / (charCount + 1);
+    for (var i = 0; i < charCount; i++) {
+      var charX = bubbleX - bubbleW / 2 + 20 + (i + 1) * charSpacing - charSpacing / 2;
+      var charY = bubbleY + (rnd(i) - 0.5) * bubbleH * 0.2;
+      bubbleContent += dot(charX, charY, 8, CORAL, bubbleOp);
+    }
+    s += thoughtBubble(bubbleX, bubbleY, bubbleW, bubbleH, CORAL, 7, bubbleOp, bubbleContent);
+  }
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var userX = CX - 300, userY = PERSON_Y;
+  var routerW = 300, routerH = 200;
+  var routerX = CX + 200;
+  var routerY = ROUTER_Y;
+
+  // Router morphs into security mechanism
+  var morph = smooth(ramp(u, 0.0, 0.4));
+  var currentRouterW = lerp(routerW, 400, morph);
+  var currentRouterH = lerp(routerH, 300, morph);
+  var currentRouterX = lerp(routerX, CX, morph);
+  var currentRouterY = lerp(routerY, CY - 100, morph);
+
+  // Router box fading out
+  s += routerBox(routerX, routerY, routerW, routerH, WHITE, 10, 1 - morph);
+
+  // Security mechanism fading in
+  s += securityMechanism(currentRouterX, currentRouterY, currentRouterW, currentRouterH, u, BLUE, 10, morph);
+
+  // User observing
+  s += person(userX, userY, AMBER, 'idle', 1);
+
+  // Keys emanating from the mechanism
+  var keyOp = ramp(u, 0.5, 0.9);
+  if (keyOp > 0.01) {
+    for (var i = 0; i < 4; i++) {
+      var keyU = (u * 0.8 + rnd(i) * 0.2) % 1;
+      var keyX = currentRouterX + (rnd(i + 10) - 0.5) * currentRouterW * 0.8;
+      var keyY = lerp(currentRouterY + currentRouterH / 2, TOP - 50, easeOut(keyU));
+      var keySize = lerp(20, 40, keyU);
+      s += keyShape(keyX, keyY, keySize, BLUE, 7, keyOp * (1 - keyU));
+    }
+  }
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var userX = CX - 300, userY = PERSON_Y;
+  var mechanismX = CX, mechanismY = CY - 100;
+  var mechanismW = 400, mechanismH = 300;
+
+  s += securityMechanism(mechanismX, mechanismY, mechanismW, mechanismH, u, BLUE, 10, 1);
+
+  // User observing
+  s += person(userX, userY, AMBER, 'idle', 1);
+
+  // Weak passwords (coral) appear and are zapped
+  var zapOp = ramp(u, 0.1, 0.8);
+  if (zapOp > 0.01) {
+    for (var i = 0; i < 5; i++) {
+      var passU = (u * 0.7 + rnd(i) * 0.3) % 1;
+      var passX = mechanismX + (rnd(i + 20) - 0.5) * mechanismW * 1.2;
+      var passY = lerp(BOT, mechanismY, easeIn(passU));
+      var passSize = lerp(30, 15, passU);
+      var currentPassOp = zapOp * (1 - passU);
+
+      if (currentPassOp > 0.01) {
+        // Coral "password" elements
+        s += rrect(passX, passY, passSize * 2, passSize, 5, CORAL, currentPassOp);
+        // Zapping lines from mechanism
+        var zapLineOp = ramp(passU, 0.6, 0.9);
+        if (zapLineOp > 0.01) {
+          s += line(mechanismX + (rnd(i + 30) - 0.5) * mechanismW * 0.3,
+                    mechanismY + (rnd(i + 40) - 0.5) * mechanismH * 0.3,
+                    passX, passY, BLUE, 6, zapLineOp * currentPassOp);
+        }
+      }
+    }
+  }
+
+  // Strong keys emanating
+  for (var k = 0; k < 3; k++) {
+    var keyU = (u * 0.5 + rnd(k + 50) * 0.5) % 1;
+    var keyX = mechanismX + (rnd(k + 60) - 0.5) * mechanismW * 0.5;
+    var keyY = lerp(mechanismY + mechanismH / 2, TOP - 50, easeOut(keyU));
+    var keySize = lerp(20, 40, keyU);
+    s += keyShape(keyX, keyY, keySize, BLUE, 7, (1 - keyU) * 0.8);
+  }
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var userX = CX - 300, userY = PERSON_Y;
+  var mechanismX = CX, mechanismY = CY - 100;
+  var mechanismW = 400, mechanismH = 300;
+
+  s += securityMechanism(mechanismX, mechanismY, mechanismW, mechanismH, u, BLUE, 10, 1);
+
+  // User nodding in acceptance
+  s += person(userX, userY, AMBER, 'nod', 1);
+
+  // Protective blue dome expands
+  var domeRadius = lerp(0, 700, easeOut(ramp(u, 0.0, 0.7)));
+  var domeOp = ramp(u, 0.0, 0.5) * (1 - ramp(u, 0.8, 1.0)) * 0.3;
+  if (domeRadius > 0) {
+    s += protectiveDome(mechanismX, mechanismY, domeRadius, BLUE, 12, domeOp);
+  }
+
+  // Subtle hum/glow of the mechanism
+  var glowOp = 0.1 + 0.1 * Math.sin(u * Math.PI * 4);
+  s += rrect(mechanismX, mechanismY, mechanismW + 20, mechanismH + 20, 35, BLUE, glowOp);
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
