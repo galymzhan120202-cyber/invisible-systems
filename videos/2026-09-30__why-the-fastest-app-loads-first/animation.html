@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why the Fastest App Loads First</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+var APP_STORE_X = 540;              // center of the app store screen
+var APP_STORE_Y = 960;              // center of the app store screen
+var APP_ICON_SIZE = 120;
+var APP_ICON_GAP = 40;
+var APP_LIST_TOP = TOP + 160;       // where the app list starts
+var APP_LIST_BOT = BOT - 160;       // where the app list ends
+var USER_Y = 1500;                  // stick figure's general y position
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / the wave (app store, algorithm)
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want (user, phone screen)
+var CORAL = "#FF5B5B";              // coral red    -> the perceived "best" app vs actual engagement
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+/* stylized app icon */
+function appIcon(x, y, color, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, APP_ICON_SIZE, APP_ICON_SIZE, 24, color, 0.9);
+  g += rrectStroke(x, y, APP_ICON_SIZE, APP_ICON_SIZE, 24, WHITE, 8, 0.6);
+  g += '</g>';
+  return g;
+}
+/* stick figure */
+function stickFigure(x, y, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += dot(x, y - 36, 24, col); // head
+  g += line(x, y - 12, x, y - 60, col, 8); // body
+  g += line(x, y - 48, x - 24, y - 24, col, 8); // left arm
+  g += line(x, y - 48, x + 24, y - 24, col, 8); // right arm
+  g += line(x, y, x - 24, y + 48, col, 8); // left leg
+  g += line(x, y, x + 24, y + 48, col, 8); // right leg
+  g += '</g>';
+  return g;
+}
+/* phone screen with scrolling app list */
+function phoneScreen(t, u, sceneIdx) {
+  var s = '';
+  var screenW = 600, screenH = 1080;
+  var screenX = APP_STORE_X, screenY = APP_STORE_Y;
+  var listScrollY = lerp(APP_LIST_TOP, APP_LIST_BOT, smooth(u));
+  var scrollSpeed = 1.0; // Base scroll speed
+  if (sceneIdx === 1) scrollSpeed = 0.5; // Slower scroll in scene 2
+  if (sceneIdx === 2) scrollSpeed = 1.2; // Faster scroll in scene 3
+
+  // The phone frame
+  s += rrectStroke(screenX, screenY, screenW + 60, screenH + 60, 48, AMBER, 12, 0.9);
+
+  // The app list background
+  s += rrect(screenX, screenY, screenW, screenH, 36, "#222222", 0.8); // Darker background for list
+
+  var numApps = 12;
+  var appHeight = APP_ICON_SIZE + APP_ICON_GAP;
+  var totalListHeight = numApps * appHeight;
+
+  // Generate app icons with dynamic positioning and coloring
+  for (var i = 0; i < numApps * 2; i++) { // Render more icons to ensure scrolling coverage
+    var appY = APP_LIST_TOP + i * appHeight;
+    var visibleY = appY - listScrollY;
+
+    if (visibleY > APP_LIST_BOT + appHeight || visibleY < APP_LIST_TOP - appHeight) continue;
+
+    var iconColor = BLUE;
+    var iconOp = 0.8;
+    var iconZ = 0; // Z-index for layering
+
+    // Scene-specific icon behavior
+    if (sceneIdx === 0) { // Scene 1: YOU + NEED - Static icons
+      iconColor = [AMBER, BLUE, AMBER, BLUE, AMBER, BLUE, AMBER, BLUE, AMBER, BLUE, AMBER, BLUE][i % 6];
+      iconOp = 0.7 + rnd(i) * 0.3;
+    } else if (sceneIdx === 1) { // Scene 2: GO - Slightly dynamic, scrolling
+      iconColor = [AMBER, BLUE, AMBER, BLUE, AMBER, BLUE, AMBER, BLUE, AMBER, BLUE, AMBER, BLUE][i % 6];
+      iconOp = 0.7 + rnd(i) * 0.3;
+      iconZ = 1;
+    } else if (sceneIdx === 2) { // Scene 3: SEARCH - Coral highlight
+      iconColor = (i === 4) ? CORAL : [AMBER, BLUE, AMBER, BLUE, AMBER, BLUE, AMBER, BLUE, AMBER, BLUE, AMBER, BLUE][i % 6];
+      iconOp = (i === 4) ? 1.0 : 0.7 + rnd(i) * 0.3;
+      iconZ = 2;
+      if (i === 4) { // Brief coral glow
+         var glow = pulse(u, 0.5, 0.3);
+         if (glow > 0.01) {
+           s += ring(screenX, visibleY, APP_ICON_SIZE * 0.8, CORAL, 10, glow * 0.6);
+         }
+      }
+    } else if (sceneIdx === 3) { // Scene 4: FIND - Algorithm influence, coral pushed down
+      iconColor = (i === 4) ? BLUE : (i === 7) ? CORAL : [AMBER, BLUE, AMBER, BLUE, AMBER, BLUE, AMBER, BLUE, AMBER, BLUE, AMBER, BLUE][i % 6];
+      iconOp = (i === 4) ? 0.9 : (i === 7) ? 0.7 : 0.7 + rnd(i) * 0.3;
+      iconZ = 3;
+    } else if (sceneIdx === 4) { // Scene 5: TAKE - Engagement metrics, coral at bottom
+      iconColor = (i === 8) ? CORAL : [AMBER, BLUE, AMBER, BLUE, AMBER, BLUE, AMBER, BLUE, AMBER, BLUE, AMBER, BLUE][i % 6];
+      iconOp = (i === 8) ? 0.5 : 0.7 + rnd(i) * 0.3;
+      iconZ = 4;
+      if (i === 8 && u > 0.3 && u < 0.8) { // Engagement metrics flow
+        var metricFlow = ramp(u, 0.3, 0.8);
+        for (var m = 0; m < 3; m++) {
+          var metricX = screenX + lerp(-APP_ICON_SIZE/2, APP_ICON_SIZE/2, rnd(m+10));
+          var metricY = visibleY + lerp(-APP_ICON_SIZE/2, APP_ICON_SIZE/2, rnd(m+11));
+          var startX = screenX - 100 - m * 50;
+          var startY = APP_LIST_TOP - 100 - m * 80;
+          var endX = metricX;
+          var endY = metricY;
+          var flowT = smooth(ramp(u, 0.3, 0.8)) * (m / 3.0);
+          var currentX = lerp(startX, endX, flowT);
+          var currentY = lerp(startY, endY, flowT);
+          s += dot(currentX, currentY, 12, BLUE, 0.8 * metricFlow);
+        }
+      }
+    } else if (sceneIdx === 5) { // Scene 6: RETURN + CHANGE - Final ranking, coral at bottom
+      iconColor = (i >= 9) ? CORAL : [BLUE, BLUE, BLUE, BLUE, BLUE, BLUE, BLUE, BLUE, BLUE, AMBER, AMBER, AMBER][i % 12];
+      iconOp = (i >= 9) ? 0.4 : 0.9;
+      iconZ = 5;
+    }
+
+    if (visibleY > APP_LIST_TOP - appHeight && visibleY < APP_LIST_BOT + appHeight) {
+      s += '<g style="z-index:' + iconZ + '">' + appIcon(screenX, visibleY, iconColor, iconOp) + '</g>';
+    }
+  }
+
+  // Scrolling effect for the list itself
+  if (sceneIdx === 1) {
+    var scrollProgress = u;
+    var scrollOffset = lerp(0, totalListHeight - (APP_LIST_BOT - APP_LIST_TOP), smooth(scrollProgress));
+    // This is a simplified representation. Actual scrolling would require more complex SVG manipulation or re-rendering.
+    // For this exercise, we'll simulate the visual effect by adjusting icon positions.
+  }
+
+  return s;
+}
+
+/* abstract algorithm lines */
+function algorithmLines(u, sceneIdx) {
+  var s = '';
+  if (sceneIdx < 3) return s; // Only visible from scene 4 onwards
+
+  var nodes = [];
+  var numNodes = 10 + Math.floor(rnd(10) * 5);
+  for (var i = 0; i < numNodes; i++) {
+    nodes.push({
+      x: lerp(TOP, BOT, rnd(i + 1)),
+      y: lerp(TOP, BOT, rnd(i + 2)),
+      color: (rnd(i+3) > 0.5) ? BLUE : AMBER,
+      radius: 15 + rnd(i+4) * 10
+    });
+  }
+
+  // Connect nodes with lines
+  for (var i = 0; i < numNodes; i++) {
+    for (var j = i + 1; j < numNodes; j++) {
+      var dist = Math.sqrt(Math.pow(nodes[i].x - nodes[j].x, 2) + Math.pow(nodes[i].y - nodes[j].y, 2));
+      var maxDist = Math.sqrt(Math.pow(BOT - TOP, 2) + Math.pow(BOT - TOP, 2));
+      var connectionProb = 0.3;
+      if (dist < maxDist * 0.5) connectionProb = 0.6;
+      if (rnd(i * numNodes + j) < connectionProb) {
+        s += line(nodes[i].x, nodes[i].y, nodes[j].x, nodes[j].y, lerp(BLUE, DIM, rnd(i*j)) , 4, 0.2);
+      }
+    }
+  }
+
+  // Add some larger nodes representing app icons
+  var appNodeCount = 5;
+  for (var i = 0; i < appNodeCount; i++) {
+    var nodeX = lerp(TOP, BOT, rnd(i + 100));
+    var nodeY = lerp(TOP, BOT, rnd(i + 101));
+    var color = (i === 2) ? CORAL : BLUE; // One coral node
+    s += dot(nodeX, nodeY, 30, color, 0.8);
+  }
+
+  return s;
+}
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var sceneIdx = Math.min(5, Math.floor(t / 10));
+  var u = (t - sceneIdx * 10) / 10;
+  if (t >= DUR) { sceneIdx = 5; u = 1; }
+
+  var stage = document.getElementById("stage");
+  stage.innerHTML = ''; // Clear previous frame
+
+  var s = '';
+
+  // Background
+  s += '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="#000000"/>';
+
+  // Global elements (like the user stick figure)
+  var userX = CX - 200;
+  var userY = USER_Y;
+  var userColor = AMBER;
+
+  if (sceneIdx === 0) { // Scene 1: YOU + NEED
+    s += stickFigure(userX, userY, userColor, 1);
+    s += phoneScreen(t, u, sceneIdx);
+  } else if (sceneIdx === 1) { // Scene 2: GO
+    s += stickFigure(userX, userY + lerp(0, -80, smooth(u)), userColor, 1);
+    s += phoneScreen(t, u, sceneIdx);
+  } else if (sceneIdx === 2) { // Scene 3: SEARCH
+    s += stickFigure(userX, userY + lerp(-80, -120, smooth(u)), userColor, 1);
+    s += phoneScreen(t, u, sceneIdx);
+  } else if (sceneIdx === 3) { // Scene 4: FIND
+    s += stickFigure(userX, userY - 120, userColor, 1);
+    s += phoneScreen(t, u, sceneIdx);
+    s += algorithmLines(u, sceneIdx);
+  } else if (sceneIdx === 4) { // Scene 5: TAKE
+    s += stickFigure(userX, userY - 120, userColor, 1);
+    s += phoneScreen(t, u, sceneIdx);
+    s += algorithmLines(u, sceneIdx);
+  } else if (sceneIdx === 5) { // Scene 6: RETURN + CHANGE
+    s += stickFigure(userX, userY - 120, userColor, 1);
+    s += phoneScreen(t, u, sceneIdx);
+    s += algorithmLines(u, sceneIdx);
+  }
+
+  stage.innerHTML = s;
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

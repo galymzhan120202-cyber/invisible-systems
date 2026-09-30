@@ -1,0 +1,15 @@
+{
+  "id": "why-the-fastest-app-loads-first",
+  "slug": "2026-09-30__why-the-fastest-app-loads-first",
+  "title_working": "Why the Fastest App Loads First",
+  "system": "app store ranking algorithms and user behavior prediction",
+  "cluster": "platforms-and-algorithms",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-09-30T12:50:00+00:00",
+  "produced_at": "2026-09-30T12:52:13+00:00",
+  "verify": "PASS",
+  "takeaway": "App store rankings prioritize apps that load quickly and keep users engaged, not necessarily the best.",
+  "animation_source": "llm"
+}
