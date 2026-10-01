@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You ordered a tiny item online, like a phone charger. You expect a neat, compact package, perfectly sized for it. You just want your small item delivered efficiently.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "But then a delivery truck arrives, handing you a colossal cardboard box. It's comically oversized for the tiny item rattling inside. Your expectation is shattered.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "You stare at the empty space, full of packing peanuts. \"Why all this waste? Are they just bad packers? Or trying to protect it with excessive padding?\"",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "The truth: it’s not about your item, but the system. Warehouses use only a few standardized box sizes, optimized for shipping containers and speed.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "This standardization makes the entire logistics chain incredibly efficient, saving companies vast time and money. The cost? Visible cardboard and air, hiding optimized machinery.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "So next time your tiny trinket arrives in a giant box, you’ll still feel absurd. But now, you’ll see the silent, streamlined logic.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

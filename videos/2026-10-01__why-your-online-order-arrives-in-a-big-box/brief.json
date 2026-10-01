@@ -1,0 +1,15 @@
+{
+  "id": "why-your-online-order-arrives-in-a-big-box",
+  "slug": "2026-10-01__why-your-online-order-arrives-in-a-big-box",
+  "title_working": "Why Your Online Order Arrives in a Big Box",
+  "system": "packaging standardization and warehouse logistics",
+  "cluster": "platforms-and-layout",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "failed",
+  "created_at": "2026-10-01T13:20:26+00:00",
+  "produced_at": "2026-10-01T13:28:51+00:00",
+  "verify": "FAIL",
+  "takeaway": "Online retailers use standardized box sizes to optimize warehouse and shipping efficiency, even if it means your small item comes in a surprisingly large package.",
+  "animation_source": "fallback"
+}
