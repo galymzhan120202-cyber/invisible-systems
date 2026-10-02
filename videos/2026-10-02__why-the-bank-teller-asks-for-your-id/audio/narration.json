@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You just need to withdraw some cash, or deposit a check. A quick, simple task, right? You're a familiar face, a regular customer, expecting efficiency.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "You confidently slide your transaction slip across the counter, expecting a smooth exchange. But then, the teller asks: \"May I see your ID?\"",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "Your mind races. Is there a problem with your account? Did you do something wrong? It feels personal, like an accusation, or just an unnecessary delay.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "But it's not about *you*. It's about a vast, invisible network of financial regulations, like \"Know Your Customer\" rules, fighting money laundering and fraud.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "This small delay, this tiny moment of friction, is the price we all pay for a secure financial system. It protects accounts and fights illicit activities globally.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "So next time the teller asks for your ID, you won't just see a question. You'll see the quiet gears of a system working to keep everyone, including you, safe.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

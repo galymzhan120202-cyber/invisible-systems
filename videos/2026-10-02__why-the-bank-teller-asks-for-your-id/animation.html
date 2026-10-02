@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why the Bank Teller Asks for Your ID</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue
+var AMBER = "#F2A93B";              // warm amber
+var CORAL = "#FF5B5B";              // coral red
+
+var DUR = 60;
+window.__duration = DUR;
+
+// Stick figure dimensions
+var SF_H = 220; // Stick figure height
+var SF_HEAD_R = 24;
+var SF_BODY_L = SF_H * 0.4;
+var SF_ARM_L = SF_H * 0.3;
+var SF_LEG_L = SF_H * 0.3;
+var SF_STROKE = 9;
+
+// YOU position
+var YOU_Y = BOT - SF_LEG_L - 80; // Base Y for YOU (feet position)
+var YOU_X_START = W + 100; // Off-screen right
+var YOU_X_COUNTER = CX - 180; // At the counter
+
+// Teller position
+var TELLER_HEAD_Y = YOU_Y - SF_LEG_L - SF_BODY_L - SF_HEAD_R - 80; // Head Y for teller
+var TELLER_X = CX + 180;
+
+// Bank counter
+var COUNTER_Y = YOU_Y - SF_LEG_L - SF_BODY_L * 0.5 - 40; // Center Y of counter
+var COUNTER_W = 700;
+var COUNTER_H = 20;
+
+// Transaction slip
+var SLIP_W = 60;
+var SLIP_H = 40;
+var SLIP_Y = COUNTER_Y - 20;
+var SLIP_X_YOU = YOU_X_COUNTER + 40;
+var SLIP_X_TELLER = CX + 50;
+
+// ID Card
+var ID_W = 90;
+var ID_H = 60;
+var ID_INNER_W = 50;
+var ID_INNER_H = 30;
+
+// KYC Glyph
+var KYC_SIZE = 120;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+// Stick figure: x, y is the center of the feet
+function stickFigure(x, y, col, pose, op, u_anim) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var sw = SF_STROKE;
+
+  var headY = y - SF_LEG_L - SF_BODY_L - SF_HEAD_R;
+  g += dot(x, headY, SF_HEAD_R, col); // Head
+
+  // Body
+  var bodyTopY = headY + SF_HEAD_R;
+  var bodyBotY = y - SF_LEG_L;
+  g += line(x, bodyTopY, x, bodyBotY, col, sw);
+
+  // Arms and Legs depend on pose
+  var armY = headY + SF_HEAD_R + SF_BODY_L * 0.2; // Shoulder height
+  var legY = y - SF_LEG_L; // Hip height
+
+  var armSwing = Math.sin(u_anim * Math.PI * 2) * SF_ARM_L * 0.3;
+  var legSwing = Math.sin(u_anim * Math.PI * 2 + Math.PI) * SF_LEG_L * 0.2;
+
+  switch (pose) {
+    case 'walk':
+      g += line(x, armY, x - SF_ARM_L * 0.8 + armSwing, armY + SF_ARM_L * 0.6, col, sw); // Left arm
+      g += line(x, armY, x + SF_ARM_L * 0.8 + armSwing, armY + SF_ARM_L * 0.6, col, sw); // Right arm
+      g += line(x, legY, x - SF_HEAD_R * 0.4 - legSwing, y, col, sw); // Left leg
+      g += line(x, legY, x + SF_HEAD_R * 0.4 + legSwing, y, col, sw); // Right leg
+      break;
+    case 'walk_left':
+      g += line(x, armY, x - SF_ARM_L * 0.8 - armSwing, armY + SF_ARM_L * 0.6, col, sw); // Left arm
+      g += line(x, armY, x + SF_ARM_L * 0.8 - armSwing, armY + SF_ARM_L * 0.6, col, sw); // Right arm
+      g += line(x, legY, x - SF_HEAD_R * 0.4 + legSwing, y, col, sw); // Left leg
+      g += line(x, legY, x + SF_HEAD_R * 0.4 - legSwing, y, col, sw); // Right leg
+      break;
+    case 'shrug':
+      var shrugY = armY - SF_ARM_L * 0.2;
+      g += line(x, armY, x - SF_ARM_L * 0.6, shrugY, col, sw);
+      g += line(x, armY, x + SF_ARM_L * 0.6, shrugY, col, sw);
+      g += line(x, legY, x - SF_HEAD_R * 0.4, y, col, sw);
+      g += line(x, legY, x + SF_HEAD_R * 0.4, y, col, sw);
+      break;
+    case 'hold_slip': // arm forward, holding slip
+      g += line(x, armY, x - SF_ARM_L * 0.8, armY + SF_ARM_L * 0.6, col, sw); // Left arm (back)
+      g += line(x, armY, x + SF_ARM_L * 0.8, armY + SF_ARM_L * 0.1, col, sw); // Right arm (forward)
+      g += line(x, legY, x - SF_HEAD_R * 0.4, y, col, sw);
+      g += line(x, legY, x + SF_HEAD_R * 0.4, y, col, sw);
+      break;
+    case 'hold_id': // arm forward, holding ID
+      g += line(x, armY, x - SF_ARM_L * 0.8, armY + SF_ARM_L * 0.6, col, sw); // Left arm (back)
+      g += line(x, armY, x + SF_ARM_L * 0.8, armY + SF_ARM_L * 0.1, col, sw); // Right arm (forward)
+      g += line(x, legY, x - SF_HEAD_R * 0.4, y, col, sw);
+      g += line(x, legY, x + SF_HEAD_R * 0.4, y, col, sw);
+      break;
+    case 'stand':
+    default:
+      g += line(x, armY, x - SF_ARM_L * 0.6, armY + SF_ARM_L * 0.6, col, sw);
+      g += line(x, armY, x + SF_ARM_L * 0.6, armY + SF_ARM_L * 0.6, col, sw);
+      g += line(x, legY, x - SF_HEAD_R * 0.4, y, col, sw);
+      g += line(x, legY, x + SF_HEAD_R * 0.4, y, col, sw);
+      break;
+  }
+
+  g += '</g>';
+  return g;
+}
+
+// Teller: x, y is the center of the head. Body is hidden by counter.
+function teller(x, y, col, pose, op, u_anim) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var sw = SF_STROKE;
+
+  var currentHeadY = y;
+  if (pose === 'nod') {
+    currentHeadY = y + SF_HEAD_R * 0.2 * Math.sin(u_anim * Math.PI * 2);
+  }
+  g += dot(x, currentHeadY, SF_HEAD_R, col); // Head
+
+  var armY = y + SF_HEAD_R + SF_BODY_L * 0.2; // Shoulder height (relative to head center)
+
+  switch (pose) {
+    case 'gesture': // Hand out gesture
+      var gestureX = x - SF_ARM_L * 0.8 * (1 - u_anim);
+      var gestureY = armY + SF_ARM_L * 0.1 * (1 - u_anim);
+      g += line(x, armY, gestureX, gestureY, col, sw);
+      g += line(x, armY, x + SF_ARM_L * 0.6, armY + SF_ARM_L * 0.6, col, sw); // Other arm
+      break;
+    case 'nod': // Simple nod
+      g += line(x, armY, x - SF_ARM_L * 0.6, armY + SF_ARM_L * 0.6, col, sw);
+      g += line(x, armY, x + SF_ARM_L * 0.6, armY + SF_ARM_L * 0.6, col, sw);
+      break;
+    case 'stand':
+    default:
+      g += line(x, armY, x - SF_ARM_L * 0.6, armY + SF_ARM_L * 0.6, col, sw);
+      g += line(x, armY, x + SF_ARM_L * 0.6, armY + SF_ARM_L * 0.6, col, sw);
+      break;
+  }
+  g += '</g>';
+  return g;
+}
+
+function bankCounter(y, col, sw, op) {
+  return rrect(CX, y, COUNTER_W, COUNTER_H, 10, col, op);
+}
+
+function transactionSlip(x, y, w, h, col, op) {
+  return rrect(x, y, w, h, 6, col, op);
+}
+
+function idCard(x, y, w, h, col, op) {
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 8, col, 1);
+  g += rrect(x, y + h * 0.1, ID_INNER_W, ID_INNER_H, 4, col, 0.6);
+  g += line(x - w * 0.3, y + h * 0.3, x + w * 0.3, y + h * 0.3, col, 3, 0.6);
+  g += line(x - w * 0.3, y + h * 0.45, x + w * 0.3, y + h * 0.45, col, 3, 0.6);
+  g += '</g>';
+  return g;
+}
+
+function questionMark(x, y, size, col, op) {
+  var sw = SF_STROKE;
+  var d = "M " + x + " " + (y - size * 0.5) +
+          " A " + (size * 0.3) + " " + (size * 0.3) + " 0 0 1 " + (x + size * 0.3) + " " + (y - size * 0.2) +
+          " L " + (x + size * 0.1) + " " + (y + size * 0.1) +
+          " M " + x + " " + (y + size * 0.3);
+  return pathTag(d, col, sw, op) + dot(x, y + size * 0.45, sw * 0.7, col, op);
+}
+
+function kycGlyph(x, y, size, col, op) {
+  var g = '<g opacity="' + op + '">';
+  var blockH = size * 0.25;
+  var blockW = size * 0.8;
+  var gap = size * 0.05;
+  g += rrect(x, y - blockH - gap, blockW, blockH, 6, col, 0.9);
+  g += rrect(x, y, blockW, blockH, 6, col, 0.9);
+  g += rrect(x, y + blockH + gap, blockW, blockH, 6, col, 0.9);
+  g += '</g>';
+  return g;
+}
+
+function blueGrid(op, u) {
+  var g = '';
+  var sw = 4;
+  var cell = 180;
+  var phase = u * 0.5; // subtle motion
+  for (var i = -2; i < W / cell + 2; i++) {
+    var x = i * cell + (phase * cell);
+    g += line(x, 0, x, H, BLUE, sw, op * 0.15);
+  }
+  for (var j = -2; j < H / cell + 2; j++) {
+    var y = j * cell + (phase * cell);
+    g += line(0, y, W, y, BLUE, sw, op * 0.15);
+  }
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var cameraPanX = lerp(0, -30, smooth(u));
+  s += '<g ' + camera(1.0, cameraPanX, 0) + '>';
+
+  // Bank Counter appears
+  var counterOp = ramp(u, 0.2, 0.6);
+  s += bankCounter(COUNTER_Y, WHITE, 8, counterOp);
+
+  // YOU walks into frame
+  var youX = lerp(YOU_X_START, YOU_X_COUNTER, easeOut(ramp(u, 0.0, 0.7)));
+  var youPose = (u < 0.7) ? 'walk' : 'stand';
+  s += stickFigure(youX, YOU_Y, AMBER, youPose, 1, u * 2);
+
+  // Transaction slip appears in YOU's hand
+  var slipOp = ramp(u, 0.5, 0.9);
+  var slipX = YOU_X_COUNTER + 40;
+  var slipY = COUNTER_Y - 20;
+  if (u > 0.7) { // Only show slip when YOU is at counter
+    s += transactionSlip(slipX, slipY, SLIP_W, SLIP_H, WHITE, slipOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, -30, 0) + '>'; // Keep camera slightly panned
+
+  s += bankCounter(COUNTER_Y, WHITE, 8, 1);
+  s += stickFigure(YOU_X_COUNTER, YOU_Y, AMBER, 'stand', 1);
+
+  // Teller appears
+  var tellerOp = ramp(u, 0.0, 0.3);
+  var tellerPose = 'stand';
+  if (u > 0.6) tellerPose = 'gesture';
+  s += teller(TELLER_X, TELLER_HEAD_Y, WHITE, tellerPose, tellerOp, ramp(u, 0.6, 0.9));
+
+  // YOU slides transaction slip forward
+  var slipX_current = lerp(SLIP_X_YOU, SLIP_X_TELLER, easeOut(ramp(u, 0.2, 0.6)));
+  s += transactionSlip(slipX_current, SLIP_Y, SLIP_W, SLIP_H, WHITE, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, -30, 0) + '>';
+
+  s += bankCounter(COUNTER_Y, WHITE, 8, 1);
+  s += teller(TELLER_X, TELLER_HEAD_Y, WHITE, 'stand', 1); // Teller remains static
+  s += transactionSlip(SLIP_X_TELLER, SLIP_Y, SLIP_W, SLIP_H, WHITE, 1); // Slip paused
+
+  // YOU shrugs
+  var youPose = (u < 0.2 || u > 0.8) ? 'stand' : 'shrug';
+  s += stickFigure(YOU_X_COUNTER, YOU_Y, AMBER, youPose, 1);
+
+  // Thought bubble appears and pulsates
+  var qMarkOp = ramp(u, 0.0, 0.3) * (1 - ramp(u, 0.8, 1.0));
+  var qMarkPulse = 1 + Math.sin(u * Math.PI * 10) * 0.05 * pulse(u, 0.5, 0.4);
+  var qMarkSize = 80 * qMarkPulse;
+  s += questionMark(YOU_X_COUNTER, YOU_Y - SF_H - 80, qMarkSize, CORAL, qMarkOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var cameraScale = lerp(1.0, 0.8, smooth(ramp(u, 0.0, 0.4)));
+  var cameraPanY = lerp(0, -100, smooth(ramp(u, 0.0, 0.4)));
+  s += '<g ' + camera(cameraScale, -30, cameraPanY) + '>';
+
+  // Coral red thought bubble dissipates
+  var qMarkOp = 1 - ramp(u, 0.0, 0.2);
+  s += questionMark(YOU_X_COUNTER, YOU_Y - SF_H - 80, 80, CORAL, qMarkOp);
+
+  // Blue grid appears
+  var gridOp = ramp(u, 0.2, 0.6);
+  s += blueGrid(gridOp, u);
+
+  s += bankCounter(COUNTER_Y, WHITE, 8, 1);
+  s += teller(TELLER_X, TELLER_HEAD_Y, WHITE, 'stand', 1);
+  s += stickFigure(YOU_X_COUNTER, YOU_Y, AMBER, 'stand', 1);
+  s += transactionSlip(SLIP_X_TELLER, SLIP_Y, SLIP_W, SLIP_H, WHITE, 1);
+
+  // KYC glyph appears
+  var kycOp = ramp(u, 0.5, 0.9);
+  s += kycGlyph(CX, CY - 200, KYC_SIZE, BLUE, kycOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  s += '<g ' + camera(0.8, -30, -100) + '>'; // Keep previous camera state
+
+  s += blueGrid(1, u); // Grid is fully present
+
+  s += bankCounter(COUNTER_Y, WHITE, 8, 1);
+
+  // Teller nods
+  var tellerPose = (u > 0.6) ? 'nod' : 'stand';
+  s += teller(TELLER_X, TELLER_HEAD_Y, WHITE, tellerPose, 1, ramp(u, 0.6, 0.9));
+
+  // YOU produces ID card
+  var youPose = (u < 0.2 || u > 0.8) ? 'stand' : 'hold_id';
+  s += stickFigure(YOU_X_COUNTER, YOU_Y, AMBER, youPose, 1);
+
+  // ID card animation
+  var idCardOp = ramp(u, 0.0, 0.2);
+  var idCardX_start = YOU_X_COUNTER + 40;
+  var idCardY_start = COUNTER_Y - 20;
+
+  var idAnimU = ramp(u, 0.2, 0.7);
+  var idMoveX = lerp(idCardX_start, CX, easeOut(idAnimU));
+  var idMoveY = lerp(idCardY_start, CY - 200, easeOut(idAnimU));
+  
+  s += idCard(idMoveX, idMoveY, ID_W, ID_H, WHITE, idCardOp);
+  // Blue flash effect
+  if (idAnimU > 0.1 && idAnimU < 0.9) {
+    var idFlashOp = Math.sin(idAnimU * Math.PI * 3) * 0.5 + 0.5; // Pulsating flash
+    s += rrect(idMoveX, idMoveY, ID_W * 1.2, ID_H * 1.2, 10, BLUE, idFlashOp * 0.3);
+  }
+
+  // Transaction slip completed (dot)
+  var slipOpacity = 1 - ramp(u, 0.7, 0.9);
+  s += transactionSlip(SLIP_X_TELLER, SLIP_Y, SLIP_W, SLIP_H, WHITE, slipOpacity);
+  var completedDotOp = ramp(u, 0.8, 1.0);
+  s += dot(SLIP_X_TELLER, SLIP_Y, 15, WHITE, completedDotOp);
+
+  s += kycGlyph(CX, CY - 200, KYC_SIZE, BLUE, 1); // KYC remains visible
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var cameraScale = lerp(0.8, 1.0, smooth(u)); // Zoom back in
+  var cameraPanY = lerp(-100, 0, smooth(u));
+  s += '<g ' + camera(cameraScale, 0, cameraPanY) + '>';
+
+  s += blueGrid(1, u); // Grid persists
+
+  s += bankCounter(COUNTER_Y, WHITE, 8, 1);
+  s += teller(TELLER_X, TELLER_HEAD_Y, WHITE, 'stand', 1); // Teller static
+
+  // YOU walks off frame left
+  var youX = lerp(YOU_X_COUNTER, -100, easeIn(ramp(u, 0.0, 0.8)));
+  var youPose = (u < 0.8) ? 'walk_left' : 'stand'; // walk off, then disappear
+  s += stickFigure(youX, YOU_Y, AMBER, youPose, 1, u * 2);
+
+  // ID card icon floats next to head
+  var idIconX = lerp(YOU_X_COUNTER - SF_HEAD_R * 2, youX - SF_HEAD_R * 2, easeIn(ramp(u, 0.0, 0.8)));
+  var idIconY = YOU_Y - SF_H - 40;
+  var idIconOp = ramp(u, 0.1, 0.4);
+  s += idCard(idIconX, idIconY, ID_W * 0.6, ID_H * 0.6, WHITE, idIconOp);
+
+  s += dot(SLIP_X_TELLER, SLIP_Y, 15, WHITE, 1); // Completed slip remains
+
+  s += kycGlyph(CX, CY - 200, KYC_SIZE, BLUE, 1); // KYC remains visible
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

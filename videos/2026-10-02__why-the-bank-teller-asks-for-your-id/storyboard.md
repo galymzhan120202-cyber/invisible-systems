@@ -1,0 +1,22 @@
+Why the Bank Teller Asks for Your ID
+
+**System:** Identity verification protocols and regulatory compliance
+**Narrator:** Bright, energetic adult female (en-US-AvaNeural/JennyNeural)
+**Palette:** `signal blue` (system/rules), `warm amber` (you/your desires), `coral red` (naive model/friction)
+**Hero Element:** An amber stick-figure "YOU" and a simple "ID card" icon (rectangle with smaller inner rectangle).
+
+| # | Time | Story beat | Stick-figure scene | Motion / camera / transition | English VO | SFX |
+|---|---|---|---|---|---|---|
+| 1 | 0–10s | **YOU + NEED**: Simple bank task. | Black canvas. An amber stick-figure "YOU" walks into frame right, carrying a small, white transaction slip. A simple bank counter (white line) appears. | YOU walks right, camera pans slightly right to reveal bank counter. YOU approaches counter. Transaction slip appears in YOU's hand. | You just need to withdraw some cash, or deposit a check. A quick, simple task, right? You're a familiar face, a regular customer, expecting efficiency. | `whoosh-fast.mp3` (0.6s)<br>`click-soft.mp3` (3.2s) |
+| 2 | 10–20s | **GO**: Unexpected ID request. | YOU stands at the bank counter. A white stick-figure teller appears behind the counter. YOU slides the transaction slip forward. Teller gestures with an open hand. | YOU slides slip across counter. Teller appears, then makes a clear "hand out" gesture. Camera focuses on the gesture. | You confidently slide your transaction slip across the counter, expecting a smooth exchange. But then, the teller asks: "May I see your ID?" | `drop-thud.mp3` (11.0s)<br>`focus.mp3` (16.5s) |
+| 3 | 20–30s | **SEARCH**: Personal confusion/annoyance. | YOU (amber) has a large coral red question mark thought bubble above head. Teller remains static. Transaction slip is paused on counter. | Thought bubble (coral red question mark) appears above YOU, pulsating slightly. YOU shrugs, turning slightly away from the teller. | Your mind races. Is there a problem with your account? Did you do something wrong? It feels personal, like an accusation, or just an unnecessary delay. | `whoosh.mp3` (21.0s)<br>`stack-collapse.mp3` (25.5s) |
+| 4 | 30–40s | **FIND**: The invisible system revealed. | Background transforms into a grid of signal blue lines representing regulations. A central signal blue "KYC" icon appears. The coral red thought bubble dissipates. | Camera zooms out to show the bank counter as part of a larger blue grid. Coral red thought bubble shrinks and vanishes. "KYC" (simple three-letter icon) appears, highlighted in signal blue. | But it's not about *you*. It's about a vast, invisible network of financial regulations, like "Know Your Customer" rules, fighting money laundering and fraud. | `transform.mp3` (32.0s)<br>`focus.mp3` (36.8s) |
+| 5 | 40–50s | **TAKE**: The cost of security. | YOU (amber) produces an ID card (white rectangle with smaller inner rectangle). The ID card moves into the blue grid and briefly flashes with signal blue. The transaction slip is completed. | YOU pulls ID card from pocket. ID card moves towards the blue grid, briefly enveloped in signal blue light, then returns. Teller nods. Transaction slip transforms to show "completed" status. | This small delay, this tiny moment of friction, is the price we all pay for a secure financial system. It protects accounts and fights illicit activities globally. | `click-soft.mp3` (41.5s)<br>`complete-done.mp3` (46.0s) |
+| 6 | 50–60s | **RETURN + CHANGE**: Wiser perspective. | YOU (amber) walks away from the counter, now with a clear, small white ID card icon floating next to their head. The blue grid remains. | YOU turns and walks off frame left. The ID card icon stays visible, now a symbol of understanding. Blue grid persists as a background element. | So next time the teller asks for your ID, you won't just see a question. You'll see the quiet gears of a system working to keep everyone, including you, safe. | `whoosh-fast.mp3` (52.0s)<br>`focus.mp3` (57.5s) |
+
+**Continuity map:**
+- Scene 1 and 2: YOU and the bank counter are continuous.
+- Scene 2 and 3: YOU, teller, and transaction slip are continuous.
+- Scene 3 and 4: YOU, teller, counter are continuous; the coral red thought bubble dissipates as the signal blue grid appears.
+- Scene 4 and 5: YOU, teller, and the signal blue grid are continuous; the ID card becomes central.
+- Scene 5 and 6: YOU (now with the ID icon) and the signal blue grid are continuous as YOU exits.
