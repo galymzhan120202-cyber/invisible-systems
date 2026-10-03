@@ -1,0 +1,15 @@
+{
+  "id": "why-your-search-history-changes-results",
+  "slug": "2026-10-03__why-your-search-history-changes-results",
+  "title_working": "Why Your Search History Changes Your Search Results",
+  "system": "personalized search algorithms and filter bubbles",
+  "cluster": "platforms-and-algorithms",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-10-03T11:45:27+00:00",
+  "produced_at": "2026-10-03T11:52:22+00:00",
+  "verify": "PASS",
+  "takeaway": "Search engines personalize results based on your past behavior, creating a filter bubble that shapes your view of information.",
+  "animation_source": "llm"
+}

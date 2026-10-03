@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You've just made a perfect meal. It smells incredible and looks delicious. You're starving. Your only goal? Get it into your mouth, right now.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "You take a bite, full of anticipation. Ouch! Too hot. Your tongue's on fire, and now you have to wait. But why does food take SO long to cool?",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "You might think it's just about heat escaping. But it's more complex. Food must pass quickly through a specific 'danger zone' where bacteria multiply rapidly.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "Heat leaves food via convection and evaporation. But the critical part is getting from piping hot, past the 'danger zone' between 140 and 40 degrees Fahrenheit, fast.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "Leaving food out to slowly cool for hours isn't just annoying; it's a health risk. The longer it stays warm, the more dangerous it becomes.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "So, when you see those wisps of steam, they're not just heat, but a race against time. Patience isn't just polite; it's smart science protecting your stomach.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

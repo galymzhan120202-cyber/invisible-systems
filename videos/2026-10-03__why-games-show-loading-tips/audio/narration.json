@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You just finished a tough boss fight or nailed a perfect combo. That rush is exhilarating! All you want is to dive back into the action, no delays.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "But then, the inevitable happens. The screen fades, a progress bar appears, and the game enters a loading sequence. It's an unavoidable pause, pulling you out of the flow.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "Your mind, accustomed to constant stimulation, starts to wander. You glance at your phone, tap your foot, or just stare blankly. Why does this wait feel so long?",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "Suddenly, a small, helpful tip appears on screen: 'Did you know you can sneak past patrols?' Your eyes snap back. Your brain now has a new task.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "The system isn't making the loading faster. It's giving your mind something to do, preventing boredom and frustration. This mental engagement makes the wait *feel* shorter.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "You're back in the game, refreshed and more informed. The loading screen wasn't just a wait; it was a carefully designed cognitive intervention.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

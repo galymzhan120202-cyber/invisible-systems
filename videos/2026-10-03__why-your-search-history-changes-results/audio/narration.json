@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You search online for answers, expecting a clear, unbiased overview. You want to understand a complex topic from all angles, getting the full picture.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "You click a few links, read articles, then search for related terms. You dive deeper, trusting the system to show you everything relevant.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "But soon, something feels off. Your search results look oddly familiar. Less diverse, more of the same information you just consumed.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "It's not hiding anything; it's the algorithm learning. The system tracks your clicks and engagement, building a profile of your interests.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "It optimizes for engagement, not balance, creating a 'filter bubble.' This echo chamber reinforces what you already clicked or believe.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "Next time you search, remember: your digital world is shaped just for you. Challenge it. Actively seek diverse views and burst your bubble.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

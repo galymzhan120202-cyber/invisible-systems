@@ -1,0 +1,15 @@
+{
+  "id": "why-games-show-loading-tips",
+  "slug": "2026-10-03__why-games-show-loading-tips",
+  "title_working": "Why Games Show Loading Screen Tips",
+  "system": "player engagement and cognitive load management during waits",
+  "cluster": "platforms-and-algorithms",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-10-03T11:40:14+00:00",
+  "produced_at": "2026-10-03T11:45:24+00:00",
+  "verify": "PASS",
+  "takeaway": "Game loading tips aren't just informative; they're a clever system to manage your perception of time and prevent boredom.",
+  "animation_source": "llm"
+}

@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Games Show Loading Screen Tips</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> System/Tips
+var AMBER = "#F2A93B";              // warm amber   -> Player/Desire
+var CORAL = "#FF5B5B";              // coral red    -> Frustration/Boredom
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- hero element constants ---------- */
+var PLAYER_X = CX, PLAYER_Y = BOT - 100;
+var SCREEN_W = 600, SCREEN_H = 800;
+var SCREEN_X = CX, SCREEN_Y = CY - 200;
+var INNER_SCREEN_W = SCREEN_W - 10;
+var INNER_SCREEN_H = SCREEN_H - 10;
+
+/* ---------- hero element builders ---------- */
+
+/* The amber stick-figure player with controller */
+function player(x, y, color, posture, controllerVisible, u, sceneU, auraOpacity) {
+  auraOpacity = auraOpacity || 0;
+  var g = '<g>';
+  var headY = y - 100, bodyY = y - 20;
+  var armAngle = 0, legAngle = 0;
+  var headTilt = 0, bodySlump = 0;
+  var gazeX = x, gazeY = headY - 10;
+  var controllerOp = 1;
+  var footTap = 0;
+  var smile = 0;
+  var nod = 0;
+
+  switch (posture) {
+    case 'focused':
+      armAngle = -30; legAngle = 5;
+      gazeY = headY - 20;
+      break;
+    case 'deflated':
+      armAngle = 10; legAngle = -10;
+      bodySlump = 10; headTilt = 10;
+      footTap = Math.sin(sceneU * Math.PI * 6) * 8; // Foot tapping animation
+      break;
+    case 'bored':
+      armAngle = 20; legAngle = -15;
+      bodySlump = 20; headTilt = 20;
+      gazeX = x + 30; // Looking away
+      break;
+    case 'frustrated':
+      armAngle = 25; legAngle = -18;
+      bodySlump = 25; headTilt = 25;
+      gazeX = x + 40;
+      break;
+    case 're-engaged':
+      armAngle = -10; legAngle = 0;
+      bodySlump = lerp(25, 0, smooth(sceneU)); // Straighten up
+      headTilt = lerp(25, 0, smooth(sceneU));
+      gazeX = x; gazeY = headY - 20;
+      break;
+    case 'reading':
+      armAngle = -15; legAngle = 0;
+      headTilt = -15; // Tilted to read
+      gazeY = headY - 10;
+      break;
+    case 'knowing':
+      armAngle = -5; legAngle = 5;
+      smile = 1;
+      nod = Math.sin(sceneU * Math.PI * 2) * 10 * ramp(sceneU, 0.6, 0.8); // Nod once
+      break;
+  }
+
+  // Head
+  g += dot(x, headY + headTilt + nod, 30, color);
+  // Body
+  g += rrect(x, bodyY + bodySlump + nod, 60, 100, 15, color);
+  // Arms
+  g += line(x - 30, bodyY - 30 + bodySlump + nod, x - 30 + Math.sin(armAngle * Math.PI / 180) * 40, bodyY + 20 + bodySlump + nod + Math.cos(armAngle * Math.PI / 180) * 40, color, 10);
+  g += line(x + 30, bodyY - 30 + bodySlump + nod, x + 30 + Math.sin(-armAngle * Math.PI / 180) * 40, bodyY + 20 + bodySlump + nod + Math.cos(-armAngle * Math.PI / 180) * 40, color, 10);
+  // Legs
+  g += line(x - 15, bodyY + 50 + bodySlump + nod, x - 15 + Math.sin(legAngle * Math.PI / 180) * 40, y + 50 + footTap + Math.cos(legAngle * Math.PI / 180) * 40, color, 10);
+  g += line(x + 15, bodyY + 50 + bodySlump + nod, x + 15 + Math.sin(-legAngle * Math.PI / 180) * 40, y + 50 + footTap + Math.cos(-legAngle * Math.PI / 180) * 40, color, 10);
+
+  // Gaze / Eyes
+  g += dot(x - 10, gazeY + headTilt + nod, 5, WHITE);
+  g += dot(x + 10, gazeY + headTilt + nod, 5, WHITE);
+  if (smile) {
+    g += pathTag("M " + (x - 10) + " " + (headY + 15 + headTilt + nod) + " Q " + x + " " + (headY + 25 + headTilt + nod) + " " + (x + 10) + " " + (headY + 15 + headTilt + nod), WHITE, 4);
+  }
+
+  // Controller
+  if (controllerVisible) {
+    g += rrect(x, y + 20, 100, 40, 15, color, controllerOp);
+    g += dot(x - 30, y + 20, 8, DIM, controllerOp); // Left button
+    g += dot(x + 30, y + 20, 8, DIM, controllerOp); // Right button
+  }
+
+  // Frustration aura (Scene 3)
+  if (auraOpacity > 0.05) {
+    g += ring(x, headY - 40, 60, CORAL, 8, auraOpacity);
+  }
+
+  g += '</g>';
+  return g;
+}
+
+/* Re-usable screen frame */
+function screenFrame(frameColor, screenOpacity) {
+  screenOpacity = (screenOpacity == null ? 1 : screenOpacity);
+  frameColor = frameColor || WHITE;
+  var s = '<g opacity="' + screenOpacity + '">';
+  s += rrectStroke(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, 30, frameColor, 10);
+  s += '<rect x="' + (SCREEN_X - SCREEN_W / 2 + 5) + '" y="' + (SCREEN_Y - SCREEN_H / 2 + 5) +
+       '" width="' + INNER_SCREEN_W + '" height="' + INNER_SCREEN_H + '" rx="25" fill="#000000"/>'; // Inner black
+  s += '</g>';
+  return s;
+}
+
+/* Wrapper for screen content to position it correctly */
+function screenContentWrapper(contentSVG) {
+  return '<g transform="translate(' + (SCREEN_X - SCREEN_W / 2 + 5) + ' ' + (SCREEN_Y - SCREEN_H / 2 + 5) + ')">' + contentSVG + '</g>';
+}
+
+/* Dynamic gameplay shapes for Scene 1 and 6 */
+function gameplayShapes(u, overlayOpacity) {
+  var g = '';
+  // Amber player attack
+  var attackX = lerp(INNER_SCREEN_W * 0.2, INNER_SCREEN_W * 0.8, Math.sin(u * Math.PI * 2) * 0.5 + 0.5);
+  var attackY = lerp(INNER_SCREEN_H * 0.8, INNER_SCREEN_H * 0.2, smooth(u * 2 % 1));
+  g += rrect(attackX, attackY, 80, 80, 15, AMBER, 0.9);
+  g += line(attackX - 60, attackY + 60, attackX - 20, attackY + 20, AMBER, 8, 0.7);
+  g += line(attackX + 60, attackY + 60, attackX + 20, attackY + 20, AMBER, 8, 0.7);
+
+  // Blue enemy
+  var enemyX = lerp(INNER_SCREEN_W * 0.8, INNER_SCREEN_W * 0.2, smooth(u * 2 % 1));
+  var enemyY = lerp(INNER_SCREEN_H * 0.2, INNER_SCREEN_H * 0.8, Math.sin(u * Math.PI * 2) * 0.5 + 0.5);
+  g += dot(enemyX, enemyY, 60, BLUE, 0.9);
+  g += ring(enemyX, enemyY, 80, BLUE, 8, 0.6);
+
+  // Background elements
+  for (var i = 0; i < 3; i++) {
+    var rx = rnd(i) * INNER_SCREEN_W, ry = rnd(i + 1) * INNER_SCREEN_H;
+    g += dot(rx, ry, 10 + rnd(i + 2) * 10, DIM, 0.3);
+  }
+
+  // Strategy overlay (Scene 6)
+  if (overlayOpacity > 0.01) {
+    var gridSpacing = 100;
+    for (var x = 0; x < INNER_SCREEN_W; x += gridSpacing) {
+      g += line(x, 0, x, INNER_SCREEN_H, BLUE, 2, overlayOpacity * 0.3);
+    }
+    for (var y = 0; y < INNER_SCREEN_H; y += gridSpacing) {
+      g += line(0, y, INNER_SCREEN_W, y, BLUE, 2, overlayOpacity * 0.3);
+    }
+    // Arrow pointing to enemy
+    var arrowX = enemyX, arrowY = enemyY - 100;
+    g += pathTag("M " + arrowX + " " + (arrowY + 50) + " L " + arrowX + " " + arrowY + " L " + (arrowX - 20) + " " + (arrowY + 20) + " M " + arrowX + " " + arrowY + " L " + (arrowX + 20) + " " + (arrowY + 20), BLUE, 10, overlayOpacity);
+  }
+
+  return g;
+}
+
+/* Coral red loading bar for Scene 2-5 */
+function loadingBarContent(u, fillAmount, color) {
+  var barH = 40;
+  var barY = INNER_SCREEN_H - barH / 2 - 20;
+  var barW = INNER_SCREEN_W * 0.8;
+  var barX = INNER_SCREEN_W / 2;
+  var currentFill = fillAmount * barW;
+
+  var g = '';
+  g += rrectStroke(barX, barY, barW, barH, 10, color, 6, 0.5);
+  g += '<rect x="' + (barX - barW / 2) + '" y="' + (barY - barH / 2) + '" width="' + currentFill +
+       '" height="' + barH + '" rx="10" fill="' + color + '"/>';
+  return g;
+}
+
+/* Abstract glyphs for tips on loading screen */
+function tipCard(x, y, w, h, color, opacity, type) {
+  var g = '';
+  g += rrect(x, y, w, h, 10, color, opacity * 0.8);
+  g += rrectStroke(x, y, w, h, 10, WHITE, 3, opacity);
+
+  // Abstract glyphs for tips
+  if (type === 'sneak') {
+    // Small stick figure sneaking
+    g += line(x - 20, y + 10, x - 10, y + 20, WHITE, 6, opacity); // Leg
+    g += line(x - 10, y + 20, x, y + 10, WHITE, 6, opacity); // Other leg
+    g += line(x - 15, y - 10, x + 5, y - 10, WHITE, 6, opacity); // Body
+    g += dot(x - 10, y - 25, 8, WHITE, opacity); // Head
+    g += line(x + 5, y - 10, x + 15, y, WHITE, 6, opacity); // Arm
+    // Target
+    g += ring(x + 30, y + 10, 15, WHITE, 4, opacity);
+    g += dot(x + 30, y + 10, 5, WHITE, opacity);
+  } else if (type === 'attack') {
+    // Sword/weapon icon
+    g += line(x - 20, y + 20, x + 20, y - 20, WHITE, 6, opacity);
+    g += line(x + 10, y - 10, x + 20, y - 20, WHITE, 6, opacity); // Blade tip
+    g += line(x - 25, y + 15, x - 15, y + 25, WHITE, 6, opacity); // Hilt
+  } else if (type === 'map') {
+    // Map icon (square with cross)
+    g += rrectStroke(x, y, 40, 40, 5, WHITE, 4, opacity);
+    g += line(x - 20, y, x + 20, y, WHITE, 4, opacity);
+    g += line(x, y - 20, x, y + 20, WHITE, 4, opacity);
+  }
+  return g;
+}
+
+/* Collection of tip cards for Scene 4-5 */
+function tipCardsContent(u, popFactor) {
+  var g = '';
+  var tipH = 100, tipW = 200;
+  var baseY = INNER_SCREEN_H - 100;
+  var gap = 140;
+
+  var tipTypes = ['sneak', 'attack', 'map'];
+
+  for (var i = 0; i < 3; i++) {
+    var x = INNER_SCREEN_W / 2 + (i - 1) * (tipW + 20);
+    var y = baseY - gap * i;
+    var popY = y - lerp(0, 30, popFactor); // Bounce effect
+    var op = popFactor; // Fade in
+
+    if (u > 0.5 && i === 0) { // Subtle shift/change for Scene 5
+      x += Math.sin(u * Math.PI * 2) * 5;
+    }
+
+    g += tipCard(x, popY, tipW, tipH, BLUE, op, tipTypes[i]);
+  }
+  return g;
+}
+
+/* Clock icon for thought bubble in Scene 3 */
+function clockIcon(x, y, r, opacity) {
+  var g = '';
+  g += ring(x, y, r, WHITE, 6, opacity);
+  g += line(x, y, x, y - r * 0.6, WHITE, 6, opacity); // Hour hand
+  g += line(x, y, x + r * 0.4, y + r * 0.4, WHITE, 6, opacity); // Minute hand
+  return g;
+}
+
+/* Thought bubble for Scene 3 */
+function thoughtBubble(x, y, content, opacity) {
+  var g = '';
+  // Bubble shape
+  g += dot(x, y, 60, WHITE, opacity * 0.9);
+  g += dot(x - 40, y + 60, 30, WHITE, opacity * 0.9);
+  g += dot(x + 40, y + 60, 30, WHITE, opacity * 0.9);
+  g += dot(x - 20, y + 90, 15, WHITE, opacity * 0.9);
+
+  if (content === 'clock') {
+    g += clockIcon(x, y, 30, opacity);
+  }
+  return g;
+}
+
+/* Connection line from tips to player for Scene 5 */
+function thoughtConnection(playerHeadX, playerHeadY, tipCenterX, tipCenterY, opacity) {
+  return line(tipCenterX, tipCenterY, playerHeadX, playerHeadY, BLUE, 8, opacity);
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.0, 1.06, smooth(u * 0.9));
+  var driftY = lerp(0, -50, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+  s += screenFrame(WHITE, 1);
+  s += screenContentWrapper(gameplayShapes(u, 0));
+  s += player(PLAYER_X, PLAYER_Y, AMBER, 'focused', true, u, u);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>'; // No camera movement in this scene
+  s += screenFrame(WHITE, 1);
+
+  // Gameplay fades out
+  var gameplayOpacity = 1 - ramp(u, 0.0, 0.2);
+  if (gameplayOpacity > 0.01) {
+    s += '<g opacity="' + gameplayOpacity + '">' + screenContentWrapper(gameplayShapes(u, 0)) + '</g>';
+  }
+
+  // Loading bar fades in and fills slowly
+  var loadingBarOpacity = ramp(u, 0.2, 0.8);
+  var loadingFill = ramp(u, 0.2, 0.8) * 0.1; // Slow fill
+  if (loadingBarOpacity > 0.01) {
+    s += '<g opacity="' + loadingBarOpacity + '">' + screenContentWrapper(loadingBarContent(u, loadingFill, CORAL)) + '</g>';
+  }
+
+  // Player deflates, taps foot
+  s += player(PLAYER_X, PLAYER_Y, AMBER, 'deflated', true, u, u);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += screenFrame(WHITE, 1);
+
+  // Loading bar continues to fill very slowly
+  var loadingFill = 0.1 + ramp(u, 0.0, 1.0) * 0.05;
+  s += screenContentWrapper(loadingBarContent(u, loadingFill, CORAL));
+
+  // Player looks bored, then frustrated with a coral aura
+  var auraOpacity = pulse(u, 0.6, 0.1) * 0.8; // Frustration aura pulses
+  var playerPosture = (u < 0.5) ? 'bored' : 'frustrated';
+  s += player(PLAYER_X, PLAYER_Y, AMBER, playerPosture, true, u, u, auraOpacity);
+
+  // Thought bubble with clock icon appears
+  var thoughtBubbleOp = ramp(u, 0.4, 0.7);
+  if (thoughtBubbleOp > 0.01) {
+    s += thoughtBubble(PLAYER_X + 100, PLAYER_Y - 200, 'clock', thoughtBubbleOp);
+  }
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += screenFrame(WHITE, 1);
+
+  // Loading bar continues to fill
+  var loadingFill = 0.15 + ramp(u, 0.0, 1.0) * 0.2;
+  s += screenContentWrapper(loadingBarContent(u, loadingFill, CORAL));
+
+  // Tip cards pop up
+  var tipPop = smooth(ramp(u, 0.0, 0.3));
+  if (tipPop > 0.01) {
+    s += screenContentWrapper(tipCardsContent(u, tipPop));
+  }
+
+  // Player re-engages
+  s += player(PLAYER_X, PLAYER_Y, AMBER, 're-engaged', true, u, u);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += screenFrame(WHITE, 1);
+
+  // Loading bar continues to fill
+  var loadingFill = 0.35 + ramp(u, 0.0, 1.0) * 0.4;
+  s += screenContentWrapper(loadingBarContent(u, loadingFill, CORAL));
+
+  // Tip cards are present and subtly animate
+  s += screenContentWrapper(tipCardsContent(u, 1)); // Fully visible tips
+
+  // Player is reading, head tilted in focus
+  s += player(PLAYER_X, PLAYER_Y, AMBER, 'reading', true, u, u);
+
+  // Blue "thought connection" line links tips to player's head
+  var connectionOp = ramp(u, 0.2, 0.6);
+  if (connectionOp > 0.01) {
+    // Approximate center of tips and player's head position
+    var tipCenterX = SCREEN_X;
+    var tipCenterY = SCREEN_Y + INNER_SCREEN_H / 2 - 200; // Roughly mid-point of tips
+    var playerHeadX = PLAYER_X;
+    var playerHeadY = PLAYER_Y - 100 - 15; // Player head with tilt
+    s += thoughtConnection(playerHeadX, playerHeadY, tipCenterX, tipCenterY, connectionOp);
+  }
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += screenFrame(WHITE, 1);
+
+  // Rapid wipe from loading screen to gameplay
+  var loadingToGameplayWipe = ramp(u, 0.0, 0.2);
+  var gameplayOpacity = loadingToGameplayWipe; // Gameplay fades in
+  var loadingContentOpacity = 1 - loadingToGameplayWipe; // Loading content fades out
+
+  // Gameplay with strategy overlay
+  var strategyOverlayOp = ramp(u, 0.4, 0.8);
+  if (gameplayOpacity > 0.01) {
+    s += '<g opacity="' + gameplayOpacity + '">' + screenContentWrapper(gameplayShapes(u, strategyOverlayOp)) + '</g>';
+  }
+
+  // Loading bar and tips fade out
+  if (loadingContentOpacity > 0.01) {
+    var finalLoadingFill = 0.75; // Last known fill amount
+    s += '<g opacity="' + loadingContentOpacity + '">' + screenContentWrapper(loadingBarContent(u, finalLoadingFill, CORAL)) + '</g>';
+    s += '<g opacity="' + loadingContentOpacity + '">' + screenContentWrapper(tipCardsContent(u, 1)) + '</g>';
+  }
+
+  // Player is back to playing with a slight, knowing nod
+  s += player(PLAYER_X, PLAYER_Y, AMBER, 'knowing', true, u, u);
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
