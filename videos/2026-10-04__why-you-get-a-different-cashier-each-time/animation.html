@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why You Get a Different Cashier Each Time</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / the wave
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want
+var CORAL = "#FF5B5B";              // coral red    -> the naive model / false signal
+
+var DUR = 60;
+window.__duration = DUR;
+
+// Scene specific constants
+var CHK_W = 600;                    // Checkout counter width
+var CHK_H = 100;                    // Checkout counter height
+var CHK_Y = BOT - 200;              // Checkout counter Y position (center)
+var CHK_SCAN_W = 120;               // Scanner pad width
+var CHK_SCAN_H = 60;                // Scanner pad height
+
+var CUST_H = 220;                   // Customer stick figure height
+var CASH_H = 200;                   // Cashier stick figure height
+var STROKE_W = 10;                  // General stroke width
+
+var CLOCK_R = 30;                   // Small clock radius
+var CLOCK_X = W - 100;              // Small clock X position
+var CLOCK_Y = TOP + 80;             // Small clock Y position
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* New helpers */
+function stickFigure(x, y, h, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = h * 0.15;
+  var bodyLen = h * 0.5;
+  var armLen = h * 0.3;
+  var legLen = h * 0.35;
+  var sw = STROKE_W * 0.8;
+
+  // Head
+  g += dot(x, y - h + headR, headR, col);
+  // Body
+  g += line(x, y - h + headR * 2, x, y - h + headR * 2 + bodyLen, col, sw);
+
+  var legStartX = x, legStartY = y - h + headR * 2 + bodyLen;
+  var armStartX = x, armStartY = y - h + headR * 2 + bodyLen * 0.2; // Shoulder
+
+  switch (pose) {
+    case 'scanning':
+      // Left arm (from figure's perspective) raised
+      g += line(armStartX, armStartY, armStartX - armLen * 0.6, armStartY + armLen * 0.2, col, sw);
+      g += line(armStartX - armLen * 0.6, armStartY + armLen * 0.2, armStartX - armLen * 0.9, armStartY - armLen * 0.2, col, sw);
+      // Right arm down
+      g += line(armStartX, armStartY, armStartX + armLen * 0.3, armStartY + armLen * 0.8, col, sw);
+      // Legs
+      g += line(legStartX, legStartY, legStartX - legLen * 0.3, legStartY + legLen, col, sw);
+      g += line(legStartX, legStartY, legStartX + legLen * 0.3, legStartY + legLen, col, sw);
+      break;
+    case 'pondering':
+      // Left arm bent, hand near head
+      g += line(armStartX, armStartY, armStartX - armLen * 0.4, armStartY + armLen * 0.2, col, sw);
+      g += line(armStartX - armLen * 0.4, armStartY + armLen * 0.2, armStartX - armLen * 0.6, y - h + headR * 2 - headR * 0.5, col, sw); // Hand near head
+      // Right arm down
+      g += line(armStartX, armStartY, armStartX + armLen * 0.3, armStartY + armLen * 0.8, col, sw);
+      // Legs
+      g += line(legStartX, legStartY, legStartX - legLen * 0.3, legStartY + legLen, col, sw);
+      g += line(legStartX, legStartY, legStartX + legLen * 0.3, legStartY + legLen, col, sw);
+      break;
+    case 'bored':
+      // Both arms slumped
+      g += line(armStartX, armStartY, armStartX - armLen * 0.4, armStartY + armLen * 0.8, col, sw);
+      g += line(armStartX, armStartY, armStartX + armLen * 0.4, armStartY + armLen * 0.8, col, sw);
+      // Legs
+      g += line(legStartX, legStartY, legStartX - legLen * 0.3, legStartY + legLen, col, sw);
+      g += line(legStartX, legStartY, legStartX + legLen * 0.3, legStartY + legLen, col, sw);
+      break;
+    case 'walking':
+      // Legs bent, arms swinging
+      g += line(legStartX - legLen * 0.2, legStartY, legStartX - legLen * 0.5, legStartY + legLen * 0.8, col, sw); // left leg bent
+      g += line(legStartX + legLen * 0.2, legStartY, legStartX + legLen * 0.1, legStartY + legLen, col, sw); // right leg straighter
+      g += line(armStartX, armStartY, armStartX - armLen * 0.4, armStartY + armLen * 0.6, col, sw); // left arm back
+      g += line(armStartX, armStartY, armStartX + armLen * 0.4, armStartY + armLen * 0.2, col, sw); // right arm forward
+      break;
+    case 'standing':
+    default:
+      // Arms down
+      g += line(armStartX, armStartY, armStartX - armLen * 0.3, armStartY + armLen * 0.8, col, sw);
+      g += line(armStartX, armStartY, armStartX + armLen * 0.3, armStartY + armLen * 0.8, col, sw);
+      // Legs
+      g += line(legStartX, legStartY, legStartX - legLen * 0.3, legStartY + legLen, col, sw);
+      g += line(legStartX, legStartY, legStartX + legLen * 0.3, legStartY + legLen, col, sw);
+      break;
+  }
+
+  g += '</g>';
+  return g;
+}
+
+function checkoutCounter(x, y, w, h, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 12, col, 1); // Main counter body
+  // Scanner pad
+  g += rrect(x + w * 0.25, y - h * 0.3, CHK_SCAN_W, CHK_SCAN_H, 8, col, 1);
+  g += '</g>';
+  return g;
+}
+
+function clockIcon(x, y, r, u, col, op, glow) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, r, col, STROKE_W * 0.7, 1);
+
+  // Hour hand (shorter, thicker)
+  var hourAngle = (u * 2 * Math.PI / 12) - Math.PI/2; // Base for 12 o'clock, then advance
+  g += line(x, y, x + r * 0.4 * Math.cos(hourAngle), y + r * 0.4 * Math.sin(hourAngle), col, STROKE_W * 0.5);
+  // Minute hand (longer, thinner)
+  var minuteAngle = (u * 2 * Math.PI) - Math.PI/2; // Full rotation
+  g += line(x, y, x + r * 0.7 * Math.cos(minuteAngle), y + r * 0.7 * Math.sin(minuteAngle), col, STROKE_W * 0.3);
+
+  if (glow) {
+    g += ring(x, y, r + 10, BLUE, STROKE_W * 0.5, 0.3);
+    g += ring(x, y, r + 20, BLUE, STROKE_W * 0.3, 0.2);
+  }
+  g += '</g>';
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var custX = lerp(W + 100, CX - 180, easeOut(ramp(u, 0.0, 0.4)));
+  var cashierX = CX + 180;
+  var counterOp = lerp(0, 1, ramp(u, 0.0, 0.2));
+
+  // Checkout counter
+  s += checkoutCounter(CX, CHK_Y, CHK_W, CHK_H, WHITE, STROKE_W, counterOp);
+
+  // Cashier
+  s += stickFigure(cashierX, CHK_Y - CHK_H / 2 - 10, CASH_H, WHITE, 'scanning', counterOp);
+
+  // Customer
+  s += stickFigure(custX, CHK_Y - CHK_H / 2 - 10, CUST_H, AMBER, 'walking', 1);
+
+  // Clock icon
+  var clockTick = u * 0.1; // Slow tick
+  s += clockIcon(CLOCK_X, CLOCK_Y, CLOCK_R, clockTick, WHITE, 1);
+
+  return s;
+}
+
+/* SCENE 2 (10-20s): GO */
+function scene2(u) {
+  var s = '';
+  var custSlide = easeOut(ramp(u, 0.0, 0.5));
+  var custX = lerp(CX - 180, CX + 300, custSlide); // Customer moves to the right
+  var cashier1Op = lerp(1, 0, ramp(u, 0.0, 0.3));
+  var cashier2Op = lerp(0, 1, ramp(u, 0.3, 0.6));
+
+  // First checkout counter (fading out)
+  s += checkoutCounter(CX - 180, CHK_Y, CHK_W, CHK_H, WHITE, STROKE_W, cashier1Op);
+  s += stickFigure(CX - 180, CHK_Y - CHK_H / 2 - 10, CASH_H, WHITE, 'standing', cashier1Op);
+
+  // Second checkout counter (fading in)
+  s += checkoutCounter(CX + 300, CHK_Y, CHK_W, CHK_H, WHITE, STROKE_W, cashier2Op);
+  s += stickFigure(CX + 300, CHK_Y - CHK_H / 2 - 10, CASH_H, WHITE, 'standing', cashier2Op);
+
+  // Customer
+  s += stickFigure(custX, CHK_Y - CHK_H / 2 - 10, CUST_H, AMBER, 'walking', 1);
+
+  // Clock icon (faster tick)
+  var clockTick = u * 0.5; // Faster tick
+  s += clockIcon(CLOCK_X, CLOCK_Y, CLOCK_R, clockTick, WHITE, 1);
+
+  return s;
+}
+
+/* SCENE 3 (20-30s): SEARCH */
+function scene3(u) {
+  var s = '';
+  var zoomScale = lerp(1.0, 1.15, smooth(ramp(u, 0.1, 0.5)));
+  var cameraShiftY = lerp(0, -50, smooth(ramp(u, 0.1, 0.5)));
+
+  s += '<g ' + camera(zoomScale, 0, cameraShiftY) + '>';
+
+  // Checkout counter (faint)
+  s += checkoutCounter(CX - 180, CHK_Y, CHK_W, CHK_H, WHITE, STROKE_W, 0.2);
+
+  // Cashier (bored)
+  s += stickFigure(CX - 180, CHK_Y - CHK_H / 2 - 10, CASH_H, WHITE, 'bored', 0.8);
+
+  // Customer (pondering)
+  s += stickFigure(CX - 400, CHK_Y - CHK_H / 2 - 10, CUST_H, AMBER, 'pondering', 1);
+
+  // Coral thought bubbles/streaks
+  var bubbleOp = ramp(u, 0.2, 0.8);
+  var bubbleCount = 8;
+  var bubbleRadius = lerp(10, 25, smooth(u));
+  for (var i = 0; i < bubbleCount; i++) {
+    var phase = (u * 0.5 + rnd(i)) % 1;
+    var x = CX - 400 + Math.sin(phase * Math.PI * 2) * lerp(60, 100, phase);
+    var y = TOP + 400 - phase * 200 + rnd(i + 10) * 50;
+    s += dot(x, y, bubbleRadius * (1 - phase), CORAL, bubbleOp * (1 - phase));
+  }
+
+  s += '</g>';
+
+  // Clock icon (slow tick)
+  var clockTick = u * 0.1;
+  s += clockIcon(CLOCK_X, CLOCK_Y, CLOCK_R, clockTick, WHITE, 1);
+
+  return s;
+}
+
+/* SCENE 4 (30-40s): FIND */
+function scene4(u) {
+  var s = '';
+  var clockExpand = smooth(ramp(u, 0.0, 0.4));
+  var finalClockR = lerp(CLOCK_R, 200, clockExpand);
+  var cameraScale = lerp(1.0, 0.8, ramp(u, 0.5, 0.8)); // Pull back slightly after zoom
+
+  // Clock transformation
+  var clockCenterX = lerp(CLOCK_X, CX, clockExpand);
+  var clockCenterY = lerp(CLOCK_Y, CY, clockExpand);
+
+  s += '<g ' + camera(cameraScale, 0, 0) + '>';
+
+  // Base clock
+  s += ring(clockCenterX, clockCenterY, finalClockR, BLUE, STROKE_W * 1.5, 1);
+
+  // Gears inside
+  var gearCount = 4;
+  var gearSpin = u * 0.8;
+  for (var i = 0; i < gearCount; i++) {
+    var angle = (i / gearCount * Math.PI * 2) + gearSpin * (i % 2 === 0 ? 1 : -1) * Math.PI * 2;
+    var gearR = finalClockR * 0.3;
+    var gearX = clockCenterX + finalClockR * 0.4 * Math.cos(angle);
+    var gearY = clockCenterY + finalClockR * 0.4 * Math.sin(angle);
+    s += ring(gearX, gearY, gearR, BLUE, STROKE_W * 0.8, 0.8);
+    // Gear teeth (simple dots)
+    for (var j = 0; j < 8; j++) {
+      var toothAngle = (j / 8 * Math.PI * 2) + gearSpin * (i % 2 === 0 ? 1 : -1) * Math.PI * 2;
+      s += dot(gearX + gearR * 1.1 * Math.cos(toothAngle), gearY + gearR * 1.1 * Math.sin(toothAngle), STROKE_W * 0.3, BLUE, 0.7);
+    }
+    // Staff figures (small dots moving around gears)
+    var staffCount = 2;
+    for (var k = 0; k < staffCount; k++) {
+      var staffPhase = (u * 0.7 + rnd(i * 10 + k)) % 1;
+      var staffAngle = staffPhase * Math.PI * 2;
+      var staffX = gearX + gearR * 0.7 * Math.cos(staffAngle);
+      var staffY = gearY + gearR * 0.7 * Math.sin(staffAngle);
+      s += dot(staffX, staffY, STROKE_W * 0.4, WHITE, 0.9);
+    }
+  }
+
+  s += '</g>';
+
+  return s;
+}
+
+/* SCENE 5 (40-50s): TAKE */
+function scene5(u) {
+  var s = '';
+  var gridOp = ramp(u, 0.0, 0.4);
+  var gridFlow = u * 0.5;
+
+  // Checkout counter
+  s += checkoutCounter(CX, CHK_Y, CHK_W, CHK_H, WHITE, STROKE_W, 1);
+
+  // Cashier (scanning motion, slightly more fluid)
+  s += stickFigure(CX + 180, CHK_Y - CHK_H / 2 - 10, CASH_H, WHITE, 'scanning', 1);
+
+  // Customer
+  s += stickFigure(CX - 180, CHK_Y - CHK_H / 2 - 10, CUST_H, AMBER, 'standing', 1);
+
+  // Blue grid lines / arrows
+  if (gridOp > 0.05) {
+    var gridSw = STROKE_W * 0.4;
+    var gridSize = 120;
+    var startY = TOP + 200;
+    var endY = BOT - 200;
+
+    for (var i = -2; i < 3; i++) { // Vertical lines
+      var x = CX + i * gridSize;
+      s += line(x, startY, x, endY, BLUE, gridSw, gridOp * 0.4);
+    }
+    for (var j = 0; j < 5; j++) { // Horizontal lines with flow
+      var y = startY + (j * gridSize + gridFlow * gridSize * 2) % (endY - startY);
+      s += line(CX - CHK_W / 2 - 100, y, CX + CHK_W / 2 + 100, y, BLUE, gridSw, gridOp * 0.6);
+      // Arrows (simple triangles)
+      var arrowSize = 20;
+      var arrowX = CX + CHK_W / 2 + 100 - arrowSize * 1.5;
+      var arrowY = y;
+      var d = "M " + arrowX + " " + (arrowY - arrowSize / 2) + " L " + (arrowX + arrowSize) + " " + arrowY + " L " + arrowX + " " + (arrowY + arrowSize / 2);
+      s += pathTag(d, BLUE, gridSw, gridOp * 0.8);
+    }
+  }
+
+  // Small clock icon (static)
+  s += clockIcon(CLOCK_X, CLOCK_Y, CLOCK_R, 0, WHITE, 0.3); // Faint, static
+
+  return s;
+}
+
+/* SCENE 6 (50-60s): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var custWalkX = lerp(CX - 180, W + 200, easeIn(ramp(u, 0.0, 0.6)));
+  var counterFade = lerp(1, 0, ramp(u, 0.0, 0.4));
+  var clockGlowOp = lerp(0, 1, ramp(u, 0.5, 0.9));
+
+  // Fading checkout counter
+  s += checkoutCounter(CX, CHK_Y, CHK_W, CHK_H, WHITE, STROKE_W, counterFade * 0.5);
+
+  // Customer walking away
+  s += stickFigure(custWalkX, CHK_Y - CHK_H / 2 - 10, CUST_H, AMBER, 'walking', 1);
+
+  // Small clock icon with blue glow
+  s += clockIcon(CLOCK_X, CLOCK_Y, CLOCK_R, 0, WHITE, 1, true); // Glow is true
+  s += ring(CLOCK_X, CLOCK_Y, CLOCK_R + 10, BLUE, STROKE_W * 0.5, clockGlowOp * 0.6);
+  s += ring(CLOCK_X, CLOCK_Y, CLOCK_R + 20, BLUE, STROKE_W * 0.3, clockGlowOp * 0.3);
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You're scrolling for deals. And there it is: that one thing you need, at an unbelievably low price. A perfect score!",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "You rush to the store, excited. But when you arrive, the shelf is empty. 'Sold out,' a small sign confirms.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "Again? Is it just bad luck, or do others always get there first? You wonder if it’s a glitch, or just poor planning.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "But it's not bad luck. That cheap item, the 'loss leader,' was just bait. Its job was to get you inside the store.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "Once inside, you're less likely to leave empty-handed. You'll pick up something similar, but pricier, to avoid a wasted trip.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "The store wins: they sold you something, just not the deal. Next time you see that amazing price, you'll know the real game.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

@@ -1,0 +1,15 @@
+{
+  "id": "why-you-get-a-different-cashier-each-time",
+  "slug": "2026-10-04__why-you-get-a-different-cashier-each-time",
+  "title_working": "Why You Get a Different Cashier Each Time",
+  "system": "staff scheduling and labor optimization in retail",
+  "cluster": "institutions-and-bureaucracy",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-10-04T12:14:15+00:00",
+  "produced_at": "2026-10-04T12:17:36+00:00",
+  "verify": "PASS",
+  "takeaway": "The dynamic rotation of cashiers is a result of sophisticated software optimizing store efficiency and minimizing costs.",
+  "animation_source": "llm"
+}

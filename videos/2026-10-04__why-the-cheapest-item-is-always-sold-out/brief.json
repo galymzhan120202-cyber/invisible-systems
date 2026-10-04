@@ -1,0 +1,15 @@
+{
+  "id": "why-the-cheapest-item-is-always-sold-out",
+  "slug": "2026-10-04__why-the-cheapest-item-is-always-sold-out",
+  "title_working": "Why the Cheapest Item is Always Sold Out",
+  "system": "loss leader pricing and limited stock strategies",
+  "cluster": "pricing-and-incentives",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "failed",
+  "created_at": "2026-10-04T12:17:39+00:00",
+  "produced_at": "2026-10-04T12:20:38+00:00",
+  "verify": "FAIL",
+  "takeaway": "The cheapest items are often bait to get you into the store, where you'll likely buy something more expensive.",
+  "animation_source": "llm"
+}
