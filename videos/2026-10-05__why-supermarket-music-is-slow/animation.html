@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Supermarket Music Is So Slow</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue  -> system / music's effect
+var AMBER = "#F2A93B";              // warm amber   -> your desires / impulse buys
+var CORAL = "#FF5B5B";              // coral red    -> naive attempt to rush
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+// Stick figure: x,y is the base of the feet. bodyHeight is from feet to shoulder.
+// Angles are in radians relative to vertical (0 = straight up/down).
+// headAngle: 0=straight, positive=right, negative=left.
+// armAngle: 0=down, positive=forward/up, negative=backward/down.
+// legAngle: 0=straight down, positive=forward, negative=backward.
+function stickFigure(x, y, scale, headAngle, leftArmAngle, rightArmAngle, leftLegAngle, rightLegAngle, bodyHeight, color, op) {
+  op = (op == null ? 1 : op);
+  var sw = 8 * scale;
+  var headR = 20 * scale;
+  var neckLen = 10 * scale;
+  var bodyLen = bodyHeight * scale;
+  var armLen = 50 * scale;
+  var legLen = 60 * scale;
+
+  var headX = x;
+  var headY = y - bodyLen - neckLen - headR;
+  var neckBaseY = y - bodyLen - neckLen;
+  var bodyTopX = x;
+  var bodyTopY = neckBaseY;
+  var bodyBotX = x;
+  var bodyBotY = y - legLen;
+
+  var g = '<g opacity="' + op + '">';
+  // Head
+  g += dot(headX + Math.sin(headAngle) * headR * 0.3, headY - Math.cos(headAngle) * headR * 0.3, headR, color);
+  // Neck
+  g += line(headX, headY + headR, bodyTopX, bodyTopY, color, sw);
+  // Body
+  g += line(bodyTopX, bodyTopY, bodyBotX, bodyBotY, color, sw);
+
+  // Arms
+  var armAttachX = bodyTopX;
+  var armAttachY = bodyTopY + bodyLen * 0.1;
+  var lArmEndX = armAttachX + Math.sin(leftArmAngle) * armLen;
+  var lArmEndY = armAttachY + Math.cos(leftArmAngle) * armLen;
+  g += line(armAttachX, armAttachY, lArmEndX, lArmEndY, color, sw);
+  var rArmEndX = armAttachX + Math.sin(rightArmAngle) * armLen;
+  var rArmEndY = armAttachY + Math.cos(rightArmAngle) * armLen;
+  g += line(armAttachX, armAttachY, rArmEndX, rArmEndY, color, sw);
+
+  // Legs
+  var lLegEndX = bodyBotX + Math.sin(leftLegAngle) * legLen;
+  var lLegEndY = bodyBotY + Math.cos(leftLegAngle) * legLen;
+  g += line(bodyBotX, bodyBotY, lLegEndX, lLegEndY, color, sw);
+  var rLegEndX = bodyBotX + Math.sin(rightLegAngle) * legLen;
+  var rLegEndY = bodyBotY + Math.cos(rightLegAngle) * legLen;
+  g += line(bodyBotX, bodyBotY, rLegEndX, rLegEndY, color, sw);
+
+  g += '</g>';
+  return g;
+}
+
+// Shopping cart: x,y is the center of the wheels.
+function shoppingCart(x, y, scale, fillLevel, color, op) {
+  op = (op == null ? 1 : op);
+  var sw = 8 * scale;
+  var cartW = 120 * scale;
+  var cartH = 80 * scale;
+  var handleH = 30 * scale;
+  var wheelR = 12 * scale;
+  var wheelSep = 80 * scale;
+
+  var g = '<g opacity="' + op + '">';
+  // Cart body
+  g += rrect(x, y - cartH / 2 - wheelR, cartW, cartH, 10 * scale, "none", sw, color);
+  // Handle
+  g += line(x + cartW / 2 - 10 * scale, y - cartH - wheelR + handleH,
+            x + cartW / 2 + 10 * scale, y - cartH - wheelR + handleH, color, sw);
+  // Wheels
+  g += dot(x - wheelSep / 2, y, wheelR, color);
+  g += dot(x + wheelSep / 2, y, wheelR, color);
+
+  // Fill items
+  if (fillLevel > 0.05) {
+    var itemH = 20 * scale;
+    var itemW = 30 * scale;
+    var maxItems = 4;
+    var currentItems = Math.min(maxItems, Math.ceil(fillLevel * maxItems));
+    for (var i = 0; i < currentItems; i++) {
+      var itemX = x + (rnd(i * 3) - 0.5) * (cartW * 0.6);
+      var itemY = y - wheelR - cartH * 0.8 + i * itemH * 0.6 + (rnd(i * 5) - 0.5) * itemH * 0.2;
+      g += rrect(itemX, itemY, itemW, itemH, 4 * scale, AMBER, 0.8 * op);
+    }
+  }
+
+  g += '</g>';
+  return g;
+}
+
+// Thought bubble with a clock glyph
+function thoughtBubble(x, y, r, clockPhase, op) {
+  op = (op == null ? 1 : op);
+  var sw = 5;
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, r, WHITE, sw);
+  // Clock hands
+  var hourAngle = Math.PI * 2 * (clockPhase / 12); // 12-hour clock
+  var minuteAngle = Math.PI * 2 * clockPhase; // 60-minute clock
+  g += line(x, y, x + Math.sin(minuteAngle) * r * 0.8, y - Math.cos(minuteAngle) * r * 0.8, WHITE, sw);
+  g += line(x, y, x + Math.sin(hourAngle) * r * 0.5, y - Math.cos(hourAngle) * r * 0.5, WHITE, sw);
+  g += dot(x, y, sw / 2, WHITE);
+  g += '</g>';
+  return g;
+}
+
+// Simple motion blur lines behind an object
+function motionBlur(x, y, length, count, col, op) {
+  var g = '';
+  var sw = 6;
+  for (var i = 0; i < count; i++) {
+    var startX = x + length * (i / count);
+    var endX = x + length * ((i + 0.5) / count);
+    g += line(startX, y, endX, y, col, sw, op * (1 - i / count));
+  }
+  return g;
+}
+
+// Pulsing wave effect (concentric circles)
+function pulsingWave(x, y, maxR, phase, col, sw, op) {
+  var g = '';
+  var numRings = 3;
+  for (var i = 0; i < numRings; i++) {
+    var p = (phase + i / numRings) % 1;
+    var r = lerp(0, maxR, easeOut(p));
+    var ringOp = op * (1 - p);
+    if (ringOp > 0.05) {
+      g += ring(x, y, r, col, sw, ringOp);
+    }
+  }
+  return g;
+}
+
+// Isometric grid for overhead view
+function aisleGrid(centerX, centerY, width, height, numRows, numCols, col, sw, op) {
+  var g = '';
+  var halfW = width / 2;
+  var halfH = height / 2;
+  var startX = centerX - halfW;
+  var endX = centerX + halfW;
+  var startY = centerY - halfH;
+  var endY = centerY + halfH;
+
+  // Horizontal lines (perspective)
+  for (var i = 0; i <= numRows; i++) {
+    var y = lerp(startY, endY, i / numRows);
+    var xOffset = lerp(0, halfW * 0.6, Math.abs(i / numRows - 0.5)); // Wider at ends, narrower in middle
+    g += line(startX - xOffset, y, endX + xOffset, y, col, sw, op);
+  }
+  // Vertical lines (perspective)
+  for (var j = 0; j <= numCols; j++) {
+    var x = lerp(startX, endX, j / numCols);
+    var yOffset = lerp(0, halfH * 0.3, Math.abs(j / numCols - 0.5)); // Wider at ends, narrower in middle
+    g += line(x, startY - yOffset, x, endY + yOffset, col, sw, op);
+  }
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+// Stick figure constants for common poses
+var STICK_H = 180; // overall height of the stick figure
+var CART_Y_OFFSET = 30; // how much lower the cart is than the stick figure's feet
+
+// Scene 1 (0-10s): YOU + NEED
+function scene1(u) {
+  var s = '';
+  var sfX = lerp(CX - 400, CX + 400, easeOut(u));
+  var sfY = BOT - 100; // Y position is relatively stable
+  var sfScale = lerp(0.8, 1.0, u); // zoom in slightly
+  var camScale = lerp(1.2, 1.0, smooth(u));
+  var camTx = lerp(-100, 0, smooth(u));
+  var camTy = lerp(200, 0, smooth(u));
+
+  s += '<g ' + camera(camScale, camTx, camTy) + '>';
+
+  // Motion blur behind cart and figure
+  var blurOp = (1 - u) * 0.8;
+  if (blurOp > 0.05) {
+    s += motionBlur(sfX - 100, sfY - CART_Y_OFFSET, -100, 3, WHITE, blurOp);
+    s += motionBlur(sfX - 10, sfY - STICK_H * sfScale * 0.5, -80, 4, WHITE, blurOp);
+  }
+
+  // Stick figure running animation
+  var runPhase = u * Math.PI * 6;
+  var headAngle = lerp(0.1, -0.05, Math.sin(runPhase * 0.5) * 0.5 + 0.5);
+  var lArm = Math.sin(runPhase) * 0.6 + 0.2;
+  var rArm = Math.sin(runPhase + Math.PI) * 0.6 + 0.2;
+  var lLeg = Math.sin(runPhase) * 0.8 + 0.1;
+  var rLeg = Math.sin(runPhase + Math.PI) * 0.8 + 0.1;
+  s += stickFigure(sfX + 40 * sfScale, sfY, sfScale, headAngle, lArm, rArm, lLeg, rLeg, STICK_H, WHITE);
+
+  // Shopping cart
+  s += shoppingCart(sfX - 60 * sfScale, sfY + CART_Y_OFFSET, sfScale, 0, WHITE);
+
+  // Thought bubble with clock
+  var bubbleX = sfX + 100 * sfScale;
+  var bubbleY = sfY - STICK_H * sfScale - 60 * sfScale;
+  var bubbleOp = ramp(u, 0.1, 0.4);
+  s += thoughtBubble(bubbleX, bubbleY, 30 * sfScale, u * 0.5, bubbleOp);
+
+  s += '</g>';
+  return s;
+}
+
+// Scene 2 (10-20s): GO
+function scene2(u) {
+  var s = '';
+  var sfX = lerp(CX + 400, CX - 100, smooth(u)); // Continues moving, but slows down
+  var sfY = BOT - 100;
+  var sfScale = 1.0;
+  var camScale = 1.0;
+  var camTx = 0;
+  var camTy = 0;
+
+  s += '<g ' + camera(camScale, camTx, camTy) + '>';
+
+  // Pulsing blue wave from top, subtly affecting movement
+  var wavePhase = u * 0.5;
+  var waveMaxR = lerp(100, W * 1.5, u);
+  var waveOp = lerp(0.0, 0.2, smooth(u));
+  s += pulsingWave(CX, CY - 600, waveMaxR, wavePhase, BLUE, 120, waveOp);
+  s += pulsingWave(CX, CY + 600, waveMaxR, wavePhase + 0.5, BLUE, 120, waveOp * 0.7);
+
+  // Stick figure slowing down
+  var walkPhase = u * Math.PI * 2;
+  var headAngle = lerp(-0.05, 0.05, Math.sin(walkPhase * 0.5) * 0.5 + 0.5);
+  var lArm = Math.sin(walkPhase) * 0.3 + 0.1;
+  var rArm = Math.sin(walkPhase + Math.PI) * 0.3 + 0.1;
+  var lLeg = Math.sin(walkPhase) * 0.4 + 0.05;
+  var rLeg = Math.sin(walkPhase + Math.PI) * 0.4 + 0.05;
+  s += stickFigure(sfX + 40 * sfScale, sfY, sfScale, headAngle, lArm, rArm, lLeg, rLeg, STICK_H, WHITE);
+
+  // Shopping cart
+  s += shoppingCart(sfX - 60 * sfScale, sfY + CART_Y_OFFSET, sfScale, 0, WHITE);
+
+  s += '</g>';
+  return s;
+}
+
+// Scene 3 (20-30s): SEARCH
+function scene3(u) {
+  var s = '';
+  var sfX = CX - 100; // Figure is now somewhat central, struggling
+  var sfY = BOT - 100;
+  var sfScale = 1.0;
+
+  // Struggle animation
+  var strugglePhase = u * Math.PI * 8;
+  var pushForce = smooth(ramp(u, 0.1, 0.8)); // Builds up and holds
+  var headAngle = lerp(0.05, -0.2, pushForce); // Head down in frustration
+  var lArm = lerp(0.1, 0.7, pushForce); // Pushing forward
+  var rArm = lerp(0.1, 0.7, pushForce);
+  var lLeg = lerp(0.05, 0.5, Math.sin(strugglePhase) * 0.5 + 0.5); // Straining
+  var rLeg = lerp(0.05, 0.5, Math.sin(strugglePhase + Math.PI) * 0.5 + 0.5);
+
+  // Subtle pull back by the wave
+  var pullX = Math.sin(u * Math.PI * 2) * 8 * pushForce; // Gentle wobble
+  var pullY = Math.sin(u * Math.PI * 3) * 5 * pushForce;
+
+  s += '<g ' + camera(1.0, pullX, pullY) + '>';
+
+  // Persistent signal blue wave
+  var waveOp = lerp(0.2, 0.3, Math.sin(u * Math.PI * 2) * 0.5 + 0.5);
+  s += pulsingWave(CX, CY - 600, W * 1.5, u * 0.5, BLUE, 120, waveOp);
+  s += pulsingWave(CX, CY + 600, W * 1.5, u * 0.5 + 0.5, BLUE, 120, waveOp * 0.7);
+
+  // Coral red streaks for trying to accelerate
+  var streakOp = pulse(u, 0.2, 0.1) + pulse(u, 0.5, 0.1) + pulse(u, 0.8, 0.1);
+  if (streakOp > 0.1) {
+    s += motionBlur(sfX + 40 * sfScale, sfY - 20, 80, 3, CORAL, streakOp * 0.7);
+    s += motionBlur(sfX - 60 * sfScale, sfY + CART_Y_OFFSET, 60, 2, CORAL, streakOp * 0.5);
+  }
+
+  s += stickFigure(sfX + 40 * sfScale, sfY, sfScale, headAngle, lArm, rArm, lLeg, rLeg, STICK_H, WHITE);
+  s += shoppingCart(sfX - 60 * sfScale, sfY + CART_Y_OFFSET, sfScale, 0, WHITE);
+
+  s += '</g>';
+  return s;
+}
+
+// Scene 4 (30-40s): FIND
+function scene4(u) {
+  var s = '';
+  var camScale = lerp(1.0, 0.4, smooth(u)); // Zoom out for overhead view
+  var camTx = lerp(0, 0, smooth(u));
+  var camTy = lerp(0, -300, smooth(u)); // Shift up to show more floor
+
+  s += '<g ' + camera(camScale, camTx, camTy) + '>';
+
+  // Isometric grid (supermarket aisle)
+  var gridOp = lerp(0.0, 0.3, smooth(ramp(u, 0.1, 0.4)));
+  s += aisleGrid(CX, CY + 200, W * 0.8, H * 0.8, 8, 4, BLUE, 6, gridOp);
+
+  // Multiple stick figures (simplified dots with carts)
+  var numFigures = 6;
+  for (var i = 0; i < numFigures; i++) {
+    var figX = CX + (i % 2 === 0 ? -200 : 200) + (rnd(i * 7) - 0.5) * 80;
+    var figY = lerp(BOT + 100, TOP - 100, (u * 0.3 + rnd(i * 11) + i / numFigures) % 1);
+    var figScale = 0.6;
+    var cartFill = rnd(i * 13) > 0.7 ? 0.5 : 0; // Some carts have amber items
+    s += stickFigure(figX + 20 * figScale, figY, figScale, 0, 0.1, 0.1, 0.1, 0.1, STICK_H, DIM, 0.8);
+    s += shoppingCart(figX - 30 * figScale, figY + CART_Y_OFFSET * figScale, figScale, cartFill, DIM, 0.8);
+  }
+
+  // Our stick figure, getting a lightbulb moment
+  var ourFigX = CX - 50;
+  var ourFigY = BOT - 250;
+  var ourFigScale = 0.8;
+  s += stickFigure(ourFigX + 20 * ourFigScale, ourFigY, ourFigScale, 0, 0.1, 0.1, 0.1, 0.1, STICK_H, WHITE);
+  s += shoppingCart(ourFigX - 30 * ourFigScale, ourFigY + CART_Y_OFFSET * ourFigScale, ourFigScale, 0, WHITE);
+
+  // Lightbulb moment
+  var bulbOp = ramp(u, 0.6, 0.9);
+  if (bulbOp > 0.05) {
+    s += dot(ourFigX, ourFigY - STICK_H * ourFigScale - 40, 20, AMBER, bulbOp);
+    s += line(ourFigX, ourFigY - STICK_H * ourFigScale - 60, ourFigX, ourFigY - STICK_H * ourFigScale - 80, AMBER, 5, bulbOp * 0.8);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+// Scene 5 (40-50s): TAKE
+function scene5(u) {
+  var s = '';
+  var sfX = CX - 100;
+  var sfY = BOT - 100;
+  var sfScale = 1.0;
+  var camScale = lerp(0.4, 1.0, smooth(u)); // Zoom back in
+  var camTx = lerp(0, 0, smooth(u));
+  var camTy = lerp(-300, 0, smooth(u));
+
+  s += '<g ' + camera(camScale, camTx, camTy) + '>';
+
+  // Background aisle lines (faint)
+  s += line(CX - 200, TOP, CX - 200, BOT, DIM, 4, 0.1);
+  s += line(CX + 200, TOP, CX + 200, BOT, DIM, 4, 0.1);
+
+  // Stick figure slowly walking
+  var walkPhase = u * Math.PI * 1; // Even slower walk
+  var headAngle = lerp(0.05, -0.05, Math.sin(walkPhase * 0.5) * 0.5 + 0.5);
+  var lArm = Math.sin(walkPhase) * 0.2 + 0.1;
+  var rArm = Math.sin(walkPhase + Math.PI) * 0.2 + 0.1;
+  var lLeg = Math.sin(walkPhase) * 0.3 + 0.05;
+  var rLeg = Math.sin(walkPhase + Math.PI) * 0.3 + 0.05;
+  s += stickFigure(sfX + 40 * sfScale, sfY, sfScale, headAngle, lArm, rArm, lLeg, rLeg, STICK_H, WHITE);
+
+  // Impulse items dropping into cart
+  var fillLevel = smooth(ramp(u, 0.2, 0.9));
+  s += shoppingCart(sfX - 60 * sfScale, sfY + CART_Y_OFFSET, sfScale, fillLevel, WHITE);
+
+  var numDrops = 4;
+  for (var i = 0; i < numDrops; i++) {
+    var dropTime = lerp(0.2, 0.8, i / numDrops);
+    var dropProg = ramp(u, dropTime, dropTime + 0.2);
+    if (dropProg > 0 && dropProg < 1) {
+      var itemX = lerp(sfX + 200, sfX - 60 * sfScale + (rnd(i * 5) - 0.5) * 60, easeOut(dropProg));
+      var itemY = lerp(TOP + 100 + rnd(i * 7) * 200, sfY + CART_Y_OFFSET - 30, easeIn(dropProg));
+      s += rrect(itemX, itemY, 40, 30, 6, AMBER, 1 - dropProg * 0.5);
+    }
+  }
+
+  s += '</g>';
+  return s;
+}
+
+// Scene 6 (50-60s): RETURN + CHANGE
+function scene6(u) {
+  var s = '';
+  var sfX = lerp(CX - 100, CX + 400, smooth(u)); // Exiting right
+  var sfY = BOT - 100;
+  var sfScale = 1.0;
+  var camScale = 1.0;
+  var camTx = lerp(0, -100, smooth(u));
+  var camTy = 0;
+
+  s += '<g ' + camera(camScale, camTx, camTy) + '>';
+
+  // Fading blue wave (subtly present)
+  var waveOp = lerp(0.3, 0.05, smooth(u));
+  s += pulsingWave(CX, CY - 600, W * 1.5, u * 0.5, BLUE, 120, waveOp);
+  s += pulsingWave(CX, CY + 600, W * 1.5, u * 0.5 + 0.5, BLUE, 120, waveOp * 0.7);
+
+  // Stick figure with full cart, exiting
+  var walkPhase = u * Math.PI * 3;
+  var headAngle = lerp(0.05, 0.3, smooth(u)); // Looking back
+  var lArm = Math.sin(walkPhase) * 0.2 + 0.1;
+  var rArm = Math.sin(walkPhase + Math.PI) * 0.2 + 0.1;
+  var lLeg = Math.sin(walkPhase) * 0.3 + 0.05;
+  var rLeg = Math.sin(walkPhase + Math.PI) * 0.3 + 0.05;
+  s += stickFigure(sfX + 40 * sfScale, sfY, sfScale, headAngle, lArm, rArm, lLeg, rLeg, STICK_H, WHITE);
+
+  var cartFill = 1.0; // Cart is full
+  s += shoppingCart(sfX - 60 * sfScale, sfY + CART_Y_OFFSET, sfScale, cartFill, WHITE);
+
+  // Store entrance in background (simple rectangle)
+  var storeEntranceX = CX - 300;
+  var storeEntranceY = CY;
+  var storeEntranceW = 200;
+  var storeEntranceH = 400;
+  var entranceOp = lerp(0.1, 0.05, smooth(u));
+  s += rrectStroke(storeEntranceX, storeEntranceY, storeEntranceW, storeEntranceH, 20, DIM, 8, entranceOp);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "id": "why-doctors-offices-have-clipboards",
+  "slug": "2026-10-05__why-doctors-offices-have-clipboards",
+  "title_working": "Why Doctor's Offices Use Clipboards",
+  "system": "information control and process standardization",
+  "cluster": "institutions-and-bureaucracy",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-10-05T14:33:10+00:00",
+  "produced_at": "2026-10-05T14:38:25+00:00",
+  "verify": "PASS",
+  "takeaway": "The clipboard is a crucial, low-tech information buffer that standardizes patient input, ensures accuracy, and provides legal clarity before data goes digital.",
+  "animation_source": "llm"
+}

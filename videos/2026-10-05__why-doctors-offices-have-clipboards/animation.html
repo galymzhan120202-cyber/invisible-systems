@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Doctor's Offices Use Clipboards</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary elements
+var BLUE  = "#4C86F0";              // signal blue  -> the system / mechanism
+var AMBER = "#F2A93B";              // warm amber   -> YOU / patient
+var CORAL = "#FF5B5B";              // coral red    -> naive assumptions / outdated
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, fillCol) {
+  return '<path d="' + d + '" ' + (fillCol ? 'fill="' + fillCol + '"' : 'fill="none"') + ' stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function chevron(x, y, size, col, op) {
+  var d = "M " + (x - size) + " " + (y + size * 0.55) + " L " + x + " " + (y - size * 0.55) + " L " + (x + size) + " " + (y + size * 0.55);
+  return pathTag(d, col, 14, op);
+}
+
+/* Stick figure: ~200px tall with head, body, limbs */
+function stickFigure(x, y, scale, col, pose, op) {
+  scale = scale || 1;
+  op = (op == null ? 1 : op);
+  var sw = 9 * scale;
+  var headR = 26 * scale;
+  var bodyLen = 100 * scale;
+  var armLen = 70 * scale;
+  var legLen = 90 * scale;
+
+  var g = '<g opacity="' + op + '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round">';
+  g += dot(x, y - bodyLen / 2 - headR, headR, col, op); // Head
+  g += line(x, y - bodyLen / 2, x, y + bodyLen / 2); // Body
+
+  // Arms
+  if (pose === 1) { // Writing/holding clipboard
+    g += line(x, y - bodyLen / 4, x - armLen * 0.6, y + armLen * 0.2); // Left arm bent
+    g += line(x, y - bodyLen / 4, x + armLen * 0.6, y + armLen * 0.2); // Right arm bent
+  } else if (pose === 2) { // Shrugging/confused
+    g += line(x, y - bodyLen / 4, x - armLen * 0.8, y - armLen * 0.2); // Left arm up
+    g += line(x, y - bodyLen / 4, x + armLen * 0.8, y - armLen * 0.2); // Right arm up
+  } else if (pose === 3) { // Pointing
+    g += line(x, y - bodyLen / 4, x + armLen * 0.8, y - armLen * 0.2); // Right arm pointing
+    g += line(x, y - bodyLen / 4, x - armLen * 0.6, y + armLen * 0.2); // Left arm relaxed
+  } else if (pose === 4) { // Receiving/handing over
+    g += line(x, y - bodyLen / 4, x - armLen * 0.6, y + armLen * 0.2); // Left arm bent
+    g += line(x, y - bodyLen / 4, x + armLen * 0.6, y + armLen * 0.2); // Right arm bent
+  }
+  else { // Standing neutral
+    g += line(x, y - bodyLen / 4, x - armLen * 0.7, y + armLen * 0.1);
+    g += line(x, y - bodyLen / 4, x + armLen * 0.7, y + armLen * 0.1);
+  }
+
+  // Legs
+  g += line(x, y + bodyLen / 2, x - legLen * 0.4, y + bodyLen / 2 + legLen * 0.8);
+  g += line(x, y + bodyLen / 2, x + legLen * 0.4, y + bodyLen / 2 + legLen * 0.8);
+  g += '</g>';
+  return g;
+}
+
+/* Clipboard: board + clip + paper + optional content */
+function clipboard(x, y, w, h, boardCol, paperCol, op, content) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 8, boardCol, op); // Board
+  g += rrect(x, y - h / 2 + 10, w * 0.7, 16, 4, DIM, op); // Clip top
+  g += rrect(x, y - h / 2 + 10 + 4, w * 0.5, 8, 2, WHITE, op); // Clip inner
+  g += rrect(x, y + h * 0.05, w * 0.8, h * 0.8, 4, paperCol, op); // Paper
+  if (content) g += content;
+  g += '</g>';
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): Patient arrives, receives clipboard. */
+function scene1(u) {
+  var s = '';
+  var patientY = BOT - 200;
+  var patientX = lerp(CX + 400, CX - 100, smooth(ramp(u, 0.0, 0.3)));
+  var clipboardX = lerp(CX - 100, CX + 100, smooth(ramp(u, 0.4, 0.6)));
+  var clipboardY = patientY - 80;
+  var boardW = 200, boardH = 300;
+
+  // Background office wall and door outline
+  s += rrect(CX, CY, W * 0.9, H * 0.8, 20, DIM, 0.05);
+  s += line(CX - 200, TOP + 100, CX - 200, BOT - 400, WHITE, 4, 0.1);
+  s += line(CX + 200, TOP + 100, CX + 200, BOT - 400, WHITE, 4, 0.1);
+
+  // Patient walks in and then starts filling
+  var patientPose = 0;
+  if (u > 0.3 && u < 0.7) patientPose = 1; // Start filling
+  s += stickFigure(patientX, patientY, 1, AMBER, patientPose, 1);
+
+  // Clipboard appears and is held
+  var clipboardOp = ramp(u, 0.3, 0.5);
+  var paperContent = '';
+  // Simple lines on paper to represent text
+  for (var i = 0; i < 4; i++) {
+    paperContent += line(clipboardX - boardW * 0.3, clipboardY + boardH * 0.8 - i * 40,
+                         clipboardX + boardW * 0.3, clipboardY + boardH * 0.8 - i * 40, DIM, 4, 0.4);
+  }
+  for (var i = 0; i < 3; i++) {
+    paperContent += line(clipboardX - boardW * 0.3, clipboardY + boardH * 0.2 - i * 40,
+                         clipboardX + boardW * 0.1, clipboardY + boardH * 0.2 - i * 40, DIM, 4, 0.4);
+  }
+
+  var clipScale = lerp(0.5, 1, smooth(ramp(u, 0.3, 0.5)));
+  var clipRot = lerp(-10, 0, smooth(ramp(u, 0.3, 0.5)));
+  s += '<g transform="translate(' + clipboardX + ' ' + clipboardY + ') scale(' + clipScale + ') rotate(' + clipRot + ') translate(' + (-clipboardX) + ' ' + (-clipboardY) + ')">';
+  s += clipboard(clipboardX, clipboardY, boardW, boardH, WHITE, WHITE, clipboardOp, paperContent);
+  s += '</g>';
+
+  return s;
+}
+
+/* SCENE 2 (10-20): Clipboard as a data collection tool. */
+function scene2(u) {
+  var s = '';
+  var patientY = BOT - 200;
+  var patientX = CX - 100;
+  var clipboardX = CX + 100;
+  var clipboardY = patientY - 80;
+  var boardW = 200, boardH = 300;
+
+  s += stickFigure(patientX, patientY, 1, AMBER, 1, 1); // Patient writing
+
+  // Clipboard transforms into a structured form/database
+  var morph = smooth(ramp(u, 0.1, 0.5));
+  var gridOpacity = morph;
+  var formLines = '';
+  var numRows = 6;
+  var rowHeight = boardH * 0.8 / numRows;
+  for (var i = 0; i <= numRows; i++) {
+    formLines += line(clipboardX - boardW * 0.35, clipboardY + boardH * 0.4 - i * rowHeight,
+                      clipboardX + boardW * 0.35, clipboardY + boardH * 0.4 - i * rowHeight, DIM, 3, 0.8 * gridOpacity);
+  }
+  formLines += line(clipboardX - boardW * 0.1, clipboardY + boardH * 0.4,
+                    clipboardX - boardW * 0.1, clipboardY - boardH * 0.4, DIM, 3, 0.8 * gridOpacity);
+
+  s += clipboard(clipboardX, clipboardY, boardW, boardH, WHITE, WHITE, 1, formLines);
+
+  // Data flowing from clipboard into a system (blue lines)
+  var flowOpacity = ramp(u, 0.4, 0.8);
+  var flowCount = 5;
+  for (var i = 0; i < flowCount; i++) {
+    var p = (u * 0.8 + rnd(i)) % 1;
+    var startX = clipboardX + boardW * 0.3;
+    var startY = clipboardY - boardH * 0.2 + i * (boardH * 0.4 / flowCount);
+    var endX = lerp(startX, CX + 400, easeOut(p));
+    var endY = lerp(startY, TOP + 100 + rnd(i+1) * 200, easeOut(p));
+    s += line(startX, startY, endX, endY, BLUE, 5, flowOpacity * (1 - p));
+  }
+
+  // Abstract system representation
+  s += rrectStroke(CX + 400, TOP + 200, 100, 200, 10, BLUE, 8, flowOpacity * 0.5);
+  s += rrect(CX + 400, TOP + 200, 80, 180, 8, BLUE, flowOpacity * 0.1);
+
+  return s;
+}
+
+/* SCENE 3 (20-30): Standardized process, avoiding errors. */
+function scene3(u) {
+  var s = '';
+  var patientY = BOT - 200;
+  var patientX = CX - 200;
+  var clipboardX = CX + 100;
+  var clipboardY = patientY - 80;
+  var boardW = 200, boardH = 300;
+
+  s += stickFigure(patientX, patientY, 1, AMBER, 1, 1); // Patient writing
+
+  // Clipboard as a flowchart/checklist
+  var morph = smooth(ramp(u, 0.1, 0.5));
+  var checklistOpacity = morph;
+  var checkmarkSize = 20;
+
+  var checklistContent = '';
+  var numItems = 4;
+  var itemSpacing = boardH * 0.8 / numItems;
+  for (var i = 0; i < numItems; i++) {
+    var itemY = clipboardY + boardH * 0.3 - i * itemSpacing;
+    checklistContent += line(clipboardX - boardW * 0.35, itemY, clipboardX + boardW * 0.1, itemY, DIM, 4, 0.8 * checklistOpacity);
+    // Checkmark
+    if (u > (0.3 + i * 0.1)) {
+      checklistContent += pathTag("M " + (clipboardX + boardW * 0.2) + " " + (itemY + 5) + " L " + (clipboardX + boardW * 0.2 + checkmarkSize * 0.4) + " " + (itemY + 5 + checkmarkSize * 0.4) + " L " + (clipboardX + boardW * 0.2 + checkmarkSize) + " " + (itemY + 5 - checkmarkSize * 0.4), BLUE, 7, 0.9 * checklistOpacity);
+    }
+  }
+  s += clipboard(clipboardX, clipboardY, boardW, boardH, WHITE, WHITE, 1, checklistContent);
+
+  // Abstract process flow (blue lines) with 'error' symbols (coral X) being avoided
+  var flowOp = ramp(u, 0.3, 0.9);
+  var flowStartX = CX - 300;
+  var flowStartY = TOP + 200;
+  var flowStep = 150;
+
+  // Blue path: correct flow
+  s += pathTag("M " + flowStartX + " " + flowStartY +
+               " L " + (flowStartX + flowStep) + " " + (flowStartY + flowStep * 0.5) +
+               " L " + (flowStartX) + " " + (flowStartY + flowStep * 1.5) +
+               " L " + (flowStartX + flowStep) + " " + (flowStartY + flowStep * 2), BLUE, 8, 0.7 * flowOp);
+
+  // Coral 'X' errors being avoided
+  var errorSize = 30;
+  var errorOp = (1 - smooth(ramp(u, 0.6, 0.9))) * flowOp;
+  s += line(flowStartX + flowStep * 0.5 - errorSize, flowStartY + flowStep * 0.2 - errorSize,
+            flowStartX + flowStep * 0.5 + errorSize, flowStartY + flowStep * 0.2 + errorSize, CORAL, 10, errorOp);
+  s += line(flowStartX + flowStep * 0.5 - errorSize, flowStartY + flowStep * 0.2 + errorSize,
+            flowStartX + flowStep * 0.5 + errorSize, flowStartY + flowStep * 0.2 - errorSize, CORAL, 10, errorOp);
+
+  s += line(flowStartX + flowStep * 0.5 - errorSize, flowStartY + flowStep * 1.7 - errorSize,
+            flowStartX + flowStep * 0.5 + errorSize, flowStartY + flowStep * 1.7 + errorSize, CORAL, 10, errorOp);
+  s += line(flowStartX + flowStep * 0.5 - errorSize, flowStartY + flowStep * 1.7 + errorSize,
+            flowStartX + flowStep * 0.5 + errorSize, flowStartY + flowStep * 1.7 - errorSize, CORAL, 10, errorOp);
+
+  return s;
+}
+
+/* SCENE 4 (30-40): Information security and privacy. */
+function scene4(u) {
+  var s = '';
+  var patientY = BOT - 200;
+  var patientX = CX - 200;
+  var clipboardX = CX + 100;
+  var clipboardY = patientY - 80;
+  var boardW = 200, boardH = 300;
+
+  s += stickFigure(patientX, patientY, 1, AMBER, 1, 1); // Patient writing
+
+  // Clipboard transforms into a shield/secure container
+  var morph = smooth(ramp(u, 0.1, 0.5));
+  var shieldOpacity = morph;
+  var shieldSize = lerp(boardW, 280, morph);
+  var shieldY = lerp(clipboardY, CY, morph);
+
+  // Shield shape
+  s += rrect(clipboardX, shieldY, shieldSize, shieldSize * 1.2, 20, BLUE, 0.2 * shieldOpacity);
+  s += rrectStroke(clipboardX, shieldY, shieldSize, shieldSize * 1.2, 20, BLUE, 10, 0.8 * shieldOpacity);
+
+  // Lock symbol on shield
+  var lockSize = 40;
+  s += ring(clipboardX, shieldY - lockSize * 0.2, lockSize * 0.6, BLUE, 8, 0.9 * shieldOpacity);
+  s += rrect(clipboardX, shieldY + lockSize * 0.3, lockSize * 0.8, lockSize * 0.8, 8, BLUE, 0.9 * shieldOpacity);
+
+  // Data packets (dots/rects) flowing towards the shield and being blocked/reflected
+  var packetOp = ramp(u, 0.3, 0.9);
+  var numPackets = 7;
+  for (var i = 0; i < numPackets; i++) {
+    var p = (u * 0.7 + rnd(i)) % 1;
+    var startX = CX - 400 + rnd(i + 10) * 200;
+    var startY = TOP + 100 + rnd(i + 20) * 400;
+    var targetX = clipboardX - shieldSize / 2;
+    var targetY = shieldY - shieldSize / 2 + rnd(i + 30) * shieldSize;
+
+    var currentX = lerp(startX, targetX, easeIn(p));
+    var currentY = lerp(startY, targetY, easeIn(p));
+
+    if (p < 0.9) { // Before hitting the shield
+      s += dot(currentX, currentY, 10, DIM, packetOp * (1 - p));
+    } else { // After hitting and reflecting
+      var reflectP = (p - 0.9) * 10;
+      var reflectX = lerp(targetX, targetX - 100, easeOut(reflectP));
+      var reflectY = lerp(targetY, targetY + 50, easeOut(reflectP));
+      s += dot(reflectX, reflectY, 10, DIM, packetOp * (1 - reflectP));
+    }
+  }
+
+  return s;
+}
+
+/* SCENE 5 (40-50): Legal/compliance requirements. */
+function scene5(u) {
+  var s = '';
+  var patientY = BOT - 200;
+  var patientX = CX - 200;
+  var clipboardX = CX + 100;
+  var clipboardY = patientY - 80;
+  var boardW = 200, boardH = 300;
+
+  s += stickFigure(patientX, patientY, 1, AMBER, 1, 1); // Patient writing
+
+  // Clipboard transforms into a legal document with a seal
+  var morph = smooth(ramp(u, 0.1, 0.5));
+  var docOpacity = morph;
+
+  var docContent = '';
+  // Abstract lines for legal text
+  for (var i = 0; i < 7; i++) {
+    docContent += line(clipboardX - boardW * 0.3, clipboardY + boardH * 0.3 - i * 30,
+                       clipboardX + boardW * 0.3, clipboardY + boardH * 0.3 - i * 30, DIM, 3, 0.7 * docOpacity);
+  }
+  // Signature line
+  docContent += line(clipboardX - boardW * 0.3, clipboardY - boardH * 0.3,
+                     clipboardX + boardW * 0.3, clipboardY - boardH * 0.3, WHITE, 5, 0.9 * docOpacity);
+  docContent += line(clipboardX - boardW * 0.2, clipboardY - boardH * 0.3 + 15,
+                     clipboardX - boardW * 0.05, clipboardY - boardH * 0.3 + 5, AMBER, 4, 0.9 * docOpacity); // "signature" squiggle
+
+  s += clipboard(clipboardX, clipboardY, boardW, boardH, WHITE, WHITE, 1, docContent);
+
+  // Official seal/stamp appearing
+  var sealOp = ramp(u, 0.4, 0.9);
+  var sealX = CX + 300, sealY = CY;
+  var sealR = 80;
+  s += ring(sealX, sealY, sealR, BLUE, 10, 0.8 * sealOp);
+  s += ring(sealX, sealY, sealR * 0.6, BLUE, 6, 0.7 * sealOp);
+  // Star glyph in center
+  var starPoints = 5;
+  var starPath = "M " + (sealX + sealR * 0.4 * Math.cos(Math.PI / 2)) + " " + (sealY - sealR * 0.4 * Math.sin(Math.PI / 2));
+  for (var i = 1; i <= starPoints * 2; i++) {
+    var r = (i % 2 === 0) ? sealR * 0.4 : sealR * 0.8;
+    var angle = Math.PI / 2 + i * Math.PI / starPoints;
+    starPath += " L " + (sealX + r * Math.cos(angle)) + " " + (sealY - r * Math.sin(angle));
+  }
+  s += pathTag(starPath + " Z", BLUE, 0, 0.9 * sealOp, BLUE); // Fill star
+  s += pathTag(starPath + " Z", WHITE, 6, 0.9 * sealOp); // Outline star
+
+  return s;
+}
+
+/* SCENE 6 (50-60): Efficiency and record keeping. */
+function scene6(u) {
+  var s = '';
+  var patientY = BOT - 200;
+  var patientX = CX - 100;
+  var clipboardX = CX + 100;
+  var clipboardY = patientY - 80;
+  var boardW = 200, boardH = 300;
+
+  // Patient hands back clipboard
+  var handOver = smooth(ramp(u, 0.0, 0.3));
+  var patientPose = lerp(1, 4, handOver); // From writing to handing over
+  s += stickFigure(patientX, patientY, 1, AMBER, patientPose, 1);
+
+  var clipReturnX = lerp(clipboardX, CX + 400, easeIn(handOver));
+  var clipReturnY = lerp(clipboardY, TOP + 200, easeIn(handOver));
+  var clipReturnScale = lerp(1, 0.4, easeIn(handOver));
+  var clipReturnRot = lerp(0, 45, easeIn(handOver));
+
+  var paperContent = ''; // Blank paper again
+  for (var i = 0; i < 4; i++) {
+    paperContent += line(clipReturnX - boardW * 0.3 * clipReturnScale, clipReturnY + boardH * 0.8 * clipReturnScale - i * 40 * clipReturnScale,
+                         clipReturnX + boardW * 0.3 * clipReturnScale, clipReturnY + boardH * 0.8 * clipReturnScale - i * 40 * clipReturnScale, DIM, 4 * clipReturnScale, 0.4);
+  }
+
+  s += '<g transform="translate(' + clipReturnX + ' ' + clipReturnY + ') scale(' + clipReturnScale + ') rotate(' + clipReturnRot + ') translate(' + (-clipReturnX) + ' ' + (-clipReturnY) + ')">';
+  s += clipboard(clipReturnX, clipReturnY, boardW, boardH, WHITE, WHITE, 1, paperContent);
+  s += '</g>';
+
+  // Digital archive/filing system
+  var systemOpacity = ramp(u, 0.4, 0.9);
+  var systemX = CX + 400, systemY = CY;
+  var systemW = 300, systemH = 600;
+
+  s += rrect(systemX, systemY, systemW, systemH, 20, BLUE, 0.1 * systemOpacity);
+  s += rrectStroke(systemX, systemY, systemW, systemH, 20, BLUE, 10, 0.7 * systemOpacity);
+
+  // Filing slots/drawers
+  var numSlots = 5;
+  var slotHeight = systemH / numSlots;
+  for (var i = 0; i < numSlots; i++) {
+    s += line(systemX - systemW / 2 + 20, systemY - systemH / 2 + (i + 1) * slotHeight,
+              systemX + systemW / 2 - 20, systemY - systemH / 2 + (i + 1) * slotHeight, BLUE, 4, 0.5 * systemOpacity);
+  }
+
+  // Data flowing into the system (from clipboard)
+  var flowIntoSystem = ramp(u, 0.3, 0.7);
+  if (flowIntoSystem > 0) {
+    var flowStartX = lerp(clipReturnX, systemX, flowIntoSystem);
+    var flowStartY = lerp(clipReturnY, systemY - systemH / 2 + slotHeight * 0.5, flowIntoSystem);
+    s += line(flowStartX, flowStartY, flowStartX + 30, flowStartY, BLUE, 6, (1 - flowIntoSystem) * 0.8);
+    s += chevron(flowStartX + 50, flowStartY, 20, BLUE, (1 - flowIntoSystem) * 0.8);
+  }
+
+  // Patient exits
+  var exit = smooth(ramp(u, 0.7, 1.0));
+  var patientExitX = lerp(patientX, CX - 500, exit);
+  s += stickFigure(patientExitX, patientY, 1, AMBER, 0, 1 - exit);
+
+  return s;
+}
+
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

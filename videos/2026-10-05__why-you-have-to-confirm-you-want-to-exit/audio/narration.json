@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You’re deep in focus, finishing that crucial report or a long online form. All your attention is on the task, ready to wrap it up.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "A quick click on the 'X' to close the tab, your fingers already moving to the next thing. Smooth exit, right?",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "But wait! A pop-up asks: 'Are you sure?' Your flow breaks. Why this extra step? It feels like deliberate slowing.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "This invisible system is 'human error prevention.' Designers know we're prone to accidental clicks and lost work. This prompt is a cheap, crucial guardian.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "It's a trade-off: a second of interruption now, versus potentially hours of lost effort. How often have you clicked 'no' and saved something vital?",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "So next time you see 'Are you sure?', remember it's not trying to annoy. It's a quiet system, protecting you from your own quick, sometimes clumsy, self.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]
