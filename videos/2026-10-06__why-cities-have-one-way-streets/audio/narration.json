@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You’re driving through the city, aiming for efficiency. All you want is a smooth, direct journey, avoiding unnecessary turns. Straight to your destination.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "But then you hit it: a 'one-way' sign. It forces you around the block, your destination just across the street, taunting you.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "Your first thought? Confusing bureaucracy, making things harder for no reason. A coral red frustration, feeling totally arbitrary.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "But look closer. One-way streets simplify intersections, eliminating head-on traffic and risky left turns. This allows signal blue traffic to flow faster, with fewer stops and less gridlock.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "The catch? While the system becomes more efficient, your personal journey might feel less direct. You pay a small cost for overall city speed.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "So next time you're rerouted, you’ll see past the immediate inconvenience. You'll understand the hidden design, optimizing for hundreds of cars.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

@@ -1,0 +1,22 @@
+## Why Cities Have One-Way Streets
+
+**System:** Traffic flow optimization for collective efficiency
+**Narrator:** Bright, energetic adult female (AvaNeural / JennyNeural)
+**Palette:** Dark theme (black canvas, white line art). Accent colors: signal blue (system/rules), warm amber (YOU/desire), coral red (naive/frustration).
+**Hero Elements:** An `amber` stick-figure car, the city grid/streets.
+
+| # | Time | Story beat | Stick-figure scene | Motion / camera / transition | English VO | SFX |
+|---|---|---|---|---|---|---|
+| 1 | 0–10s | **YOU + NEED**: The desire for efficient travel. | Black canvas. A simple city grid appears. An `amber` car moves smoothly along a white street line. | City grid fades in. `Amber` car moves left-to-right on a straight path. Camera follows the car. | You’re driving through the city, aiming for efficiency. All you want is a smooth, direct journey, avoiding unnecessary turns. Straight to your destination. | 0.6s whoosh.mp3, 4.5s click-soft.mp3 |
+| 2 | 10–20s | **GO**: Encountering the obstacle of a one-way street. | The `amber` car approaches an intersection. A coral red 'one-way' arrow sign appears, blocking the direct path to a destination dot across the intersection. | `Amber` car stops at intersection. Coral red arrow pops up, forcing the car to turn away. Camera pans to show the destination dot. Car turns. | But then you hit it: a 'one-way' sign. It forces you around the block, your destination just across the street, taunting you. | 11.2s drop-thud.mp3, 14.8s whoosh.mp3 |
+| 3 | 20–30s | **SEARCH**: Initial frustration and naive assumptions. | `Amber` car is now on a longer, indirect path. Other white cars seem to be moving in an arbitrary pattern, creating a messy, coral red tangle at the previous intersection. | Camera zooms out slightly to show the convoluted detour. The previous intersection is highlighted in coral red, with erratic lines representing traffic. | Your first thought? Confusing bureaucracy, making things harder for no reason. A coral red frustration, feeling totally arbitrary. | 21.5s focus.mp3, 24.0s stack-collapse.mp3 |
+| 4 | 30–40s | **FIND**: The hidden system revealed: flow optimization. | The coral red mess dissolves. The grid transforms to show multiple one-way streets, all flowing in clear, signal blue directions. Intersections are simpler, no opposing traffic or left turns. | The city grid reconfigures. Coral red fades out as signal blue lines emerge for all lanes, showing clear, distinct flow directions. `Amber` car is now one of many flowing in an organized manner. | But look closer. One-way streets simplify intersections, eliminating head-on traffic and risky left turns. This allows signal blue traffic to flow faster, with fewer stops and less gridlock. | 31.0s transform.mp3, 35.5s whoosh-fast.mp3 |
+| 5 | 40–50s | **TAKE**: The cost of the system: individual detour. | The `amber` car is shown completing its longer path, eventually reaching the destination. The overall city traffic is still flowing smoothly in signal blue. | Camera focuses on the `amber` car, showing its extended path. It eventually reaches its destination. Other signal blue traffic continues to flow around it. | The catch? While the system becomes more efficient, your personal journey might feel less direct. You pay a small cost for overall city speed. | 42.0s click-soft.mp3, 46.5s whoosh.mp3 |
+| 6 | 50–60s | **RETURN + CHANGE**: New understanding of the collective benefit. | The `amber` car is back on a street, now surrounded by many other cars. The city grid is clearly signal blue, depicting efficient, if not always direct, paths. | `Amber` car drives on a street, now with a clear understanding. The entire city grid is visible in signal blue, showing the optimized flow. | So next time you're rerouted, you’ll see past the immediate inconvenience. You'll understand the hidden design, optimizing for hundreds of cars. | 52.0s focus.mp3, 56.5s complete-done.mp3 |
+
+**Continuity map:**
+- **Scene 1-2:** The city grid and the `amber` car's journey.
+- **Scene 2-3:** The `amber` car's frustration and the specific intersection.
+- **Scene 3-4:** The city grid, transforming from a confusing mess to an optimized system.
+- **Scene 4-5:** The `amber` car within the optimized city flow, completing its journey.
+- **Scene 5-6:** The `amber` car continues its journey with the backdrop of the now-understood city grid.

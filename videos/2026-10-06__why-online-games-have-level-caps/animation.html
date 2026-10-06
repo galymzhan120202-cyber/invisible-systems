@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Online Games Have Level Caps</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+var PLAYER_Y = 1400;                // Resting height for the player stick figure
+var XP_BAR_X = CX, XP_BAR_Y = 220;  // XP bar position
+var CAP_X = CX + 180;               // Level cap / gate X position
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / the gate
+var AMBER = "#F2A93B";              // warm amber   -> YOU / player
+var CORAL = "#FF5B5B";              // coral red    -> obstacle / naive view
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, fill) {
+  return '<path d="' + d + '" fill="' + (fill || 'none') + '" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom elements ---------- */
+
+// Stick figure: x, y is base of feet.
+// pose: 'run', 'idle', 'push', 'look_right', 'powerful', 'social_idle', 'social_wave'
+function stickFigure(x, y, scale, col, pose, op) {
+  scale = scale == null ? 1 : scale;
+  op = op == null ? 1 : op;
+  var sw = 8 * scale;
+  var headR = 18 * scale;
+  var bodyH = 60 * scale;
+  var armL = 40 * scale;
+  var legL = 50 * scale;
+  var g = '<g opacity="' + op + '">';
+
+  var headY = y - legL - bodyH - headR;
+  var bodyX = x;
+  var bodyY = y - legL - bodyH / 2;
+
+  var headDx = 0, headDy = 0; // For gaze
+  var arm1X1, arm1Y1, arm1X2, arm1Y2;
+  var arm2X1, arm2Y1, arm2X2, arm2Y2;
+  var leg1X1, leg1Y1, leg1X2, leg1Y2;
+  var leg2X1, leg2Y1, leg2X2, leg2Y2;
+  var sword = ''; // For scene 1
+
+  // Default pose: idle
+  arm1X1 = bodyX; arm1Y1 = bodyY - bodyH / 2 + sw / 2; arm1X2 = bodyX - armL * 0.7; arm1Y2 = bodyY + armL * 0.3;
+  arm2X1 = bodyX; arm2Y1 = bodyY - bodyH / 2 + sw / 2; arm2X2 = bodyX + armL * 0.7; arm2Y2 = bodyY + armL * 0.3;
+  leg1X1 = bodyX; leg1Y1 = bodyY + bodyH / 2 - sw / 2; leg1X2 = bodyX - legL * 0.4; leg1Y2 = y;
+  leg2X1 = bodyX; leg2Y1 = bodyY + bodyH / 2 - sw / 2; leg2X2 = bodyX + legL * 0.4; leg2Y2 = y;
+
+  switch (pose) {
+    case 'run':
+      arm1X2 = bodyX - armL * 0.8; arm1Y2 = bodyY - armL * 0.2; // Back arm
+      arm2X2 = bodyX + armL * 0.6; arm2Y2 = bodyY + armL * 0.4; // Forward arm
+      leg1X2 = bodyX - legL * 0.5; leg1Y2 = y - legL * 0.2; // Back leg bent
+      leg2X2 = bodyX + legL * 0.5; leg2Y2 = y; // Forward leg
+      sword = line(arm2X2, arm2Y2, arm2X2 + 30 * scale, arm2Y2 - 20 * scale, col, sw * 0.8); // Simple sword
+      break;
+    case 'collide':
+      headDy = 5 * scale;
+      arm1X2 = bodyX - armL * 0.4; arm1Y2 = bodyY - armL * 0.4;
+      arm2X2 = bodyX + armL * 0.4; arm2Y2 = bodyY - armL * 0.4;
+      leg1X2 = bodyX - legL * 0.2; leg1Y2 = y - legL * 0.1;
+      leg2X2 = bodyX + legL * 0.2; leg2Y2 = y - legL * 0.1;
+      break;
+    case 'push':
+      arm1X2 = bodyX - armL * 0.8; arm1Y2 = bodyY - armL * 0.1;
+      arm2X2 = bodyX + armL * 0.8; arm2Y2 = bodyY - armL * 0.1;
+      leg1X2 = bodyX - legL * 0.4; leg1Y2 = y - legL * 0.1;
+      leg2X2 = bodyX + legL * 0.4; leg2Y2 = y - legL * 0.1;
+      headDy = 5 * scale;
+      break;
+    case 'look_right':
+      headDx = 8 * scale;
+      break;
+    case 'powerful': // Bigger, more spread out
+      sw *= 1.5; headR *= 1.5; bodyH *= 1.5; armL *= 1.5; legL *= 1.5;
+      headY = y - legL - bodyH - headR;
+      bodyY = y - legL - bodyH / 2;
+      arm1X1 = bodyX; arm1Y1 = bodyY - bodyH / 2 + sw / 2; arm1X2 = bodyX - armL * 1.0; arm1Y2 = bodyY;
+      arm2X1 = bodyX; arm2Y1 = bodyY - bodyH / 2 + sw / 2; arm2X2 = bodyX + armL * 1.0; arm2Y2 = bodyY;
+      leg1X1 = bodyX; leg1Y1 = bodyY + bodyH / 2 - sw / 2; leg1X2 = bodyX - legL * 0.6; leg1Y2 = y;
+      leg2X1 = bodyX; leg2Y1 = bodyY + bodyH / 2 - sw / 2; leg2X2 = bodyX + legL * 0.6; leg2Y2 = y;
+      break;
+    case 'social_idle':
+      // Default idle is fine
+      break;
+    case 'social_wave':
+      arm1X1 = bodyX; arm1Y1 = bodyY - bodyH / 2 + sw / 2; arm1X2 = bodyX - armL * 0.5; arm1Y2 = bodyY - armL * 0.8; // Waving arm
+      arm2X1 = bodyX; arm2Y1 = bodyY - bodyH / 2 + sw / 2; arm2X2 = bodyX + armL * 0.7; arm2Y2 = bodyY + armL * 0.3;
+      break;
+  }
+
+  g += line(bodyX, bodyY - bodyH / 2, bodyX, bodyY + bodyH / 2, col, sw); // Body
+  g += line(arm1X1, arm1Y1, arm1X2, arm1Y2, col, sw); // Arm 1
+  g += line(arm2X1, arm2Y1, arm2X2, arm2Y2, col, sw); // Arm 2
+  g += line(leg1X1, leg1Y1, leg1X2, leg1Y2, col, sw); // Leg 1
+  g += line(leg2X1, leg2Y1, leg2X2, leg2Y2, col, sw); // Leg 2
+  g += dot(bodyX + headDx, headY + headDy, headR, col); // Head
+  g += sword;
+  g += '</g>';
+  return g;
+}
+
+// XP Bar: x, y is center. fillPct 0-1.
+// type: 'xp' (filling bar), 'max' (solid bar with marker)
+function xpBar(x, y, w, h, fillPct, type, col, op) {
+  op = op == null ? 1 : op;
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, h / 2, col, 5, op);
+  if (type === 'xp') {
+    g += '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + (w * fillPct) + '" height="' + h +
+         '" rx="' + (h / 2) + '" fill="' + col + '" opacity="' + op + '"/>';
+  } else if (type === 'max') {
+    g += rrect(x, y, w, h, h / 2, col, op);
+    g += rrect(x + w / 2 + 30, y, 40, h, h / 4, col, op); // "MAX" visual marker
+  }
+  g += '</g>';
+  return g;
+}
+
+// Level Cap / Gate: x, y is center of base.
+// type: 'wall' (solid rect), 'gate' (ornate lines)
+function levelCap(x, y, h, type, col, sw, op) {
+  op = op == null ? 1 : op;
+  sw = sw == null ? 10 : sw;
+  var g = '<g opacity="' + op + '">';
+  var capH = h;
+  var capW = 120;
+  var topY = y - capH;
+  var midY = y - capH / 2;
+
+  if (type === 'wall') {
+    g += rrect(x, midY, capW, capH, 12, col, op);
+  } else if (type === 'gate') {
+    var barW = 10;
+    var barSpacing = 30;
+    var numBars = Math.floor(capW / barSpacing) - 1;
+    for (var i = 0; i <= numBars; i++) {
+      var barX = x - capW / 2 + barSpacing / 2 + i * barSpacing;
+      g += line(barX, topY, barX, y, col, barW, op);
+    }
+    g += line(x - capW / 2, topY + 20, x + capW / 2, topY + 20, col, sw * 0.8, op); // Top crossbar
+    g += line(x - capW / 2, y - 20, x + capW / 2, y - 20, col, sw * 0.8, op); // Bottom crossbar
+    g += ring(x, midY, capW / 3, col, sw * 0.6, op * 0.8); // Central ring detail
+  }
+  g += '</g>';
+  return g;
+}
+
+function groundLine(y, x1, x2, col, sw, op) {
+  return line(x1, y, x2, y, col, sw, op);
+}
+
+function questionMarkGlyph(x, y, size, col, op) {
+  var sw = size / 5;
+  var r = size / 2;
+  var d = "M " + x + " " + (y - r) + " A " + r + " " + r + " 0 1 1 " + (x - r) + " " + y;
+  return pathTag(d, col, sw, op) + dot(x - sw / 2, y + r + sw, sw * 0.8, col, op);
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.02, 1.0, smooth(u)); // Subtle camera zoom
+  s += '<g ' + camera(scale, 0, 0) + '>';
+
+  var playerX = lerp(CX - 300, CX + 300, easeOut(u));
+  var playerBob = Math.sin(u * Math.PI * 4) * 8;
+  var xpFill = easeOut(u);
+
+  s += groundLine(PLAYER_Y + 70, 0, W, WHITE, 8, 0.2);
+  s += groundLine(PLAYER_Y + 70 + 80, 0, W, WHITE, 6, 0.15);
+
+  // Simple landscape elements
+  for (var i = 0; i < 5; i++) {
+    var hillX = (CX - 500 + i * 250 - u * 100) % (W + 200);
+    if (hillX < -100) hillX += (W + 200);
+    s += dot(hillX, PLAYER_Y + 50 + rnd(i) * 30, 20 + rnd(i + 1) * 10, DIM, 0.3);
+  }
+
+  s += stickFigure(playerX, PLAYER_Y + playerBob, 1, AMBER, 'run', 1);
+  s += xpBar(XP_BAR_X, XP_BAR_Y, 600, 40, xpFill, 'xp', AMBER, 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var playerTargetX = CAP_X - 100;
+  var playerX = lerp(CX - 300, playerTargetX, smooth(ramp(u, 0.0, 0.3)));
+  var collideBounce = Math.sin(ramp(u, 0.3, 0.5) * Math.PI) * 40;
+  playerX += collideBounce;
+  var playerPose = u < 0.3 ? 'run' : 'collide';
+  if (u > 0.6) playerPose = 'idle';
+
+  var capHeight = BOT - TOP - 100;
+  var capY = TOP + capHeight / 2 + 50;
+
+  var xpBarFill = 1;
+  var xpBarType = 'xp';
+  var xpBarOp = 1;
+
+  if (u > 0.4 && u < 0.6) { // XP bar flashes red
+    xpBarOp = 0.8 + 0.2 * Math.sin(u * 20);
+    xpBarFill = 1;
+  }
+  if (u >= 0.6) { // XP bar becomes MAX
+    xpBarType = 'max';
+    xpBarOp = 1;
+  }
+
+  s += groundLine(PLAYER_Y + 70, 0, W, WHITE, 8, 0.2);
+
+  s += stickFigure(playerX, PLAYER_Y, 1, AMBER, playerPose, 1);
+  s += levelCap(CAP_X, capY, capHeight, 'wall', CORAL, 12, 1);
+  s += xpBar(XP_BAR_X, XP_BAR_Y, 600, 40, xpBarFill, xpBarType, CORAL, xpBarOp);
+
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var capHeight = BOT - TOP - 100;
+  var capY = TOP + capHeight / 2 + 50;
+
+  var playerX = CAP_X - 100;
+  var pushOffset = Math.sin(ramp(u, 0.3, 0.6) * Math.PI) * 15;
+  var playerPose = 'idle';
+  if (u > 0.2 && u < 0.7) playerPose = 'push';
+
+  var qmOp = ramp(u, 0.6, 0.9);
+  var qmScale = 1 + Math.sin(u * Math.PI * 5) * 0.1;
+
+  s += groundLine(PLAYER_Y + 70, 0, W, WHITE, 8, 0.2);
+
+  s += stickFigure(playerX + pushOffset, PLAYER_Y, 1, AMBER, playerPose, 1);
+  s += levelCap(CAP_X, capY, capHeight, 'wall', CORAL, 12, 1);
+  s += xpBar(XP_BAR_X, XP_BAR_Y, 600, 40, 1, 'max', CORAL, 1);
+
+  if (qmOp > 0.05) {
+    s += questionMarkGlyph(playerX - 60, PLAYER_Y - 180, 40 * qmScale, WHITE, qmOp);
+    s += questionMarkGlyph(playerX + 40, PLAYER_Y - 220, 30 * qmScale, DIM, qmOp * 0.6);
+  }
+
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var capHeight = BOT - TOP - 100;
+  var capY = TOP + capHeight / 2 + 50;
+
+  var transform = smooth(ramp(u, 0.0, 0.4)); // Wall to gate
+  var reveal = smooth(ramp(u, 0.5, 0.9)); // Reveal other players
+
+  var capSW = lerp(12, 8, transform);
+
+  // Morphing from solid coral wall to blue gate
+  s += rrect(CAP_X, capY, 120, capHeight, 12, CORAL, 1 - transform); // Fading out coral wall
+  s += levelCap(CAP_X, capY, capHeight, 'gate', BLUE, capSW, transform); // Fading in blue gate
+
+  var playerX = CAP_X - 100;
+  s += stickFigure(playerX, PLAYER_Y, 1, AMBER, 'look_right', 1);
+  s += xpBar(XP_BAR_X, XP_BAR_Y, 600, 40, 1, 'max', CORAL, 1 - transform); // MAX bar fades out
+
+  // Other players appear behind the gate
+  if (reveal > 0.05) {
+    var groupX = CAP_X + 250;
+    var groupY = PLAYER_Y + 50;
+    s += stickFigure(groupX, groupY, 0.9, WHITE, 'social_idle', reveal * 0.8);
+    s += stickFigure(groupX + 100, groupY - 20, 0.8, WHITE, 'social_wave', reveal * 0.9);
+    s += stickFigure(groupX + 180, groupY + 30, 0.7, DIM, 'social_idle', reveal * 0.7);
+  }
+
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var capHeight = BOT - TOP - 100;
+  var capY = TOP + capHeight / 2 + 50;
+
+  var powerfulPlayerScale = lerp(1.8, 1.6, smooth(u));
+  var powerfulPlayerX = lerp(CX - 400, CX + 400, easeOut(u));
+  var powerfulPlayerY = PLAYER_Y - 50;
+  var playerGlowOp = 0.2 + 0.1 * Math.sin(u * Math.PI * 10);
+
+  // Game elements being destroyed
+  for (var i = 0; i < 6; i++) {
+    var elemX = (CX - 500 + i * 200 - u * 300) % (W + 200);
+    if (elemX < -100) elemX += (W + 200);
+    var elemY = PLAYER_Y + 50 + rnd(i) * 60;
+    var distToPlayer = Math.abs(elemX - powerfulPlayerX);
+    var destroyOp = clamp(distToPlayer / 150, 0, 1);
+    if (distToPlayer < 100) {
+      destroyOp = 1 - ramp(100 - distToPlayer, 0, 100);
+      s += ring(elemX, elemY, 30 + (1 - destroyOp) * 20, CORAL, 5, (1 - destroyOp) * 0.8); // Destruction pulse
+    }
+    s += rrect(elemX, elemY, 40, 40, 8, DIM, destroyOp * 0.7);
+  }
+
+  s += stickFigure(powerfulPlayerX, powerfulPlayerY, powerfulPlayerScale, AMBER, 'powerful', 1);
+  s += ring(powerfulPlayerX, powerfulPlayerY - 100 * powerfulPlayerScale, 100 * powerfulPlayerScale, CORAL, 10, playerGlowOp);
+
+  // Gate materializes to moderate
+  var gateAppear = smooth(ramp(u, 0.6, 0.9));
+  s += levelCap(CAP_X, capY, capHeight, 'gate', BLUE, 8, gateAppear * 0.8);
+
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.9, smooth(ramp(u, 0.5, 0.9))); // subtle pull back as player joins group
+  s += '<g ' + camera(scale, 0, 0) + '>';
+
+  var capHeight = BOT - TOP - 100;
+  var capY = TOP + capHeight / 2 + 50;
+
+  var playerX = lerp(CAP_X - 100, CAP_X + 250, smooth(ramp(u, 0.0, 0.4)));
+  var playerY = PLAYER_Y;
+  var playerPose = u < 0.5 ? 'run' : 'social_idle';
+  if (u > 0.6) playerPose = 'social_wave';
+
+  var gateRecede = smooth(ramp(u, 0.5, 0.9));
+  var gateOp = lerp(1, 0.3, gateRecede);
+  var gateScale = lerp(1, 0.8, gateRecede);
+
+  s += groundLine(PLAYER_Y + 70, 0, W, WHITE, 8, 0.2);
+
+  // Other players (social group)
+  var groupX = CAP_X + 250;
+  var groupY = PLAYER_Y + 50;
+  s += stickFigure(groupX, groupY, 0.9, WHITE, 'social_idle', 0.8);
+  s += stickFigure(groupX + 100, groupY - 20, 0.8, WHITE, 'social_idle', 0.9);
+  s += stickFigure(groupX + 180, groupY + 30, 0.7, DIM, 'social_idle', 0.7);
+
+  // Gate recedes and fades
+  s += '<g transform="scale(' + gateScale + ') translate(' + (CX - CX * gateScale) + ' ' + (CY - CY * gateScale) + ')">';
+  s += levelCap(CAP_X, capY, capHeight, 'gate', BLUE, 8, gateOp);
+  s += '</g>';
+
+  s += stickFigure(playerX, playerY, 1, AMBER, playerPose, 1);
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

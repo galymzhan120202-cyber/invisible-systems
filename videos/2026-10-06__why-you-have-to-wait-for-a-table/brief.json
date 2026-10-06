@@ -1,0 +1,15 @@
+{
+  "id": "why-you-have-to-wait-for-a-table",
+  "slug": "2026-10-06__why-you-have-to-wait-for-a-table",
+  "title_working": "Why Restaurants Make You Wait for a Table",
+  "system": "reservation and demand management",
+  "cluster": "queues-and-waiting",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "failed",
+  "created_at": "2026-10-06T13:22:48+00:00",
+  "produced_at": "2026-10-06T13:35:12+00:00",
+  "verify": "FAIL",
+  "takeaway": "Understanding restaurant queues reveals they're not random, but a system designed for everyone's best dining experience.",
+  "animation_source": "llm"
+}

@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You arrive at a bustling restaurant, hungry for a meal. You just want a table, a simple, reasonable request after a long day.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "The host tells you there's a 30-minute wait, despite seeing several empty tables. A question mark hangs over your head.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "You suspect they’re trying to seem exclusive, or the staff are just inefficient. This frustrating delay feels totally unnecessary.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "What you don't see is the hidden flow. Those 'empty' tables are buffers: cleared, reset, or awaiting a server.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "This buffer ensures kitchen flow and good server attention. No wait means chaos, rushed service, and a poor experience.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "So, next time you wait, you’ll understand. It’s an invisible system ensuring your dining experience is consistently good for everyone.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

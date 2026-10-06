@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Restaurants Make You Wait for a Table</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band
+var MID_Y = (TOP + BOT) / 2;
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue  -> system / flow
+var AMBER = "#F2A93B";              // warm amber   -> YOU / desire
+var CORAL = "#FF5B5B";              // coral red    -> frustration / naive assumption
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, fill) {
+  return '<path d="' + d + '" fill="' + (fill || 'none') + '" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* Stick figure builder */
+function stickFigure(x, y, scale, color, pose, op) {
+  scale = scale || 1;
+  op = op == null ? 1 : op;
+  var sw = 8 * scale;
+  var headR = 24 * scale;
+  var bodyH = 80 * scale;
+  var armL = 50 * scale;
+  var legL = 60 * scale;
+
+  var g = '<g opacity="' + op + '">';
+  g += dot(x, y - headR - bodyH / 2, headR, color); // Head
+
+  // Body
+  g += line(x, y - bodyH / 2, x, y + bodyH / 2, color, sw);
+
+  // Arms & Legs based on pose
+  if (pose === 'walking') {
+    g += line(x - 10 * scale, y - bodyH / 4, x - 10 * scale - armL * 0.6, y - bodyH / 4 + armL * 0.4, color, sw); // Arm back
+    g += line(x + 10 * scale, y - bodyH / 4, x + 10 * scale + armL * 0.6, y - bodyH / 4 - armL * 0.4, color, sw); // Arm forward
+    g += line(x - 10 * scale, y + bodyH / 2, x - 10 * scale - legL * 0.4, y + bodyH / 2 + legL, color, sw); // Leg back
+    g += line(x + 10 * scale, y + bodyH / 2, x + 10 * scale + legL * 0.4, y + bodyH / 2 + legL, color, sw); // Leg forward
+  } else if (pose === 'pointing') {
+    g += line(x, y - bodyH / 4, x + armL, y - bodyH / 4 - armL * 0.2, color, sw); // Pointing arm
+    g += line(x, y - bodyH / 4, x - armL * 0.8, y - bodyH / 4 + armL * 0.2, color, sw); // Other arm
+    g += line(x, y + bodyH / 2, x - 10 * scale, y + bodyH / 2 + legL, color, sw);
+    g += line(x, y + bodyH / 2, x + 10 * scale, y + bodyH / 2 + legL, color, sw);
+  } else if (pose === 'frustrated') {
+    g += line(x - 10 * scale, y - bodyH / 4, x + 10 * scale, y - bodyH / 4, color, sw); // Crossed arms (simplified)
+    g += line(x - 10 * scale, y - bodyH / 4 + armL * 0.4, x + 10 * scale, y - bodyH / 4 + armL * 0.4, color, sw);
+    g += line(x, y + bodyH / 2, x - 10 * scale, y + bodyH / 2 + legL, color, sw);
+    g += line(x, y + bodyH / 2, x + 10 * scale, y + bodyH / 2 + legL, color, sw);
+  } else if (pose === 'understanding') {
+    g += line(x, y - bodyH / 4, x - armL * 0.7, y - bodyH / 4 + armL * 0.3, color, sw);
+    g += line(x, y - bodyH / 4, x + armL * 0.7, y - bodyH / 4 + armL * 0.3, color, sw);
+    g += line(x, y + bodyH / 2, x - 10 * scale, y + bodyH / 2 + legL, color, sw);
+    g += line(x, y + bodyH / 2, x + 10 * scale, y + bodyH / 2 + legL, color, sw);
+  } else if (pose === 'host') {
+    g += line(x, y - bodyH / 4, x - armL * 0.6, y - bodyH / 4 + armL * 0.2, color, sw); // Gentle gesture
+    g += line(x, y - bodyH / 4, x + armL * 0.6, y - bodyH / 4 + armL * 0.2, color, sw);
+    g += line(x, y + bodyH / 2, x - 10 * scale, y + bodyH / 2 + legL, color, sw);
+    g += line(x, y + bodyH / 2, x + 10 * scale, y + bodyH / 2 + legL, color, sw);
+  } else { // 'standing' or default
+    g += line(x, y - bodyH / 4, x - armL, y - bodyH / 4, color, sw);
+    g += line(x, y - bodyH / 4, x + armL, y - bodyH / 4, color, sw);
+    g += line(x, y + bodyH / 2, x - 10 * scale, y + bodyH / 2 + legL, color, sw);
+    g += line(x, y + bodyH / 2, x + 10 * scale, y + bodyH / 2 + legL, color, sw);
+  }
+  g += '</g>';
+  return g;
+}
+
+/* Restaurant elements */
+function restaurantExterior(op) {
+  op = op == null ? 1 : op;
+  var g = '<g opacity="' + op + '">';
+  // Building outline
+  g += rrectStroke(CX, CY, 700, 1200, 40, WHITE, 10, 0.8);
+  // Door
+  g += rrect(CX, CY + 300, 160, 240, 10, WHITE, 0.9);
+  g += line(CX - 40, CY + 300, CX - 40, CY + 360, DIM, 6); // Door handle
+  // Window
+  g += rrect(CX, CY - 300, 400, 300, 10, DIM, 0.2);
+  g += line(CX - 200, CY - 300, CX + 200, CY - 300, WHITE, 2, 0.4);
+  g += line(CX, CY - 450, CX, CY - 150, WHITE, 2, 0.4);
+  g += '</g>';
+  return g;
+}
+
+function table(x, y, w, h, col, sw, op, seats) {
+  op = op == null ? 1 : op;
+  seats = seats == null ? 4 : seats;
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, 10, col, sw);
+  if (seats > 0) g += dot(x - w / 2 - 20, y, 10, col, op);
+  if (seats > 1) g += dot(x + w / 2 + 20, y, 10, col, op);
+  if (seats > 2) g += dot(x, y - h / 2 - 20, 10, col, op);
+  if (seats > 3) g += dot(x, y + h / 2 + 20, 10, col, op);
+  g += '</g>';
+  return g;
+}
+
+function stomachIcon(x, y, r, col, op) {
+  var d = "M " + (x - r * 0.6) + " " + y + " Q " + x + " " + (y - r * 0.8) + " " + (x + r * 0.6) + " " + y +
+          " M " + (x - r * 0.4) + " " + (y + r * 0.2) + " Q " + x + " " + (y - r * 0.4) + " " + (x + r * 0.4) + " " + (y + r * 0.2);
+  return pathTag(d, col, 7, op);
+}
+
+function questionMark(x, y, size, col, op) {
+  var d = "M " + x + " " + (y - size) + " Q " + (x + size) + " " + (y - size) + " " + (x + size) + " " + (y) +
+          " Q " + (x + size) + " " + (y + size * 0.5) + " " + (x + size * 0.2) + " " + (y + size * 0.5) +
+          " L " + (x + size * 0.2) + " " + (y + size * 0.7) + " M " + x + " " + (y + size * 1.1) + " L " + x + " " + (y + size * 1.3);
+  return pathTag(d, col, 10, op);
+}
+
+function waitBubble(x, y, w, h, col, op) {
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 20, col);
+  g += line(x - w * 0.3, y - h * 0.1, x + w * 0.3, y - h * 0.1, WHITE, 8); // Two bars for "30 min"
+  g += line(x - w * 0.2, y + h * 0.2, x + w * 0.2, y + h * 0.2, WHITE, 8);
+  g += '</g>';
+  return g;
+}
+
+function thoughtBubble(x, y, w, h, col, op) {
+  var d = "M " + (x - w / 2) + " " + (y - h / 2) +
+          " Q " + (x - w * 0.6) + " " + (y - h * 0.8) + " " + x + " " + (y - h * 0.9) +
+          " Q " + (x + w * 0.6) + " " + (y - h * 0.8) + " " + (x + w / 2) + " " + (y - h / 2) +
+          " Q " + (x + w * 0.8) + " " + (y - h * 0.2) + " " + (x + w * 0.7) + " " + (y + h * 0.2) +
+          " Q " + (x + w * 0.4) + " " + (y + h * 0.6) + " " + (x + w * 0.1) + " " + (y + h * 0.4) +
+          " Q " + (x - w * 0.2) + " " + (y + h * 0.8) + " " + (x - w * 0.5) + " " + (y + h * 0.5) +
+          " Q " + (x - w * 0.7) + " " + (y + h * 0.1) + " " + (x - w / 2) + " " + (y - h / 2) + " Z";
+  return pathTag(d, col, 4, op, col); // Filled thought bubble
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.0, 1.1, smooth(ramp(u, 0.0, 0.4)));
+  var tx = lerp(0, -100, smooth(ramp(u, 0.0, 0.4)));
+  var ty = lerp(0, 50, smooth(ramp(u, 0.0, 0.4)));
+  s += '<g ' + camera(scale, tx, ty) + '>';
+
+  s += restaurantExterior(1);
+
+  var figX = lerp(CX - 400, CX - 100, easeOut(ramp(u, 0.0, 0.3)));
+  var figY = BOT - 280;
+  var figOp = lerp(0, 1, ramp(u, 0.0, 0.1));
+  var figPose = u < 0.3 ? 'walking' : (u < 0.7 ? 'pointing' : 'standing');
+  s += stickFigure(figX, figY, 1, AMBER, figPose, figOp);
+
+  // Stomach icon
+  var stomachOp = lerp(0, 1, ramp(u, 0.2, 0.4)) * (1 - ramp(u, 0.6, 0.8));
+  s += stomachIcon(figX + 60, figY - 100, 30, AMBER, stomachOp);
+
+  // Empty tables
+  var tableOp = lerp(0, 0.8, ramp(u, 0.4, 0.7));
+  s += table(CX + 200, CY - 200, 160, 100, WHITE, 7, tableOp);
+  s += table(CX + 200, CY + 0, 160, 100, WHITE, 7, tableOp);
+  s += table(CX + 200, CY + 200, 160, 100, WHITE, 7, tableOp);
+  s += table(CX - 200, CY + 100, 160, 100, WHITE, 7, tableOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20s): GO */
+function scene2(u) {
+  var s = '';
+  s += '<g ' + camera(1.1, -100, 50) + '>';
+
+  s += restaurantExterior(1);
+
+  var figX = CX - 100;
+  var figY = BOT - 280;
+  s += stickFigure(figX, figY, 1, AMBER, 'standing', 1);
+
+  // Empty tables
+  s += table(CX + 200, CY - 200, 160, 100, WHITE, 7, 0.8);
+  s += table(CX + 200, CY + 0, 160, 100, WHITE, 7, 0.8);
+  s += table(CX + 200, CY + 200, 160, 100, WHITE, 7, 0.8);
+  s += table(CX - 200, CY + 100, 160, 100, WHITE, 7, 0.8);
+
+  // Host appears
+  var hostX = lerp(CX + 400, CX + 50, easeOut(ramp(u, 0.0, 0.2)));
+  var hostY = BOT - 280;
+  s += stickFigure(hostX, hostY, 1, WHITE, 'host', 1);
+
+  // "30 min" bubble
+  var bubbleOp = lerp(0, 1, ramp(u, 0.1, 0.3)) * (1 - ramp(u, 0.7, 0.9));
+  var bubbleX = lerp(hostX, figX + 100, easeOut(ramp(u, 0.3, 0.5)));
+  var bubbleY = lerp(hostY - 200, figY - 200, easeOut(ramp(u, 0.3, 0.5)));
+  s += waitBubble(bubbleX, bubbleY, 120, 80, CORAL, bubbleOp);
+
+  // Question mark
+  var qmOp = lerp(0, 1, ramp(u, 0.6, 0.8));
+  s += questionMark(figX, figY - 200, 40, CORAL, qmOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30s): SEARCH */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.1, -100, 50) + '>';
+
+  s += restaurantExterior(1);
+
+  var figX = CX - 100;
+  var figY = BOT - 280;
+  s += stickFigure(figX, figY, 1, AMBER, 'frustrated', 1);
+
+  // Empty tables with subtle coral flash
+  var flashOp = Math.sin(u * Math.PI * 4) * 0.2 * (1 - ramp(u, 0.7, 0.9));
+  s += table(CX + 200, CY - 200, 160, 100, WHITE, 7, 0.8);
+  s += rrect(CX + 200, CY - 200, 160, 100, 10, CORAL, flashOp);
+  s += table(CX + 200, CY + 0, 160, 100, WHITE, 7, 0.8);
+  s += rrect(CX + 200, CY + 0, 160, 100, 10, CORAL, flashOp);
+  s += table(CX + 200, CY + 200, 160, 100, WHITE, 7, 0.8);
+  s += rrect(CX + 200, CY + 200, 160, 100, 10, CORAL, flashOp);
+  s += table(CX - 200, CY + 100, 160, 100, WHITE, 7, 0.8);
+  s += rrect(CX - 200, CY + 100, 160, 100, 10, CORAL, flashOp);
+
+  // Thought bubble
+  var thoughtOp = lerp(0, 1, ramp(u, 0.3, 0.5)) * (1 - ramp(u, 0.8, 0.95));
+  var bubbleX = figX + 150;
+  var bubbleY = figY - 250;
+  s += thoughtBubble(bubbleX, bubbleY, 300, 200, CORAL, thoughtOp);
+
+  if (thoughtOp > 0.1) {
+    // Inside thought bubble: inefficient server
+    s += stickFigure(bubbleX - 80, bubbleY + 30, 0.6, WHITE, 'walking', thoughtOp * 0.8);
+    s += table(bubbleX + 60, bubbleY + 30, 80, 50, WHITE, 4, thoughtOp * 0.8, 2);
+    s += dot(bubbleX + 60, bubbleY + 30, 8, DIM, thoughtOp * 0.8); // Occupied dot
+    s += dot(bubbleX - 40, bubbleY - 80, 8, DIM, thoughtOp * 0.6); // Ignored table dots
+    s += dot(bubbleX + 100, bubbleY - 80, 8, DIM, thoughtOp * 0.6);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40s): FIND */
+function scene4(u) {
+  var s = '';
+  var scale = lerp(1.1, 0.9, smooth(ramp(u, 0.0, 0.3)));
+  var tx = lerp(-100, 0, smooth(ramp(u, 0.0, 0.3)));
+  var ty = lerp(50, 0, smooth(ramp(u, 0.0, 0.3)));
+  s += '<g ' + camera(scale, tx, ty) + '>';
+
+  // Restaurant exterior fades out
+  s += restaurantExterior(1 - ramp(u, 0.0, 0.2));
+
+  // Flow diagram appears
+  var diagramOp = ramp(u, 0.1, 0.4);
+  var tableSize = lerp(160, 100, smooth(ramp(u, 0.2, 0.4)));
+  var tableSW = lerp(7, 4, smooth(ramp(u, 0.2, 0.4)));
+
+  // Tables as nodes
+  var t1X = CX - 200, t1Y = CY - 300;
+  var t2X = CX + 200, t2Y = CY - 300;
+  var t3X = CX - 200, t3Y = CY;
+  var t4X = CX + 200, t4Y = CY;
+  var t5X = CX - 200, t5Y = CY + 300;
+  var t6X = CX + 200, t6Y = CY + 300;
+
+  var tableColor = WHITE;
+  var blueTableOp = lerp(0, 1, ramp(u, 0.4, 0.6));
+
+  // Table states cycle
+  var cyclePhase = u * 2;
+  var t1State = (Math.floor(cyclePhase + rnd(10) * 0.5) % 2 === 0) ? BLUE : WHITE;
+  var t2State = (Math.floor(cyclePhase + rnd(11) * 0.5) % 2 === 0) ? BLUE : WHITE;
+  var t3State = (Math.floor(cyclePhase + rnd(12) * 0.5) % 2 === 0) ? BLUE : WHITE;
+  var t4State = (Math.floor(cyclePhase + rnd(13) * 0.5) % 2 === 0) ? BLUE : WHITE;
+  var t5State = (Math.floor(cyclePhase + rnd(14) * 0.5) % 2 === 0) ? BLUE : WHITE;
+  var t6State = (Math.floor(cyclePhase + rnd(15) * 0.5) % 2 === 0) ? BLUE : WHITE;
+
+  s += rrect(t1X, t1Y, tableSize, tableSize, 10, t1State, diagramOp * blueTableOp);
+  s += rrect(t2X, t2Y, tableSize, tableSize, 10, t2State, diagramOp * blueTableOp);
+  s += rrect(t3X, t3Y, tableSize, tableSize, 10, t3State, diagramOp * blueTableOp);
+  s += rrect(t4X, t4Y, tableSize, tableSize, 10, t4State, diagramOp * blueTableOp);
+  s += rrect(t5X, t5Y, tableSize, tableSize, 10, t5State, diagramOp * blueTableOp);
+  s += rrect(t6X, t6Y, tableSize, tableSize, 10, t6State, diagramOp * blueTableOp);
+
+  s += rrectStroke(t1X, t1Y, tableSize, tableSize, 10, tableColor, tableSW, diagramOp);
+  s += rrectStroke(t2X, t2Y, tableSize, tableSize, 10, tableColor, tableSW, diagramOp);
+  s += rrectStroke(t3X, t3Y, tableSize, tableSize, 10, tableColor, tableSW, diagramOp);
+  s += rrectStroke(t4X, t4Y, tableSize, tableSize, 10, tableColor, tableSW, diagramOp);
+  s += rrectStroke(t5X, t5Y, tableSize, tableSize, 10, tableColor, tableSW, diagramOp);
+  s += rrectStroke(t6X, t6Y, tableSize, tableSize, 10, tableColor, tableSW, diagramOp);
+
+  // Server lines (flow)
+  var flowOp = lerp(0, 1, ramp(u, 0.3, 0.6));
+  var dashPhase = u * 20;
+
+  function flowLine(x1, y1, x2, y2, op, id) {
+    var len = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+    var numDashes = Math.floor(len / 40);
+    var dashArray = (len / numDashes * 0.6) + " " + (len / numDashes * 0.4);
+    var offset = (dashPhase + rnd(id) * 10) % (len / numDashes);
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+           '" stroke="' + BLUE + '" stroke-width="6" stroke-linecap="round" opacity="' + op +
+           '" stroke-dasharray="' + dashArray + '" stroke-dashoffset="' + offset + '"/>';
+  }
+
+  s += flowLine(t1X, t1Y + tableSize / 2, t3X, t3Y - tableSize / 2, flowOp, 1);
+  s += flowLine(t3X, t3Y + tableSize / 2, t5X, t5Y - tableSize / 2, flowOp, 2);
+  s += flowLine(t2X, t2Y + tableSize / 2, t4X, t4Y - tableSize / 2, flowOp, 3);
+  s += flowLine(t4X, t4Y + tableSize / 2, t6X, t6Y - tableSize / 2, flowOp, 4);
+  s += flowLine(t1X + tableSize / 2, t1Y, t2X - tableSize / 2, t2Y, flowOp, 5);
+  s += flowLine(t3X + tableSize / 2, t3Y, t4X - tableSize / 2, t4Y, flowOp, 6);
+  s += flowLine(t5X + tableSize / 2, t5Y, t6X - tableSize / 2, t6Y, flowOp, 7);
+
+  // Buffer zone
+  var bufferOp = lerp(0, 0.3, ramp(u, 0.6, 0.8));
+  s += rrect(CX, CY, 300, 400, 20, BLUE, bufferOp);
+  s += rrectStroke(CX, CY, 300, 400, 20, BLUE, 8, bufferOp * 2);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50s): TAKE */
+function scene5(u) {
+  var s = '';
+  s += '<g ' + camera(0.9, 0, 0) + '>';
+
+  // Split screen transition
+  var splitX = lerp(W / 2, W / 2, smooth(ramp(u, 0.0, 0.2)));
+  var splitW = lerp(0, W, smooth(ramp(u, 0.0, 0.2)));
+  var leftX = CX - splitW / 4;
+  var rightX = CX + splitW / 4;
+
+  // Left side: Smooth flow (BLUE)
+  s += '<g clip-path="inset(0% ' + (50 - splitW / W * 50) + '% 0% 0%)">';
+  s += rrect(leftX, CY, splitW / 2, BOT - TOP, 0, BLUE, 0.15);
+  s += rrectStroke(leftX, CY, splitW / 2, BOT - TOP, 0, BLUE, 10, 0.4);
+
+  var tableSize = 80;
+  var t1X = leftX - 100, t1Y = CY - 200;
+  var t2X = leftX + 100, t2Y = CY - 200;
+  var t3X = leftX - 100, t3Y = CY + 0;
+  var t4X = leftX + 100, t4Y = CY + 0;
+  var t5X = leftX - 100, t5Y = CY + 200;
+  var t6X = leftX + 100, t6Y = CY + 200;
+
+  var cyclePhase = u * 2;
+  var t1State = (Math.floor(cyclePhase + rnd(10) * 0.5) % 2 === 0) ? BLUE : WHITE;
+  var t2State = (Math.floor(cyclePhase + rnd(11) * 0.5) % 2 === 0) ? BLUE : WHITE;
+  var t3State = (Math.floor(cyclePhase + rnd(12) * 0.5) % 2 === 0) ? BLUE : WHITE;
+  var t4State = (Math.floor(cyclePhase + rnd(13) * 0.5) % 2 === 0) ? BLUE : WHITE;
+  var t5State = (Math.floor(cyclePhase + rnd(14) * 0.5) % 2 === 0) ? BLUE : WHITE;
+  var t6State = (Math.floor(cyclePhase + rnd(15) * 0.5) % 2 === 0) ? BLUE : WHITE;
+
+  s += rrect(t1X, t1Y, tableSize, tableSize, 10, t1State, 0.8);
+  s += rrect(t2X, t2Y, tableSize, tableSize, 10, t2State, 0.8);
+  s += rrect(t3X, t3Y, tableSize, tableSize, 10, t3State, 0.8);
+  s += rrect(t4X, t4Y, tableSize, tableSize, 10, t4State, 0.8);
+  s += rrect(t5X, t5Y, tableSize, tableSize, 10, t5State, 0.8);
+  s += rrect(t6X, t6Y, tableSize, tableSize, 10, t6State, 0.8);
+  s += '</g>';
+
+  // Right side: Chaotic scene (CORAL)
+  s += '<g clip-path="inset(0% 0% 0% ' + (50 - splitW / W * 50) + '%)">';
+  s += rrect(rightX, CY, splitW / 2, BOT - TOP, 0, CORAL, 0.15);
+  s += rrectStroke(rightX, CY, splitW / 2, BOT - TOP, 0, CORAL, 10, 0.4);
+
+  // Chaotic elements
+  var chaosOp = ramp(u, 0.3, 0.5);
+  var shake = Math.sin(u * 50) * 5;
+  var chaosScale = lerp(1, 1.1, Math.sin(u * 10) * 0.1);
+
+  // Overwhelmed kitchen (simple rectangle with a few lines)
+  s += rrect(rightX - 100 + shake, CY - 300 + shake, 150, 100, 10, DIM, chaosOp * 0.8);
+  s += line(rightX - 100 + shake, CY - 300 + shake, rightX - 100 + 70 + shake, CY - 300 + 50 + shake, WHITE, 4, chaosOp);
+  s += line(rightX - 100 + shake, CY - 300 + 50 + shake, rightX - 100 + 70 + shake, CY - 300 + shake, WHITE, 4, chaosOp);
+
+  // Frantic servers (crossing lines)
+  s += line(rightX - 150 + shake, CY - 100 + shake, rightX + 150 + shake, CY + 100 + shake, WHITE, 6, chaosOp);
+  s += line(rightX + 150 + shake, CY - 100 + shake, rightX - 150 + shake, CY + 100 + shake, WHITE, 6, chaosOp);
+
+  // Angry customers (white dots)
+  for (var i = 0; i < 5; i++) {
+    var custX = rightX + (rnd(i) - 0.5) * 300;
+    var custY = CY + 200 + (rnd(i + 10) - 0.5) * 200;
+    s += dot(custX + shake, custY + shake, 12, WHITE, chaosOp);
+    s += line(custX - 10 + shake, custY - 10 + shake, custX + 10 + shake, custY - 10 + shake, CORAL, 4, chaosOp); // Frown
+  }
+
+  // Piled tables
+  s += rrect(rightX - 100 + shake, CY + 100 + shake, 100, 60, 10, WHITE, chaosOp * 0.8);
+  s += rrect(rightX - 90 + shake, CY + 120 + shake, 100, 60, 10, WHITE, chaosOp * 0.6);
+  s += rrect(rightX - 110 + shake, CY + 80 + shake, 100, 60, 10, WHITE, chaosOp * 0.7);
+
+  s += '</g>';
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60s): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.9, 1.0, smooth(ramp(u, 0.4, 0.8)));
+  s += '<g ' + camera(scale, 0, 0) + '>';
+
+  // Restaurant exterior returns
+  s += restaurantExterior(ramp(u, 0.0, 0.2));
+
+  // Protagonist returns, understanding posture
+  var figX = CX - 100;
+  var figY = BOT - 280;
+  var figOp = lerp(0, 1, ramp(u, 0.2, 0.4));
+  s += stickFigure(figX, figY, 1, AMBER, 'understanding', figOp);
+
+  // Subtle pulsing flow lines inside the restaurant
+  var flowPulseOp = lerp(0, 0.3, ramp(u, 0.5, 0.7)) * (0.5 + 0.5 * Math.sin(u * Math.PI * 4));
+  var flowSW = 6;
+
+  s += line(CX - 200, CY - 200, CX + 200, CY - 200, BLUE, flowSW, flowPulseOp);
+  s += line(CX - 200, CY + 0, CX + 200, CY + 0, BLUE, flowSW, flowPulseOp);
+  s += line(CX - 200, CY + 200, CX + 200, CY + 200, BLUE, flowSW, flowPulseOp);
+
+  s += line(CX - 200, CY - 200, CX - 200, CY + 200, BLUE, flowSW, flowPulseOp);
+  s += line(CX + 200, CY - 200, CX + 200, CY + 200, BLUE, flowSW, flowPulseOp);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
