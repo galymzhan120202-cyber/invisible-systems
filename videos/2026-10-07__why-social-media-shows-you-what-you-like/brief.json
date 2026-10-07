@@ -1,0 +1,15 @@
+{
+  "id": "why-social-media-shows-you-what-you-like",
+  "slug": "2026-10-07__why-social-media-shows-you-what-you-like",
+  "title_working": "Why Social Media Shows You What You Like",
+  "system": "engagement loops and algorithmic curation",
+  "cluster": "platforms-and-algorithms",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-10-07T13:11:49+00:00",
+  "produced_at": "2026-10-07T13:20:33+00:00",
+  "verify": "PASS",
+  "takeaway": "Social media algorithms create a personalized, reinforcing feedback loop based on your past engagement.",
+  "animation_source": "llm"
+}

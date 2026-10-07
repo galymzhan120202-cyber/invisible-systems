@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Public Parks Have Paths</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary elements
+var BLUE  = "#4C86F0";              // signal blue  -> official paths, structured flow
+var AMBER = "#F2A93B";              // warm amber   -> YOU / desired shortcut
+var CORAL = "#FF5B5B";              // coral red    -> erosion, damage, naive path
+
+var GRASS_GREEN = "#4CAF50";        // vibrant green for park grass
+var ERODED_BROWN = "#6B4226";       // worn earth color
+var DARK_ERODED_BROWN = "#4E311F";  // deeper erosion color
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+// function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); } // Not used, removed.
+
+function hexToRgb(hex) {
+  var bigint = parseInt(hex.slice(1), 16);
+  var r = (bigint >> 16) & 255;
+  var g = (bigint >> 8) & 255;
+  var b = bigint & 255;
+  return [r, g, b];
+}
+function rgbToHex(r, g, b) {
+  return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
+}
+function lerpColor(a, b, t) {
+  var ca = hexToRgb(a), cb = hexToRgb(b);
+  var r = Math.round(lerp(ca[0], cb[0], t));
+  var g = Math.round(lerp(ca[1], cb[1], t));
+  var b = Math.round(lerp(ca[2], cb[2], t));
+  return rgbToHex(r, g, b);
+}
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function chevron(x, y, size, col, op) {
+  var d = "M " + (x - size) + " " + (y + size * 0.55) + " L " + x + " " + (y - size * 0.55) + " L " + (x + size) + " " + (y + size * 0.55);
+  return pathTag(d, col, 14, op);
+}
+
+/* stick figure: x, y is feet center */
+function stickFigure(x, y, col, gazeDir, walkPhase, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var sw = 9;
+  var headR = 20;
+  var bodyLen = 80;
+  var armLen = 60;
+  var legLen = 80;
+
+  var headY = y - legLen - bodyLen - headR;
+  var bodyTopY = y - legLen - bodyLen;
+  var bodyBotY = y - legLen;
+
+  var bob = 0;
+  var legOffset = 0;
+  var armOffset = 0;
+
+  if (walkPhase != null) {
+    bob = Math.sin(walkPhase * Math.PI * 2) * 8; // gentle bob
+    legOffset = Math.sin(walkPhase * Math.PI * 2) * 10; // legs swing opposite
+    armOffset = Math.sin(walkPhase * Math.PI * 2 + Math.PI) * 10; // arms swing opposite
+  }
+
+  // Head
+  var headXOffset = 0;
+  var headYOffset = 0;
+  if (gazeDir === 'left') headXOffset = -10;
+  else if (gazeDir === 'right') headXOffset = 10;
+  else if (gazeDir === 'up') headYOffset = -10;
+  else if (gazeDir === 'down') headYOffset = 10;
+  g += dot(x + headXOffset, headY + bob + headYOffset, headR, col);
+
+  // Body
+  g += line(x, bodyTopY + bob, x, bodyBotY + bob, col, sw);
+
+  // Arms
+  g += line(x - 15 - armOffset, bodyTopY + bob + 10, x - 15 - armOffset, bodyTopY + bob + 10 + armLen, col, sw);
+  g += line(x + 15 + armOffset, bodyTopY + bob + 10, x + 15 + armOffset, bodyTopY + bob + 10 + armLen, col, sw);
+
+  // Legs
+  g += line(x - 10 - legOffset, bodyBotY + bob, x - 10 - legOffset, bodyBotY + bob + legLen, col, sw);
+  g += line(x + 10 + legOffset, bodyBotY + bob, x + 10 + legOffset, bodyBotY + bob + legLen, col, sw);
+
+  g += '</g>';
+  return g;
+}
+
+function grassPatch(y1, y2, color, op) {
+  return rrect(CX, (y1 + y2) / 2, W, y2 - y1, 0, color, op);
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- scene specific constants ---------- */
+var SF_BASE_Y = BOT - 100; // Stick figure feet base Y
+
+// The distant, winding blue path (not the one SF takes)
+var CURVED_BLUE_PATH_DATA = "M " + (CX - 200) + " " + BOT +
+                            " C " + (CX - 300) + " " + (CY + 100) +
+                            ", " + (CX + 300) + " " + (CY - 100) +
+                            ", " + (CX + 200) + " " + TOP;
+
+// The straight desire path route (the one SF takes)
+var STRAIGHT_PATH_X = CX;
+var STRAIGHT_PATH_Y_START = BOT - 100;
+var STRAIGHT_PATH_Y_END = TOP + 100;
+var STRAIGHT_PATH_DATA = "M " + STRAIGHT_PATH_X + " " + STRAIGHT_PATH_Y_START + " L " + STRAIGHT_PATH_X + " " + STRAIGHT_PATH_Y_END;
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  s += grassPatch(TOP, BOT, GRASS_GREEN, 1);
+  s += pathTag(CURVED_BLUE_PATH_DATA, BLUE, 12, 0.3); // Distant, faint blue path
+
+  var bob = Math.sin(u * Math.PI * 3) * 5; // Gentle breathing bob
+  s += stickFigure(CX, SF_BASE_Y + bob, AMBER, 'straight', null, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var gazeU = smooth(u * 1.5); // Faster gaze change
+  var gazeDir = gazeU < 0.5 ? 'left' : 'up'; // Look at blue path, then open grass
+
+  var camTx = lerp(0, -100, smooth(clamp(u * 2, 0, 0.5))); // Pan left towards blue path
+  var camScale = lerp(1.0, 1.1, smooth(clamp((u - 0.5) * 2, 0, 0.5))); // Zoom on open grass
+  s += '<g ' + camera(camScale, camTx, 0) + '>';
+
+  s += grassPatch(TOP, BOT, GRASS_GREEN, 1);
+  s += pathTag(CURVED_BLUE_PATH_DATA, BLUE, 12, lerp(0.3, 0.1, smooth(u))); // Blue path fades
+
+  s += stickFigure(CX, SF_BASE_Y, AMBER, gazeDir, null, 1);
+
+  // "Desire" chevron pointing up the straight path
+  var chevronOp = ramp(u, 0.6, 0.9);
+  if (chevronOp > 0.02) {
+    s += chevron(STRAIGHT_PATH_X, SF_BASE_Y - 200, 30, AMBER, chevronOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var sfMoveU = smooth(u);
+  var sfY = lerp(SF_BASE_Y, SF_BASE_Y - 800, sfMoveU);
+  var sfWalkPhase = u * 2; // Walking animation speed
+
+  var camTy = lerp(0, -100, sfMoveU); // Camera follows stick figure up
+  s += '<g ' + camera(1.0, 0, camTy) + '>';
+
+  s += grassPatch(TOP, BOT, GRASS_GREEN, 1);
+
+  // Coral red line appears behind the stick figure
+  var pathSegmentY = lerp(STRAIGHT_PATH_Y_START, sfY + 100, smooth(ramp(u, 0.1, 0.9)));
+  if (pathSegmentY < STRAIGHT_PATH_Y_START - 5) { // Only draw if a segment has formed
+    s += pathTag("M " + STRAIGHT_PATH_X + " " + STRAIGHT_PATH_Y_START + " L " + STRAIGHT_PATH_X + " " + pathSegmentY, CORAL, 7, 0.8);
+  }
+
+  // Other tiny amber stick figures following the path
+  for (var i = 0; i < 5; i++) {
+    var otherSfU = (u * 0.8 + rnd(i) * 0.2) % 1;
+    var otherSfY = lerp(SF_BASE_Y + 200, STRAIGHT_PATH_Y_END - 50, otherSfU);
+    if (otherSfY > TOP + 50 && otherSfY < BOT - 50) {
+      s += stickFigure(STRAIGHT_PATH_X + (rnd(i + 10) - 0.5) * 40, otherSfY, DIM, 'up', otherSfU * 1.5, 0.7);
+    }
+  }
+
+  s += stickFigure(STRAIGHT_PATH_X, sfY, AMBER, 'up', sfWalkPhase, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  s += grassPatch(TOP, BOT, GRASS_GREEN, 1);
+
+  // The coral line widens into a distinct desire path
+  var pathWidth = lerp(7, 80, smooth(u));
+  s += pathTag(STRAIGHT_PATH_DATA, CORAL, pathWidth, 0.9);
+
+  // Stick figure stands next to it, observing
+  s += stickFigure(STRAIGHT_PATH_X - 120, SF_BASE_Y, AMBER, 'right', null, 1);
+
+  // A simple "sign" next to the path to indicate "desire path"
+  var signOp = ramp(u, 0.4, 0.8);
+  if (signOp > 0.02) {
+    var signX = STRAIGHT_PATH_X + 180;
+    var signY = CY - 200;
+    s += rrectStroke(signX, signY, 100, 140, 12, DIM, 6, signOp);
+    s += chevron(signX, signY + 20, 20, DIM, signOp * 0.8); // Arrow glyph
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var camScale = lerp(1.0, 0.9, smooth(u * 0.8)); // Zoom out slightly
+  var camTy = lerp(0, 50, smooth(u * 0.8));
+  s += '<g ' + camera(camScale, 0, camTy) + '>';
+
+  // Grass shows signs of damage around the path
+  s += grassPatch(TOP, BOT, GRASS_GREEN, 1 - smooth(u * 0.6)); // Overall grass fades slightly
+  s += grassPatch(TOP, BOT, ERODED_BROWN, smooth(u * 0.6) * 0.1); // Faint brown overlay
+
+  // The coral red desire path is now wide, muddy, and eroded
+  var pathWidth = lerp(80, 120, smooth(u));
+  s += pathTag(STRAIGHT_PATH_DATA, CORAL, pathWidth, 0.7); // Base erosion
+
+  // Add irregular muddy patches
+  var numMudPatches = 10;
+  for (var i = 0; i < numMudPatches; i++) {
+    var patchU = (u * 0.8 + rnd(i) * 0.2);
+    if (patchU < 0.9) {
+      var patchY = lerp(STRAIGHT_PATH_Y_START + 50, STRAIGHT_PATH_Y_END - 50, rnd(i + 1) + patchU * 0.2);
+      var patchX = STRAIGHT_PATH_X + (rnd(i + 2) - 0.5) * pathWidth * 0.8;
+      var patchSize = lerp(20, 60, rnd(i + 3));
+      s += rrect(patchX, patchY, patchSize, patchSize * 1.2, 10, DARK_ERODED_BROWN, smooth(u) * 0.8);
+    }
+  }
+
+  // Stick figure stands, looking concerned
+  s += stickFigure(STRAIGHT_PATH_X - 160, SF_BASE_Y, AMBER, 'down', null, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var camScale = lerp(0.9, 1.0, smooth(clamp(u / 0.7, 0, 1)));
+  var camTy = lerp(50, 0, smooth(clamp(u / 0.7, 0, 1)));
+  s += '<g ' + camera(camScale, 0, camTy) + '>';
+
+  s += grassPatch(TOP, BOT, GRASS_GREEN, 1); // Grass restored
+
+  // The eroded path transforms into a formal blue paved path
+  var pathColor = lerpColor(CORAL, BLUE, smooth(u));
+  var pathWidth = lerp(120, 90, smooth(u));
+  s += pathTag(STRAIGHT_PATH_DATA, pathColor, pathWidth, 1);
+
+  // Stick figure walks confidently on the new path
+  var sfMoveU = smooth(u);
+  var sfY = lerp(SF_BASE_Y, SF_BASE_Y - 800, sfMoveU);
+  var sfWalkPhase = u * 2;
+  s += stickFigure(STRAIGHT_PATH_X, sfY, AMBER, 'up', sfWalkPhase, 1);
+
+  // Completion ring effect
+  var ringOp = ramp(u, 0.7, 0.9);
+  if (ringOp > 0.02) {
+    s += ring(STRAIGHT_PATH_X, STRAIGHT_PATH_Y_END - 50, 40 + (u - 0.7) * 300, WHITE, 5, clamp(1.2 - (u - 0.7) * 3, 0, 0.6));
+  }
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

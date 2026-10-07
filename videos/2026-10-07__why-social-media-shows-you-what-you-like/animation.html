@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Social Media Shows You What You Like</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band
+var DUR = 60;
+window.__duration = DUR;
+
+var WHITE = "#FFFFFF";
+var BLACK = "#000000";
+var BLUE  = "#4C86F0";              // signal blue  -> algorithm / system
+var AMBER = "#F2A93B";              // warm amber   -> YOU / your desires / data
+var CORAL = "#FF5B5B";              // coral red    -> the bubble / naive perception
+var DIM   = "#8A93A6";              // muted grey for secondary elements
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+/* stick figure: x, y is center of body. scale 1 = ~200px tall. */
+function stickFigure(x, y, scale, headAngle, armL, armR, legL, legR, col, op) {
+  op = (op == null ? 1 : op);
+  var sw = 9 * scale;
+  var headR = 28 * scale;
+  var bodyH = 80 * scale;
+  var limbL = 60 * scale;
+  var g = '<g opacity="' + op + '">';
+
+  // Head
+  g += '<circle cx="' + x + '" cy="' + (y - headR - bodyH / 2) + '" r="' + headR + '" fill="' + col + '" transform="rotate(' + headAngle + ' ' + x + ' ' + (y - headR - bodyH / 2) + ')"/>';
+
+  // Body
+  g += line(x, y - bodyH / 2, x, y + bodyH / 2, col, sw);
+
+  // Arms
+  var armY = y - bodyH / 4;
+  g += line(x, armY, x - Math.cos(armL) * limbL, armY + Math.sin(armL) * limbL, col, sw); // Left arm
+  g += line(x, armY, x + Math.cos(armR) * limbL, armY + Math.sin(armR) * limbL, col, sw); // Right arm
+
+  // Legs
+  var legY = y + bodyH / 2;
+  g += line(x, legY, x - Math.cos(legL) * limbL, legY + Math.sin(legL) * limbL, col, sw); // Left leg
+  g += line(x, legY, x + Math.cos(legR) * limbL, legY + Math.sin(legR) * limbL, col, sw); // Right leg
+
+  g += '</g>';
+  return g;
+}
+
+/* phone: x, y is center. screenContent is inner SVG for the screen. */
+function phone(x, y, w, h, screenContent, col, op) {
+  op = (op == null ? 1 : op);
+  var rad = 20;
+  var screenW = w - 20, screenH = h - 20;
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, rad, col); // Phone body
+  g += rrect(x, y, screenW, screenH, rad - 5, BLACK); // Screen background
+  g += '<g transform="translate(' + (x - screenW / 2) + ' ' + (y - screenH / 2) + ')">';
+  g += screenContent; // Screen content
+  g += '</g>';
+  g += '</g>';
+  return g;
+}
+
+/* content block for the feed */
+function contentBlock(x, y, w, h, rad, highlightCol, highlightOp, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, rad, WHITE, 0.9);
+  if (highlightOp > 0.01) {
+    g += rrectStroke(x, y, w + 8, h + 8, rad + 4, highlightCol, 6, highlightOp);
+  }
+  g += '</g>';
+  return g;
+}
+
+/* network node */
+function networkNode(x, y, r, col, op) {
+  return dot(x, y, r, col, op);
+}
+
+/* network line */
+function networkLine(x1, y1, x2, y2, col, sw, op) {
+  return line(x1, y1, x2, y2, col, sw, op);
+}
+
+/* data point (small amber dot) */
+function dataPoint(x, y, r, col, op) {
+  return dot(x, y, r, col, op);
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+var FEED_X = CX;
+var CONTENT_BLOCK_W = 380;
+var CONTENT_BLOCK_H = 160;
+var CONTENT_BLOCK_GAP = 200;
+var PHONE_W = CONTENT_BLOCK_W + 40;
+var PHONE_H = CONTENT_BLOCK_H * 4 + CONTENT_BLOCK_GAP * 3 + 40; // Roughly 4 blocks visible
+
+// Helper to generate a feed of content blocks
+function generateFeed(phoneY, scrollOffset, numBlocks, highlightIdx, highlightOp, blockCol, op) {
+  var screenTop = phoneY - PHONE_H / 2 + 20;
+  var screenContent = '';
+  for (var i = 0; i < numBlocks; i++) {
+    var y = screenTop + CONTENT_BLOCK_H / 2 + i * CONTENT_BLOCK_GAP - scrollOffset;
+    if (y > screenTop - CONTENT_BLOCK_H / 2 && y < screenTop + PHONE_H - CONTENT_BLOCK_H / 2) { // Only render visible blocks
+      var currentHighlightOp = (i === highlightIdx) ? highlightOp : 0;
+      screenContent += contentBlock(FEED_X - (CX - CONTENT_BLOCK_W/2 - 20), y - (screenTop), CONTENT_BLOCK_W, CONTENT_BLOCK_H, 12, blockCol, currentHighlightOp, op);
+    }
+  }
+  return screenContent;
+}
+
+/* SCENE 1 (0-10s): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.0, 1.2, smooth(u * 0.4));
+  var driftY = lerp(0, -120, smooth(u * 0.4));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  var sfY = CY + 300;
+  var phoneY = sfY - 100;
+  var scrollOffset = u * 120; // Gentle scroll
+  var highlightBlock = 2; // The 3rd block (index 2)
+  var highlightFade = ramp(u, 0.7, 1.0);
+
+  var feedContent = generateFeed(phoneY, scrollOffset, 6, highlightBlock, highlightFade, AMBER, 1);
+  s += phone(CX, phoneY, PHONE_W, PHONE_H, feedContent, WHITE, 1);
+
+  // Stick figure arms for scrolling
+  var armScrollL = lerp(-Math.PI * 0.4, -Math.PI * 0.3, Math.sin(u * Math.PI * 2) * 0.5 + 0.5);
+  var armScrollR = lerp(Math.PI * 0.4, Math.PI * 0.3, Math.sin(u * Math.PI * 2) * 0.5 + 0.5);
+  s += stickFigure(CX, sfY, 1.0, 0, armScrollL, armScrollR, -0.1, 0.1, AMBER, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20s): GO */
+function scene2(u) {
+  var s = '';
+  var scale = lerp(1.2, 1.1, smooth(u * 0.4));
+  var driftY = lerp(-120, -80, smooth(u * 0.4));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  var sfY = CY + 300;
+  var phoneY = sfY - 100;
+
+  // All blocks become amber-highlighted
+  var highlightOp = ramp(u, 0.0, 0.3);
+  var feedContent = generateFeed(phoneY, u * 200, 8, -1, highlightOp, AMBER, 1); // -1 means no single block highlighted, all get highlightOp
+  s += phone(CX, phoneY, PHONE_W, PHONE_H, feedContent, WHITE, 1);
+
+  // Stick figure tapping enthusiastically
+  var tapPhase = Math.sin(u * Math.PI * 8); // Fast tapping motion
+  var armTapL = lerp(-Math.PI * 0.4, -Math.PI * 0.2, clamp(tapPhase, 0, 1));
+  var armTapR = lerp(Math.PI * 0.4, Math.PI * 0.2, clamp(tapPhase, 0, 1));
+  var headTilt = lerp(0, 10, smooth(u)); // Leaning in
+  s += stickFigure(CX, sfY, 1.0, headTilt, armTapL, armTapR, -0.1, 0.1, AMBER, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30s): SEARCH */
+function scene3(u) {
+  var s = '';
+  var scale = lerp(1.1, 1.0, smooth(u * 0.4));
+  var driftY = lerp(-80, 0, smooth(u * 0.4));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  var sfY = CY + 300;
+  var phoneY = sfY - 100;
+
+  // Personalized feed persists (all amber-highlighted)
+  var feedContent = generateFeed(phoneY, u * 80, 8, -1, 1, AMBER, 1);
+  s += phone(CX, phoneY, PHONE_W, PHONE_H, feedContent, WHITE, 1);
+
+  // Coral red bubble forms around stick figure and phone
+  var bubbleRad = lerp(0, 400, easeOut(ramp(u, 0.0, 0.6)));
+  var bubbleOp = lerp(0, 0.2, easeOut(ramp(u, 0.0, 0.6)));
+  s += ring(CX, CY, bubbleRad, CORAL, 12, bubbleOp);
+  s += dot(CX, CY, bubbleRad, CORAL, bubbleOp * 0.1); // Inner fill
+
+  // Content blocks rotate around the stick figure
+  var rotateAngle = lerp(0, 360, u * 0.5);
+  s += '<g transform="rotate(' + rotateAngle + ' ' + CX + ' ' + CY + ')">';
+  var blockCount = 5;
+  for (var i = 0; i < blockCount; i++) {
+    var angle = (i / blockCount) * Math.PI * 2;
+    var bx = CX + Math.sin(angle) * 300;
+    var by = CY + Math.cos(angle) * 300;
+    s += contentBlock(bx, by, CONTENT_BLOCK_W * 0.7, CONTENT_BLOCK_H * 0.7, 10, AMBER, 1, 0.8);
+  }
+  s += '</g>';
+
+  // Stick figure confused/suspicious
+  var headConfuse = lerp(0, 20, smooth(ramp(u, 0.4, 0.8)));
+  var armConfuse = lerp(Math.PI * 0.4, Math.PI * 0.6, smooth(ramp(u, 0.4, 0.8)));
+  s += stickFigure(CX, sfY, 1.0, headConfuse, -armConfuse, armConfuse, -0.1, 0.1, AMBER, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40s): FIND */
+function scene4(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.8, smooth(u * 0.4));
+  var driftY = lerp(0, 100, smooth(u * 0.4));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  var sfY = CY + 300;
+  var phoneY = sfY - 100;
+
+  // Coral bubble dissolves
+  var bubbleDissolve = 1 - ramp(u, 0.0, 0.3);
+  s += ring(CX, CY, 400, CORAL, 12, 0.2 * bubbleDissolve);
+  s += dot(CX, CY, 400, CORAL, 0.02 * bubbleDissolve);
+
+  // Reveal blue algorithmic network
+  var networkReveal = ramp(u, 0.2, 0.7);
+  var nodeCount = 10;
+  var nodeRadius = 16;
+  var networkOpacity = networkReveal * 0.8;
+
+  // Nodes
+  for (var i = 0; i < nodeCount; i++) {
+    var angle = (i / nodeCount) * Math.PI * 2 + u * 0.2;
+    var r = lerp(100, 400, rnd(i));
+    s += networkNode(CX + Math.cos(angle) * r, CY + Math.sin(angle) * r, nodeRadius, BLUE, networkOpacity);
+  }
+
+  // Lines connecting nodes (simple random connections for visual complexity)
+  for (var i = 0; i < nodeCount; i++) {
+    var j = Math.floor(rnd(i + 10) * nodeCount);
+    var angle1 = (i / nodeCount) * Math.PI * 2 + u * 0.2;
+    var angle2 = (j / nodeCount) * Math.PI * 2 + u * 0.2;
+    var r1 = lerp(100, 400, rnd(i));
+    var r2 = lerp(100, 400, rnd(j));
+    s += networkLine(CX + Math.cos(angle1) * r1, CY + Math.sin(angle1) * r1,
+                     CX + Math.cos(angle2) * r2, CY + Math.sin(angle2) * r2, BLUE, 4, networkOpacity * 0.6);
+  }
+
+  // Small amber dots representing past actions connecting to content blocks
+  var dataPointCount = 5;
+  for (var i = 0; i < dataPointCount; i++) {
+    var dpX = lerp(CX - 200, CX + 200, rnd(i + 20));
+    var dpY = lerp(sfY + 100, phoneY - 200, rnd(i + 30));
+    s += dataPoint(dpX, dpY, 8, AMBER, networkReveal);
+    // Line to a content block (simplified to a fixed point for now)
+    s += line(dpX, dpY, FEED_X, phoneY - 100, BLUE, 2, networkReveal * 0.7);
+  }
+
+  // Personalized feed persists (all amber-highlighted)
+  var feedContent = generateFeed(phoneY, u * 50, 8, -1, 1, AMBER, 1);
+  s += phone(CX, phoneY, PHONE_W, PHONE_H, feedContent, WHITE, 1);
+
+  s += stickFigure(CX, sfY, 1.0, 0, -0.1, 0.1, -0.1, 0.1, AMBER, 1); // Neutral pose
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50s): TAKE */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(0.8, 0.9, smooth(u * 0.4));
+  var driftY = lerp(100, 50, smooth(u * 0.4));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  var sfY = CY + 300;
+  var phoneY = sfY - 100;
+
+  // Blue algorithmic lines form a tighter, circular feedback loop
+  var loopRadius = lerp(400, 180, smooth(u));
+  var loopOpacity = 0.8;
+  var loopSpeed = u * Math.PI * 2;
+
+  // Nodes on the loop
+  var nodeCount = 8;
+  for (var i = 0; i < nodeCount; i++) {
+    var angle = (i / nodeCount) * Math.PI * 2 + loopSpeed;
+    s += networkNode(CX + Math.cos(angle) * loopRadius, CY + Math.sin(angle) * loopRadius, 16, BLUE, loopOpacity);
+  }
+
+  // Lines forming the loop
+  for (var i = 0; i < nodeCount; i++) {
+    var angle1 = (i / nodeCount) * Math.PI * 2 + loopSpeed;
+    var angle2 = ((i + 1) / nodeCount) * Math.PI * 2 + loopSpeed;
+    s += networkLine(CX + Math.cos(angle1) * loopRadius, CY + Math.sin(angle1) * loopRadius,
+                     CX + Math.cos(angle2) * loopRadius, CY + Math.sin(angle2) * loopRadius, BLUE, 6, loopOpacity);
+  }
+
+  // Small amber 'data points' (likes/pauses) from stick figure, absorbed into loop
+  var dataPointsIn = 5;
+  for (var i = 0; i < dataPointsIn; i++) {
+    var dpPhase = (u * 1.5 + rnd(i)) % 1;
+    var dpX = lerp(CX, CX + Math.cos(loopSpeed + i * 0.5) * loopRadius, easeIn(dpPhase));
+    var dpY = lerp(sfY + 50, CY + Math.sin(loopSpeed + i * 0.5) * loopRadius, easeIn(dpPhase));
+    s += dataPoint(dpX, dpY, 10, AMBER, 1 - dpPhase); // Fade out as absorbed
+  }
+
+  // New content blocks appear from the loop
+  var newContentOut = 3;
+  for (var i = 0; i < newContentOut; i++) {
+    var cpPhase = (u * 1.2 + rnd(i + 10)) % 1;
+    var startX = CX + Math.cos(loopSpeed + i * 0.7) * loopRadius;
+    var startY = CY + Math.sin(loopSpeed + i * 0.7) * loopRadius;
+    var endX = FEED_X;
+    var endY = phoneY - 200 + i * CONTENT_BLOCK_GAP;
+    var blockX = lerp(startX, endX, easeOut(cpPhase));
+    var blockY = lerp(startY, endY, easeOut(cpPhase));
+    s += contentBlock(blockX, blockY, CONTENT_BLOCK_W * 0.8, CONTENT_BLOCK_H * 0.8, 10, AMBER, 1, cpPhase);
+  }
+
+  // Personalized feed persists (all amber-highlighted)
+  var feedContent = generateFeed(phoneY, u * 30, 8, -1, 1, AMBER, 1);
+  s += phone(CX, phoneY, PHONE_W, PHONE_H, feedContent, WHITE, 1);
+
+  s += stickFigure(CX, sfY, 1.0, 0, -0.1, 0.1, -0.1, 0.1, AMBER, 1); // Neutral pose
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60s): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.9, 1.0, smooth(clamp(u / 0.7, 0, 1))); // Settle scale
+  var driftY = lerp(50, 0, smooth(clamp(u / 0.7, 0, 1))); // Settle position
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  var sfY = CY + 300;
+  var phoneY = sfY - 100;
+
+  // The feedback loop becomes less overt, but its underlying blue structure remains visible
+  var loopOpacity = lerp(0.8, 0.15, smooth(u));
+  var loopRadius = lerp(180, 250, smooth(u)); // Loop expands slightly, less tight
+  var loopSpeed = u * Math.PI * 0.5;
+
+  var nodeCount = 8;
+  for (var i = 0; i < nodeCount; i++) {
+    var angle = (i / nodeCount) * Math.PI * 2 + loopSpeed;
+    s += networkNode(CX + Math.cos(angle) * loopRadius, CY + Math.sin(angle) * loopRadius, 12, BLUE, loopOpacity);
+  }
+  for (var i = 0; i < nodeCount; i++) {
+    var angle1 = (i / nodeCount) * Math.PI * 2 + loopSpeed;
+    var angle2 = ((i + 1) / nodeCount) * Math.PI * 2 + loopSpeed;
+    s += networkLine(CX + Math.cos(angle1) * loopRadius, CY + Math.sin(angle1) * loopRadius,
+                     CX + Math.cos(angle2) * loopRadius, CY + Math.sin(angle2) * loopRadius, BLUE, 4, loopOpacity);
+  }
+
+  // Feed now a mix of regular content and subtle signal blue lines
+  var feedContent = '';
+  var screenTop = phoneY - PHONE_H / 2 + 20;
+  var scrollOffset = u * 20; // Very slow scroll
+  for (var i = 0; i < 6; i++) {
+    var y = screenTop + CONTENT_BLOCK_H / 2 + i * CONTENT_BLOCK_GAP - scrollOffset;
+    if (y > screenTop - CONTENT_BLOCK_H / 2 && y < screenTop + PHONE_H - CONTENT_BLOCK_H / 2) {
+      // Regular block
+      feedContent += contentBlock(FEED_X - (CX - CONTENT_BLOCK_W/2 - 20), y - (screenTop), CONTENT_BLOCK_W, CONTENT_BLOCK_H, 12, AMBER, 0.0, 1);
+
+      // Subtle blue lines integrated into background of some blocks
+      if (i % 2 === 0) { // Every other block has subtle lines
+        var lineOp = lerp(0, 0.1, smooth(u));
+        feedContent += line(FEED_X - (CX - CONTENT_BLOCK_W/2 - 20) - CONTENT_BLOCK_W/2 + 20, y - (screenTop) - 30,
+                            FEED_X - (CX - CONTENT_BLOCK_W/2 - 20) + CONTENT_BLOCK_W/2 - 20, y - (screenTop) + 30, BLUE, 2, lineOp);
+        feedContent += line(FEED_X - (CX - CONTENT_BLOCK_W/2 - 20) + CONTENT_BLOCK_W/2 - 20, y - (screenTop) - 30,
+                            FEED_X - (CX - CONTENT_BLOCK_W/2 - 20) - CONTENT_BLOCK_W/2 + 20, y - (screenTop) + 30, BLUE, 2, lineOp);
+      }
+    }
+  }
+  s += phone(CX, phoneY, PHONE_W, PHONE_H, feedContent, WHITE, 1);
+
+  // Stick figure nods slowly, understanding
+  var headNod = lerp(0, -15, smooth(u));
+  var armNod = lerp(-0.1, -0.3, smooth(u));
+  s += stickFigure(CX, sfY, 1.0, headNod, armNod, -armNod, -0.1, 0.1, AMBER, 1);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable at u=1
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
