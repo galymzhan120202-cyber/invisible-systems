@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Software Subscriptions Auto-Renew</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band
+var STROKE_WIDTH = 9;
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue  -> the system / recurring revenue
+var AMBER = "#F2A93B";              // warm amber   -> YOU / user actions
+var CORAL = "#FF5B5B";              // coral red    -> frustration / trap
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+/* stick figure (amber) - base at feet */
+function stickFigure(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = 32;
+  var bodyLen = 100;
+  var armLen = 70;
+  var legLen = 80;
+  var headY = y - bodyLen - headR;
+  var bodyTopY = y - bodyLen;
+  var bodyBotY = y;
+
+  g += dot(x, headY, headR, col); // Head
+
+  // Body
+  g += line(x, bodyTopY, x, bodyBotY, col, STROKE_WIDTH);
+
+  // Arms and Legs based on pose
+  switch (pose) {
+    case 'tap':
+      g += line(x, bodyTopY + 20, x - armLen * 0.7, bodyTopY + armLen * 0.4, col, STROKE_WIDTH); // Left arm up
+      g += line(x, bodyTopY + 20, x + armLen * 0.5, bodyTopY + armLen * 0.2, col, STROKE_WIDTH); // Right arm slightly out
+      g += line(x - 20, bodyBotY, x - 20 - legLen * 0.3, bodyBotY + legLen * 0.2, col, STROKE_WIDTH); // Left leg
+      g += line(x + 20, bodyBotY, x + 20 + legLen * 0.3, bodyBotY + legLen * 0.2, col, STROKE_WIDTH); // Right leg
+      break;
+    case 'busy': // Carrying a stack of books
+      var bookStackH = 60;
+      var bookStackW = 80;
+      g += line(x, bodyTopY + 20, x - armLen * 0.6, bodyTopY + armLen * 0.5, col, STROKE_WIDTH); // Left arm
+      g += line(x, bodyTopY + 20, x + armLen * 0.6, bodyTopY + armLen * 0.5, col, STROKE_WIDTH); // Right arm
+      g += rrect(x, bodyTopY + armLen * 0.5 + bookStackH / 2 + 10, bookStackW, bookStackH, 6, DIM, op * 0.8); // Books
+      g += line(x - 20, bodyBotY, x - 20 - legLen * 0.2, bodyBotY + legLen * 0.1, col, STROKE_WIDTH);
+      g += line(x + 20, bodyBotY, x + 20 + legLen * 0.2, bodyBotY + legLen * 0.1, col, STROKE_WIDTH);
+      break;
+    case 'puzzled': // Hand holding box, question mark
+      g += line(x, bodyTopY + 20, x - armLen * 0.2, bodyTopY + armLen * 0.8, col, STROKE_WIDTH); // Left arm down
+      g += line(x, bodyTopY + 20, x + armLen * 0.2, bodyTopY + armLen * 0.8, col, STROKE_WIDTH); // Right arm down
+      g += line(x - 20, bodyBotY, x - 20 - legLen * 0.1, bodyBotY + legLen * 0.05, col, STROKE_WIDTH);
+      g += line(x + 20, bodyBotY, x + 20 + legLen * 0.1, bodyBotY + legLen * 0.05, col, STROKE_WIDTH);
+      break;
+    case 'watching': // Arms slightly out, observing
+      g += line(x, bodyTopY + 20, x - armLen * 0.4, bodyTopY + armLen * 0.4, col, STROKE_WIDTH);
+      g += line(x, bodyTopY + 20, x + armLen * 0.4, bodyTopY + armLen * 0.4, col, STROKE_WIDTH);
+      g += line(x - 20, bodyBotY, x - 20 - legLen * 0.1, bodyBotY + legLen * 0.05, col, STROKE_WIDTH);
+      g += line(x + 20, bodyBotY, x + 20 + legLen * 0.1, bodyBotY + legLen * 0.05, col, STROKE_WIDTH);
+      break;
+    case 'overwhelmed': // Head in hands
+      g += line(x, bodyTopY + 20, x - armLen * 0.6, headY + headR - 10, col, STROKE_WIDTH); // Left arm to head
+      g += line(x, bodyTopY + 20, x + armLen * 0.6, headY + headR - 10, col, STROKE_WIDTH); // Right arm to head
+      g += line(x - 20, bodyBotY, x - 20 - legLen * 0.1, bodyBotY + legLen * 0.05, col, STROKE_WIDTH);
+      g += line(x + 20, bodyBotY, x + 20 + legLen * 0.1, bodyBotY + legLen * 0.05, col, STROKE_WIDTH);
+      break;
+    case 'confident': // Standing tall, one arm holding item
+      g += line(x, bodyTopY + 20, x - armLen * 0.2, bodyTopY + armLen * 0.8, col, STROKE_WIDTH); // Left arm down
+      g += line(x, bodyTopY + 20, x + armLen * 0.2, bodyTopY + armLen * 0.8, col, STROKE_WIDTH); // Right arm down
+      g += line(x - 20, bodyBotY, x - 20 - legLen * 0.1, bodyBotY + legLen * 0.05, col, STROKE_WIDTH);
+      g += line(x + 20, bodyBotY, x + 20 + legLen * 0.1, bodyBotY + legLen * 0.05, col, STROKE_WIDTH);
+      break;
+    default: // Neutral
+      g += line(x, bodyTopY + 20, x - armLen * 0.5, bodyTopY + armLen * 0.5, col, STROKE_WIDTH);
+      g += line(x, bodyTopY + 20, x + armLen * 0.5, bodyTopY + armLen * 0.5, col, STROKE_WIDTH);
+      g += line(x - 20, bodyBotY, x - 20 - legLen * 0.1, bodyBotY + legLen * 0.05, col, STROKE_WIDTH);
+      g += line(x + 20, bodyBotY, x + 20 + legLen * 0.1, bodyBotY + legLen * 0.05, col, STROKE_WIDTH);
+      break;
+  }
+  g += '</g>';
+  return g;
+}
+
+/* subscription box icon */
+function subBox(x, y, size, col, innerIcon, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var boxW = size, boxH = size * 1.1;
+  var rad = size * 0.1;
+  g += rrectStroke(x, y, boxW, boxH, rad, col, STROKE_WIDTH, op);
+
+  var iconSize = size * 0.4;
+  switch (innerIcon) {
+    case '+':
+      g += line(x - iconSize / 2, y, x + iconSize / 2, y, col, STROKE_WIDTH, op);
+      g += line(x, y - iconSize / 2, x, y + iconSize / 2, col, STROKE_WIDTH, op);
+      break;
+    case '$':
+      g += pathTag("M " + (x - iconSize * 0.15) + " " + (y - iconSize * 0.4) +
+                   " C " + (x - iconSize * 0.3) + " " + (y - iconSize * 0.2) + " " + (x - iconSize * 0.3) + " " + (y + iconSize * 0.2) + " " + (x - iconSize * 0.15) + " " + (y + iconSize * 0.4) +
+                   " M " + (x + iconSize * 0.15) + " " + (y + iconSize * 0.4) +
+                   " C " + (x + iconSize * 0.3) + " " + (y + iconSize * 0.2) + " " + (x + iconSize * 0.3) + " " + (y - iconSize * 0.2) + " " + (x + iconSize * 0.15) + " " + (y - iconSize * 0.4) +
+                   " M " + (x - iconSize * 0.3) + " " + y + " H " + (x + iconSize * 0.3), col, STROKE_WIDTH * 0.8, op);
+      break;
+    case '?':
+      g += questionMark(x, y - iconSize * 0.1, iconSize, col, op);
+      break;
+    case 'X':
+      g += line(x - iconSize / 2, y - iconSize / 2, x + iconSize / 2, y + iconSize / 2, col, STROKE_WIDTH, op);
+      g += line(x - iconSize / 2, y + iconSize / 2, x + iconSize / 2, y - iconSize / 2, col, STROKE_WIDTH, op);
+      break;
+    case 'cancel':
+      g += cancelButton(x, y, iconSize * 0.6, col, op);
+      break;
+    case 'check':
+      g += pathTag("M " + (x - iconSize * 0.4) + " " + (y + iconSize * 0.05) + " L " + (x - iconSize * 0.1) + " " + (y + iconSize * 0.35) + " L " + (x + iconSize * 0.4) + " " + (y - iconSize * 0.35), col, STROKE_WIDTH, op);
+      break;
+  }
+  g += '</g>';
+  return g;
+}
+
+/* clock icon */
+function clockIcon(x, y, r, col, handAngle, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, r, col, STROKE_WIDTH, op);
+  g += dot(x, y, STROKE_WIDTH * 0.5, col, op); // Center dot
+  var hx = x + r * 0.7 * Math.sin(handAngle);
+  var hy = y - r * 0.7 * Math.cos(handAngle);
+  g += line(x, y, hx, hy, col, STROKE_WIDTH * 0.8, op); // Hand
+  return g;
+}
+
+/* lightbulb icon */
+function lightbulb(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var bulbR = size * 0.4;
+  var bulbTopY = y - size * 0.4;
+  var bulbBotY = y + size * 0.1;
+  g += pathTag("M " + x + " " + bulbTopY +
+               " A " + bulbR + " " + bulbR + " 0 1 1 " + x + " " + bulbBotY +
+               " L " + (x - bulbR * 0.3) + " " + (bulbBotY + size * 0.1) +
+               " L " + (x + bulbR * 0.3) + " " + (bulbBotY + size * 0.1) +
+               " Z", col, STROKE_WIDTH, op);
+  g += line(x - bulbR * 0.2, bulbBotY + size * 0.15, x + bulbR * 0.2, bulbBotY + size * 0.15, col, STROKE_WIDTH * 0.7, op);
+  g += line(x - bulbR * 0.2, bulbBotY + size * 0.25, x + bulbR * 0.2, bulbBotY + size * 0.25, col, STROKE_WIDTH * 0.7, op);
+  return g;
+}
+
+/* cancel button icon */
+function cancelButton(x, y, r, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, r, col, STROKE_WIDTH, op);
+  g += line(x - r * 0.7, y - r * 0.7, x + r * 0.7, y + r * 0.7, col, STROKE_WIDTH, op);
+  return g;
+}
+
+/* question mark icon */
+function questionMark(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var qCurve = "M " + (x - size * 0.2) + " " + (y - size * 0.5) +
+               " C " + (x - size * 0.5) + " " + (y - size * 0.5) + " " + (x - size * 0.5) + " " + (y) + " " + x + " " + (y + size * 0.1) +
+               " C " + (x + size * 0.3) + " " + (y + size * 0.2) + " " + (x + size * 0.3) + " " + (y - size * 0.2) + " " + x + " " + (y - size * 0.3);
+  g += pathTag(qCurve, col, STROKE_WIDTH, op);
+  g += dot(x, y + size * 0.4, STROKE_WIDTH * 0.8, col, op);
+  return g;
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.0, 1.05, smooth(u * 0.9));
+  var driftY = lerp(0, -20, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  var figureX = CX - 150, figureY = BOT - 100;
+  var boxX = CX + 150, boxY = figureY - 60;
+  var boxSize = 180;
+
+  s += stickFigure(figureX, figureY, AMBER, 'tap', 1);
+
+  var plusOp = ramp(u, 0.1, 0.4) * (1 - ramp(u, 0.6, 0.9));
+  s += subBox(boxX, boxY, boxSize, WHITE, '+', plusOp);
+  s += subBox(boxX, boxY, boxSize, WHITE, null, 1); // Base box always present
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var figureX = lerp(CX - 150, CX - 280, smooth(u));
+  var figureY = BOT - 100;
+  var boxX = lerp(CX + 150, CX + 280, smooth(u));
+  var boxY = figureY - 60;
+  var boxSize = 180;
+
+  s += stickFigure(figureX, figureY, AMBER, 'busy', 1);
+  s += subBox(boxX, boxY, boxSize, WHITE, null, 1 - smooth(u)); // Original box recedes and fades
+
+  var clockR = 60;
+  var clockX = CX + 100;
+  var clockY = TOP + 200;
+  var clockOp = ramp(u, 0.1, 0.4);
+  s += clockIcon(clockX, clockY, clockR, DIM, u * Math.PI * 8, clockOp); // Clock spins
+
+  var newBoxSize = lerp(0, 100, easeOut(ramp(u, 0.6, 0.8)));
+  var newBoxX = CX + 100 + lerp(100, 0, easeOut(ramp(u, 0.6, 0.8)));
+  var newBoxY = figureY - 20; // Near pocket
+  s += subBox(newBoxX, newBoxY, newBoxSize, BLUE, '$', ramp(u, 0.6, 0.9));
+
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var figureX = CX - 100;
+  var figureY = BOT - 100;
+  var boxX = CX + 100;
+  var boxY = figureY - 140;
+  var boxSize = 160;
+
+  s += stickFigure(figureX, figureY, AMBER, 'puzzled', 1);
+
+  var qMarkOp = ramp(u, 0.1, 0.4) * (1 - ramp(u, 0.7, 1.0));
+  s += questionMark(figureX + 60, figureY - 280, 100, WHITE, qMarkOp);
+
+  var boxCol = WHITE;
+  var glow = pulse(u, 0.6, 0.1);
+  if (glow > 0.1) boxCol = lerp(WHITE, CORAL, glow);
+
+  s += subBox(boxX, boxY, boxSize, boxCol, '$', 1);
+
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var figureX = CX - 200;
+  var figureY = BOT - 100;
+  var boxSize = 100;
+
+  s += stickFigure(figureX, figureY, AMBER, 'watching', 1);
+
+  var lightbulbOp = ramp(u, 0.7, 0.9);
+  s += lightbulb(figureX + 60, figureY - 280, 100, AMBER, lightbulbOp);
+
+  // Conveyor belt of subscription boxes
+  var beltSpeed = u * 400; // Adjust speed
+  var numBoxes = 8;
+  var startY = TOP + 100;
+  var endY = BOT - 100;
+  var beltX = CX + 180;
+  var beltWidth = 200;
+
+  // Background belt track
+  s += rrect(beltX, CY, beltWidth, H, 20, BLUE, 0.15);
+
+  for (var i = 0; i < numBoxes; i++) {
+    var boxU = (u * 0.8 + i / numBoxes + beltSpeed / (numBoxes * 400)) % 1;
+    var boxY = lerp(endY, startY, boxU);
+    var boxOp = clamp(1 - Math.abs(boxU - 0.5) * 1.5, 0, 1);
+    s += subBox(beltX, boxY, boxSize, BLUE, '$', boxOp * 0.9);
+  }
+
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var figureX = CX;
+  var figureY = BOT - 100;
+
+  s += stickFigure(figureX, figureY, AMBER, 'overwhelmed', 1);
+
+  var boxSize = 100;
+  var numStacks = 3;
+  var stackHeight = 200;
+  var stackBaseY = BOT - 200;
+
+  for (var i = 0; i < numStacks; i++) {
+    var stackX = CX - 300 + i * 300;
+    var numBoxesInStack = 4;
+    for (var j = 0; j < numBoxesInStack; j++) {
+      var boxY = stackBaseY - j * (boxSize * 0.8);
+      var boxOp = ramp(u, 0.1 + i * 0.05, 0.6 + i * 0.05);
+      s += subBox(stackX, boxY, boxSize, BLUE, '$', boxOp);
+
+      // Flashing red X
+      var xFlash = pulse(u, 0.4 + i * 0.1 + j * 0.05, 0.05);
+      if (xFlash > 0.2) {
+        s += subBox(stackX, boxY, boxSize * 0.8, CORAL, 'X', xFlash);
+      }
+    }
+  }
+
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var figureX = CX - 150;
+  var figureY = BOT - 100;
+  var boxX = CX + 150;
+  var boxY = figureY - 60;
+  var boxSize = 180;
+
+  s += stickFigure(figureX, figureY, AMBER, 'confident', 1);
+
+  // Original box with '+' reappears
+  var boxOp = ramp(u, 0.2, 0.6);
+  s += subBox(boxX, boxY, boxSize, WHITE, '+', boxOp);
+
+  // Cancel button held by figure
+  var cancelBtnX = figureX + 100;
+  var cancelBtnY = figureY - 100;
+  var cancelBtnR = 60;
+  var cancelBtnOp = ramp(u, 0.5, 0.9);
+  s += cancelButton(cancelBtnX, cancelBtnY, cancelBtnR, AMBER, cancelBtnOp);
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

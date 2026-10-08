@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why You Confirm Software Installs</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for dialogs
+var BLUE  = "#4C86F0";              // signal blue  -> system / rules
+var AMBER = "#F2A93B";              // warm amber   -> user / app
+var CORAL = "#FF5B5B";              // coral red    -> malice / failure
+
+var DUR = 60;
+window.__duration = DUR;
+
+// Common sizes
+var STROKE_W = 10;
+var STICK_H = 200;                  // Stick figure height
+var APP_SIZE = 120;                 // App icon square size
+var GATE_W = 200;                   // Width of the gate
+var SYSTEM_W = 700;                 // Width of the system block
+var SYSTEM_H = BOT - TOP - 100;     // Height of the system block
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+// Custom shapes for this animation
+function stickFigure(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" stroke="' + col + '" stroke-width="' + STROKE_W + '" stroke-linecap="round">';
+  // Head
+  g += dot(x, y - STICK_H * 0.4, STICK_H * 0.15, col);
+  // Body
+  g += line(x, y - STICK_H * 0.2, x, y + STICK_H * 0.15);
+  // Arms
+  if (pose === 'tap') { // Tapping a button
+    g += line(x, y - STICK_H * 0.1, x + STICK_H * 0.2, y - STICK_H * 0.05); // Right arm bent
+    g += line(x + STICK_H * 0.2, y - STICK_H * 0.05, x + STICK_H * 0.25, y + STICK_H * 0.05); // Hand
+    g += line(x, y - STICK_H * 0.1, x - STICK_H * 0.2, y - STICK_H * 0.05); // Left arm relaxed
+  } else if (pose === 'confused') { // Arms up, head tilted
+    g += line(x, y - STICK_H * 0.1, x - STICK_H * 0.2, y - STICK_H * 0.2);
+    g += line(x, y - STICK_H * 0.1, x + STICK_H * 0.2, y - STICK_H * 0.2);
+    g += line(x - STICK_H * 0.05, y - STICK_H * 0.45, x + STICK_H * 0.05, y - STICK_H * 0.35, col, STROKE_W * 0.6); // Confused brow
+  } else if (pose === 'frustrated') { // Hands on hips, head down
+    g += line(x, y - STICK_H * 0.1, x - STICK_H * 0.2, y + STICK_H * 0.05);
+    g += line(x, y - STICK_H * 0.1, x + STICK_H * 0.2, y + STICK_H * 0.05);
+    g += line(x - STICK_H * 0.1, y - STICK_H * 0.35, x + STICK_H * 0.1, y - STICK_H * 0.35, col, STROKE_W * 0.6); // Frustrated mouth
+  } else if (pose === 'look_up') { // Looking up
+    g += line(x, y - STICK_H * 0.1, x - STICK_H * 0.2, y - STICK_H * 0.05);
+    g += line(x, y - STICK_H * 0.1, x + STICK_H * 0.2, y - STICK_H * 0.05);
+    g += line(x, y - STICK_H * 0.4, x + STICK_H * 0.08, y - STICK_H * 0.48, col, STROKE_W * 0.6); // Gaze up
+  } else { // Default: relaxed
+    g += line(x, y - STICK_H * 0.1, x - STICK_H * 0.2, y);
+    g += line(x, y - STICK_H * 0.1, x + STICK_H * 0.2, y);
+  }
+  // Legs
+  g += line(x, y + STICK_H * 0.15, x - STICK_H * 0.1, y + STICK_H * 0.35);
+  g += line(x, y + STICK_H * 0.15, x + STICK_H * 0.1, y + STICK_H * 0.35);
+  g += '</g>';
+  return g;
+}
+
+function appIcon(x, y, size, col, op) {
+  return rrect(x, y, size, size, size * 0.2, col, op);
+}
+
+function installButton(x, y, w, h, col, op) {
+  var g = '<g opacity="' + (op == null ? 1 : op) + '">';
+  g += rrect(x, y, w, h, 15, col, 0.9);
+  // Simple glyph: downward arrow
+  g += line(x, y - 8, x, y + 8, WHITE, STROKE_W * 0.7);
+  g += line(x - 6, y + 2, x, y + 8, WHITE, STROKE_W * 0.7);
+  g += line(x + 6, y + 2, x, y + 8, WHITE, STROKE_W * 0.7);
+  g += '</g>';
+  return g;
+}
+
+function systemBlock(x, y, w, h, col, op) {
+  return rrect(x, y, w, h, 30, col, op);
+}
+
+function gate(x, y, w, h, col, op, locked) {
+  var g = '<g opacity="' + (op == null ? 1 : op) + '">';
+  g += rrect(x, y, w, h, 15, col, 0.9);
+  if (locked) {
+    // Lock glyph
+    g += ring(x, y - 10, 15, WHITE, STROKE_W * 0.6);
+    g += line(x, y + 5, x, y + 15, WHITE, STROKE_W * 0.6);
+  }
+  g += '</g>';
+  return g;
+}
+
+function dialogBox(x, y, w, h, col, op) {
+  var g = '<g opacity="' + (op == null ? 1 : op) + '">';
+  g += rrect(x, y, w, h, 20, col, 0.95);
+  // Simple glyph: question mark
+  g += pathTag("M " + x + " " + (y - 25) + " A 15 15 0 1 1 " + (x - 15) + " " + (y - 10) + " L " + (x - 10) + " " + (y + 5) + " M " + x + " " + (y + 15) + " L " + x + " " + (y + 20), WHITE, STROKE_W * 0.7);
+  // "Confirm" button inside dialog
+  g += rrect(x, y + 50, 100, 40, 10, BLUE, 0.9);
+  g += line(x - 10, y + 50, x - 2, y + 58, WHITE, STROKE_W * 0.6); // Checkmark
+  g += line(x - 2, y + 58, x + 12, y + 42, WHITE, STROKE_W * 0.6);
+  g += '</g>';
+  return g;
+}
+
+function virusShape(x, y, size, col, op) {
+  var g = '<g opacity="' + (op == null ? 1 : op) + '" fill="' + col + '">';
+  // Jagged shape, like a blob with spikes
+  var d = "M " + (x - size * 0.4) + " " + (y - size * 0.2);
+  d += " L " + (x - size * 0.1) + " " + (y - size * 0.4);
+  d += " L " + (x + size * 0.2) + " " + (y - size * 0.3);
+  d += " L " + (x + size * 0.4) + " " + (y - size * 0.1);
+  d += " L " + (x + size * 0.2) + " " + (y + size * 0.2);
+  d += " L " + (x - size * 0.1) + " " + (y + size * 0.4);
+  d += " L " + (x - size * 0.3) + " " + (y + size * 0.1);
+  d += " Z";
+  g += '<path d="' + d + '" fill="' + col + '"/>';
+  g += '</g>';
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var sfX = CX - 200, sfY = BOT - STICK_H / 2 - 50;
+  var appX = CX + 100, appY = CY - 100;
+  var btnX = CX + 100, btnY = CY + 100;
+
+  var tapTime = ramp(u, 0.2, 0.4);
+  var glowTime = ramp(u, 0.3, 0.6);
+
+  s += stickFigure(sfX, sfY, AMBER, tapTime > 0.05 ? 'tap' : 'relaxed', 1);
+  s += appIcon(appX, appY, APP_SIZE, AMBER, 1);
+  if (glowTime > 0) {
+    s += ring(appX, appY, APP_SIZE * 0.6, AMBER, STROKE_W * 0.8, glowTime * 0.8);
+  }
+  s += installButton(btnX, btnY, 180, 80, BLUE, 1);
+
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var sfX = CX - 200, sfY = BOT - STICK_H / 2 - 50;
+  var appStartX = CX + 100, appStartY = CY - 100;
+  var systemX = CX, systemY = CY;
+  var gateX = CX - SYSTEM_W / 2 + GATE_W / 2; // Fixed position for gate within system
+  var appTargetX = gateX - APP_SIZE / 2 - 20; // App stops before gate
+
+  var appMove = smooth(ramp(u, 0.0, 0.4));
+  var gateSlide = smooth(ramp(u, 0.2, 0.5)); // Gate slides in from right
+  var dialogPop = smooth(ramp(u, 0.5, 0.7));
+
+  var currentAppX = lerp(appStartX, appTargetX, appMove);
+  var currentAppY = lerp(appStartY, systemY, appMove);
+
+  // System block appears
+  s += systemBlock(systemX, systemY, SYSTEM_W, SYSTEM_H, BLUE, 0.2);
+
+  // Gate slides in
+  var gateCurrentX = lerp(systemX + SYSTEM_W / 2 + GATE_W / 2 + 100, gateX, gateSlide);
+  s += gate(gateCurrentX, systemY, GATE_W, SYSTEM_H - 100, BLUE, 0.9, true);
+
+  s += appIcon(currentAppX, currentAppY, APP_SIZE, AMBER, 1);
+
+  // Stick figure and dialog
+  var sfPose = 'relaxed';
+  if (dialogPop > 0.1) sfPose = 'confused';
+  s += stickFigure(sfX, sfY, AMBER, sfPose, 1);
+
+  if (dialogPop > 0) {
+    s += dialogBox(sfX + 150, sfY - 200, 260, 180, DIM, dialogPop);
+  }
+
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var sfX = CX - 200, sfY = BOT - STICK_H / 2 - 50;
+  var systemX = CX, systemY = CY;
+  var gateX = CX - SYSTEM_W / 2 + GATE_W / 2;
+  var appX = gateX - APP_SIZE / 2 - 20, appY = systemY;
+
+  var frustration = ramp(u, 0.1, 0.4);
+  var maliceAttempt = ramp(u, 0.5, 0.8);
+
+  s += systemBlock(systemX, systemY, SYSTEM_W, SYSTEM_H, BLUE, 0.2);
+  s += gate(gateX, systemY, GATE_W, SYSTEM_H - 100, BLUE, 0.9, true);
+  s += appIcon(appX, appY, APP_SIZE, AMBER, 1);
+
+  var sfPose = 'relaxed';
+  if (frustration > 0.1) sfPose = 'frustrated';
+  s += stickFigure(sfX, sfY, AMBER, sfPose, 1);
+
+  if (frustration > 0.05) { // Coral question mark thought bubble
+    s += pathTag("M " + (sfX - 50) + " " + (sfY - STICK_H - 20) + " A 20 20 0 1 1 " + (sfX - 70) + " " + (sfY - STICK_H + 5) + " L " + (sfX - 65) + " " + (sfY - STICK_H + 20) + " M " + (sfX - 50) + " " + (sfY - STICK_H + 30) + " L " + (sfX - 50) + " " + (sfY - STICK_H + 35), CORAL, STROKE_W * 0.8, frustration * 0.9);
+  }
+
+  // Malicious shapes trying to peek around the gate
+  if (maliceAttempt > 0) {
+    var peekOp = (1 - Math.abs(maliceAttempt - 0.5) * 2) * 0.8; // Fade in and out
+    s += virusShape(gateX + GATE_W / 2 + 50, systemY - 100, 80, CORAL, peekOp);
+    s += virusShape(gateX + GATE_W / 2 + 70, systemY + 120, 70, CORAL, peekOp * 0.7);
+  }
+
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var systemX = CX, systemY = CY;
+  var gateX = CX - SYSTEM_W / 2 + GATE_W / 2;
+  var appX = gateX - APP_SIZE / 2 - 20, appY = systemY;
+
+  var zoom = lerp(1.0, 1.4, smooth(ramp(u, 0.0, 0.4)));
+  var panY = lerp(0, -100, smooth(ramp(u, 0.2, 0.7))); // Pan up to show internal structure
+
+  s += '<g ' + camera(zoom, 0, panY) + '>';
+
+  // System block outline, fading to reveal interior
+  s += rrectStroke(systemX, systemY, SYSTEM_W, SYSTEM_H, 30, BLUE, STROKE_W, lerp(0.9, 0.2, smooth(ramp(u, 0.0, 0.5))));
+  s += rrect(systemX, systemY, SYSTEM_W, SYSTEM_H, 30, BLUE, lerp(0.2, 0.05, smooth(ramp(u, 0.0, 0.5))));
+
+  // Intricate internal lines
+  var lineOp = smooth(ramp(u, 0.3, 0.8));
+  var numLines = 8;
+  for (var i = 0; i < numLines; i++) {
+    var yOffset = lerp(TOP + 50, BOT - 50, i / (numLines - 1));
+    s += line(systemX - SYSTEM_W / 2 + 50, yOffset, systemX + SYSTEM_W / 2 - 50, yOffset, BLUE, STROKE_W * 0.4, lineOp);
+  }
+  // Vertical connections
+  var numVLines = 5;
+  for (var i = 0; i < numVLines; i++) {
+    var xOffset = lerp(systemX - SYSTEM_W / 2 + 80, systemX + SYSTEM_W / 2 - 80, i / (numVLines - 1));
+    s += line(xOffset, TOP + 80, xOffset, BOT - 80, BLUE, STROKE_W * 0.4, lineOp);
+  }
+
+  // Fortified gate, more prominent lines
+  var gateFortify = smooth(ramp(u, 0.4, 0.9));
+  s += rrect(gateX, systemY, GATE_W, SYSTEM_H - 100, 15, BLUE, lerp(0.9, 0.5, gateFortify));
+  s += rrectStroke(gateX, systemY, GATE_W, SYSTEM_H - 100, 15, WHITE, STROKE_W * 0.8, gateFortify * 0.8);
+  s += line(gateX - GATE_W / 2 + 20, systemY - SYSTEM_H / 2 + 100, gateX + GATE_W / 2 - 20, systemY + SYSTEM_H / 2 - 100, WHITE, STROKE_W * 0.4, gateFortify * 0.6);
+  s += line(gateX + GATE_W / 2 - 20, systemY - SYSTEM_H / 2 + 100, gateX - GATE_W / 2 + 20, systemY + SYSTEM_H / 2 - 100, WHITE, STROKE_W * 0.4, gateFortify * 0.6);
+
+  s += appIcon(appX, appY, APP_SIZE, AMBER, 1); // App waiting outside
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var systemX = CX, systemY = CY;
+  var gateX = CX - SYSTEM_W / 2 + GATE_W / 2;
+  var appX = gateX - APP_SIZE / 2 - 20, appY = systemY; // App still waiting
+
+  var virusSize = 100;
+  var virusStartX = gateX - GATE_W / 2 - virusSize;
+  var virusTargetX = gateX - GATE_W / 2 + 10; // Tries to get past
+  var virusBounceX = gateX - GATE_W / 2 - virusSize * 0.8; // Rebounds to
+  var virusY = systemY + 50;
+
+  var attackPhase = smooth(ramp(u, 0.0, 0.4)); // Virus moves in
+  var bouncePhase = smooth(ramp(u, 0.4, 0.7)); // Virus bounces back
+  var gateFlash = pulse(u, 0.55, 0.1); // Gate flashes when hit
+
+  var currentVirusX = lerp(virusStartX, virusTargetX, attackPhase);
+  if (bouncePhase > 0) {
+    currentVirusX = lerp(virusTargetX, virusBounceX, bouncePhase);
+  }
+
+  s += systemBlock(systemX, systemY, SYSTEM_W, SYSTEM_H, BLUE, 0.2); // Background system
+  // Internal lines from S4, slightly faded
+  var numLines = 8;
+  for (var i = 0; i < numLines; i++) {
+    var yOffset = lerp(TOP + 50, BOT - 50, i / (numLines - 1));
+    s += line(systemX - SYSTEM_W / 2 + 50, yOffset, systemX + SYSTEM_W / 2 - 50, yOffset, BLUE, STROKE_W * 0.4, 0.4);
+  }
+  var numVLines = 5;
+  for (var i = 0; i < numVLines; i++) {
+    var xOffset = lerp(systemX - SYSTEM_W / 2 + 80, systemX + SYSTEM_W / 2 - 80, i / (numVLines - 1));
+    s += line(xOffset, TOP + 80, xOffset, BOT - 80, BLUE, STROKE_W * 0.4, 0.4);
+  }
+
+  // Gate with flash effect
+  s += gate(gateX, systemY, GATE_W, SYSTEM_H - 100, BLUE, 0.9 + gateFlash * 0.5, true);
+  s += rrectStroke(gateX, systemY, GATE_W, SYSTEM_H - 100, 15, WHITE, STROKE_W * 0.8, 0.8 + gateFlash * 0.8);
+
+  s += virusShape(currentVirusX, virusY, virusSize, CORAL, 1);
+  s += appIcon(appX, appY, APP_SIZE, AMBER, 0.6); // App waiting patiently, slightly faded
+
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var sfX = CX - 200, sfY = BOT - STICK_H / 2 - 50;
+  var systemX = CX, systemY = CY;
+  var gateX = CX - SYSTEM_W / 2 + GATE_W / 2;
+  var appStartX = gateX - APP_SIZE / 2 - 20, appStartY = systemY;
+  var appTargetX = systemX + APP_SIZE / 2 + 20; // App enters system
+  var appTargetY = systemY;
+  var confirmBtnX = sfX + 150, confirmBtnY = sfY - 200 + 50; // Same position as dialog button
+
+  var stickFigureReturn = smooth(ramp(u, 0.0, 0.2));
+  var tapButton = smooth(ramp(u, 0.1, 0.3));
+  var gateRetract = smooth(ramp(u, 0.3, 0.6));
+  var appEnter = smooth(ramp(u, 0.5, 0.8));
+  var systemPulse = pulse(u, 0.85, 0.1);
+
+  // System block
+  s += systemBlock(systemX, systemY, SYSTEM_W, SYSTEM_H, BLUE, 0.2 + systemPulse * 0.3);
+
+  // Gate retracts
+  var currentGateX = lerp(gateX, systemX + SYSTEM_W / 2 + GATE_W / 2 + 50, gateRetract);
+  s += gate(currentGateX, systemY, GATE_W, SYSTEM_H - 100, BLUE, 0.9, false); // Not locked anymore
+
+  // App icon enters
+  var currentAppX = lerp(appStartX, appTargetX, appEnter);
+  var currentAppY = lerp(appStartY, appTargetY, appEnter);
+  s += appIcon(currentAppX, currentAppY, APP_SIZE, AMBER, 1);
+
+  // Stick figure
+  var sfPose = 'relaxed';
+  if (tapButton > 0.1) sfPose = 'tap';
+  s += stickFigure(sfX, sfY, AMBER, sfPose, 1);
+
+  // Confirm button (blue, checkmark)
+  s += rrect(confirmBtnX, confirmBtnY, 100, 40, 10, BLUE, 0.9);
+  s += line(confirmBtnX - 10, confirmBtnY, confirmBtnX - 2, confirmBtnY + 8, WHITE, STROKE_W * 0.6); // Checkmark
+  s += line(confirmBtnX - 2, confirmBtnY + 8, confirmBtnX + 12, confirmBtnY - 8, WHITE, STROKE_W * 0.6);
+
+  // System pulse effect
+  if (systemPulse > 0) {
+    s += ring(systemX, systemY, SYSTEM_W / 2 * 0.8, BLUE, STROKE_W * 0.8, systemPulse * 0.7);
+  }
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

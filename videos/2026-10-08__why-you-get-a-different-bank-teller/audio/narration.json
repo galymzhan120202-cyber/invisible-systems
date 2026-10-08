@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You walk into your bank, hoping to see a familiar face, maybe even the teller who helped you last time. A little consistency would be nice.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "But almost always, it's a completely new person behind the counter. You wonder, 'Where did the last one go? Do they just keep hiring?'",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "It feels like endless turnover or bad luck. You're always starting fresh, repeating your request, wishing for some continuity.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "This constant rotation is actually a deliberate strategy. Banks cross-train staff in many roles and move them between branches, building a resilient system.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "If a teller is sick or moves roles, another trained person steps right in. Your banking experience stays seamless, even if the face changes.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "So while you might miss a personal connection, you're seeing a robust system. It ensures your money is always accessible and bank operations never stop.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

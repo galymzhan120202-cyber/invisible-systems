@@ -1,0 +1,15 @@
+{
+  "id": "why-you-have-to-confirm-software-install",
+  "slug": "2026-10-08__why-you-have-to-confirm-software-install",
+  "title_working": "Why You Confirm Software Installs — Invisible Systems",
+  "system": "user consent and system integrity",
+  "cluster": "rules-and-defaults",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-10-08T13:24:40+00:00",
+  "produced_at": "2026-10-08T13:28:10+00:00",
+  "verify": "PASS",
+  "takeaway": "The 'confirm installation' step is a vital protective layer for your system, not just an annoying delay.",
+  "animation_source": "llm"
+}

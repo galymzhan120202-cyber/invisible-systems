@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You need a tool for a quick project, or want to try a new app. Signing up for a free trial or subscription is easy, designed to get you started quickly. You just want convenience.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "Weeks pass. Project done, trial's end forgotten. Suddenly, a recurring charge appears on your statement for that service. You barely used it.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "\"Why didn't they ask me?\" You expect to actively opt-in. This feels like a trap or an oversight by the company.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "This isn't an oversight; it's deliberate design. The system leverages human inertia. Auto-renewal ensures predictable revenue by relying on users simply forgetting to cancel.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "The cost isn't just small charges for forgotten services. It’s a constant trickle draining your budget, plus the mental load to track and cancel these hidden subscriptions.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "Tomorrow, you’ll still find subscription offers. But now, you see the invisible system at play. You're opting into commitment, prepared to act or pay.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

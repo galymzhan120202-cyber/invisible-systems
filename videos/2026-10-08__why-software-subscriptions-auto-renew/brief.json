@@ -1,0 +1,15 @@
+{
+  "id": "why-software-subscriptions-auto-renew",
+  "slug": "2026-10-08__why-software-subscriptions-auto-renew",
+  "title_working": "Why Software Subscriptions Auto-Renew",
+  "system": "recurring revenue and inertia",
+  "cluster": "pricing-and-incentives",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-10-08T13:28:13+00:00",
+  "produced_at": "2026-10-08T13:31:13+00:00",
+  "verify": "PASS",
+  "takeaway": "Software subscriptions auto-renew because companies leverage user inertia for predictable, ongoing revenue, making inaction profitable.",
+  "animation_source": "llm"
+}
