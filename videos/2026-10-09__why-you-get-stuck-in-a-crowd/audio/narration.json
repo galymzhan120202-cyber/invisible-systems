@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You’re in a bustling crowd, trying to get somewhere. You just want to keep moving, a simple, reasonable goal.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "But suddenly, the flow slows. You push gently, then a little harder, trying to carve out your path, but it’s no use.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "Frustration builds. You scan for the blockage, blaming the slow person ahead, or the group dawdling by the exit.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "But the real problem isn't one person; it’s the system itself. When density hits a critical point, small individual movements create tiny, cascading blockages.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "This creates a feedback loop: everyone trying to move faster just increases the local density and friction, paradoxically slowing everyone down.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "Now, you see the crowd not as individuals, but as a fluid system. You can anticipate the waves, conserve energy, and move with the flow instead of fighting it.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

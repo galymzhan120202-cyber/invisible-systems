@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why You Get Stuck in a Crowd</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / flow
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want
+var CORAL = "#FF5B5B";              // coral red    -> friction / bottleneck
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, fill) {
+  return '<path d="' + d + '" fill="' + (fill ? fill : 'none') + '" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+// Stick figure constants
+var FIG_H = 180;
+var FIG_SW = 9;
+var FIG_HEAD_R = 24;
+
+/* The "You" stick figure. Pose can be 'stand', 'walk', 'push', 'stuck', 'look', 'run' */
+function stickFigure(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headY = y - FIG_H / 2 + FIG_HEAD_R;
+  var bodyY = headY + FIG_HEAD_R;
+  var bodyLen = FIG_H * 0.4;
+  var legLen = FIG_H * 0.3;
+  var armLen = FIG_H * 0.25;
+
+  g += dot(x, headY, FIG_HEAD_R, col); // Head
+  g += line(x, bodyY, x, bodyY + bodyLen, col, FIG_SW); // Body
+
+  if (pose === 'walk' || pose === 'run') {
+    var legSwing = Math.sin(op * Math.PI * 2) * 20; // Use op for a simple animation phase
+    var armSwing = Math.sin(op * Math.PI * 2 + Math.PI) * 15;
+
+    // Left leg
+    g += line(x, bodyY + bodyLen, x - 15 + legSwing, bodyY + bodyLen + legLen, col, FIG_SW);
+    // Right leg
+    g += line(x, bodyY + bodyLen, x + 15 - legSwing, bodyY + bodyLen + legLen, col, FIG_SW);
+    // Left arm
+    g += line(x, bodyY + 10, x - 20 + armSwing, bodyY + 10 + armLen, col, FIG_SW);
+    // Right arm
+    g += line(x, bodyY + 10, x + 20 - armSwing, bodyY + 10 + armLen, col, FIG_SW);
+  } else if (pose === 'push') {
+    g += line(x, bodyY + bodyLen, x - 10, bodyY + bodyLen + legLen, col, FIG_SW);
+    g += line(x, bodyY + bodyLen, x + 10, bodyY + bodyLen + legLen, col, FIG_SW);
+    g += line(x, bodyY + 10, x - 30, bodyY + 10, col, FIG_SW); // Arms pushing forward
+    g += line(x, bodyY + 10, x + 30, bodyY + 10, col, FIG_SW);
+  } else if (pose === 'stuck') {
+    g += line(x, bodyY + bodyLen, x - 10, bodyY + bodyLen + legLen, col, FIG_SW);
+    g += line(x, bodyY + bodyLen, x + 10, bodyY + bodyLen + legLen, col, FIG_SW);
+    g += line(x, bodyY + 10, x - 25, bodyY + 10 + armLen * 0.5, col, FIG_SW); // Arms down
+    g += line(x, bodyY + 10, x + 25, bodyY + 10 + armLen * 0.5, col, FIG_SW);
+    g += line(x - FIG_HEAD_R * 0.4, headY - FIG_HEAD_R * 0.3, x + FIG_HEAD_R * 0.4, headY - FIG_HEAD_R * 0.3, col, FIG_SW * 0.7); // Frown
+  } else if (pose === 'look') {
+    g += line(x, bodyY + bodyLen, x - 10, bodyY + bodyLen + legLen, col, FIG_SW);
+    g += line(x, bodyY + bodyLen, x + 10, bodyY + bodyLen + legLen, col, FIG_SW);
+    g += line(x, bodyY + 10, x - 25, bodyY + 10 + armLen * 0.5, col, FIG_SW); // Arms down
+    g += line(x, bodyY + 10, x + 25, bodyY + 10 + armLen * 0.5, col, FIG_SW);
+    g += line(x, headY - FIG_HEAD_R * 0.3, x + FIG_HEAD_R * 0.5, headY - FIG_HEAD_R * 0.1, col, FIG_SW * 0.7); // Gaze right
+  } else { // 'stand'
+    g += line(x, bodyY + bodyLen, x - 10, bodyY + bodyLen + legLen, col, FIG_SW);
+    g += line(x, bodyY + bodyLen, x + 10, bodyY + bodyLen + legLen, col, FIG_SW);
+    g += line(x, bodyY + 10, x - 20, bodyY + 10 + armLen, col, FIG_SW);
+    g += line(x, bodyY + 10, x + 20, bodyY + 10 + armLen, col, FIG_SW);
+  }
+  g += '</g>';
+  return g;
+}
+
+var CROWD_DOT_R = 14;
+
+/* Generates a crowd of dots within a given area, with optional flow */
+function generateCrowd(xMin, xMax, yMin, yMax, count, t, flowSpeed, flowDir, densityOp, frictionOp) {
+  var g = '';
+  var spanY = yMax - yMin;
+  var spanX = xMax - xMin;
+  for (var i = 0; i < count; i++) {
+    var rx = rnd(i * 3 + 1) * spanX;
+    var ry = (rnd(i * 3 + 2) + t * flowSpeed * flowDir) % 1;
+    if (ry < 0) ry += 1; // Ensure positive modulo
+    var x = xMin + rx;
+    var y = yMin + ry * spanY;
+
+    var col = WHITE;
+    var op = densityOp;
+    if (rnd(i * 3 + 3) < frictionOp) { // Some dots are friction dots
+      col = CORAL;
+      op = densityOp * 1.2;
+    }
+    g += dot(x, y, CROWD_DOT_R, col, op);
+  }
+  return g;
+}
+
+/* Base path element that morphs across scenes */
+function baseFlowPath(u, pathWidth, pathColor, pathOp) {
+  var s = '';
+  s += rrect(CX, CY, pathWidth, BOT - TOP, pathWidth / 2, pathColor, pathOp);
+  return s;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + SPARSE CROWD */
+function scene1(u) {
+  var s = '';
+  var pathW = lerp(W * 0.7, W * 0.6, smooth(u));
+  s += baseFlowPath(u, pathW, BLUE, 0.2);
+
+  // "You" walking forward
+  var youY = lerp(BOT - FIG_H / 2 - 40, CY + 100, smooth(u));
+  var youX = CX;
+  s += stickFigure(youX, youY, AMBER, 'walk', u * 10); // Use u*10 for walking animation phase
+
+  // Sparse crowd
+  var crowdCount = 18;
+  var crowdYMin = TOP + 100;
+  var crowdYMax = BOT - 200;
+  var crowdXMin = CX - pathW / 2 + CROWD_DOT_R * 2;
+  var crowdXMax = CX + pathW / 2 - CROWD_DOT_R * 2;
+  s += generateCrowd(crowdXMin, crowdXMax, crowdYMin, crowdYMax, crowdCount, u, 0.1, -1, 0.8, 0);
+
+  // Arrow indicating forward movement
+  var arrowY = youY - FIG_H / 2 - 60;
+  var arrowSize = 30;
+  s += line(CX, arrowY + arrowSize, CX, arrowY - arrowSize, AMBER, 10, 0.8);
+  s += line(CX - arrowSize * 0.6, arrowY - arrowSize * 0.4, CX, arrowY - arrowSize, AMBER, 10, 0.8);
+  s += line(CX + arrowSize * 0.6, arrowY - arrowSize * 0.4, CX, arrowY - arrowSize, AMBER, 10, 0.8);
+
+  return s;
+}
+
+/* SCENE 2 (10-20): CROWD DENSITY INCREASES, YOU ENCOUNTER RESISTANCE */
+function scene2(u) {
+  var s = '';
+  var pathW = lerp(W * 0.6, W * 0.5, smooth(u));
+  s += baseFlowPath(u, pathW, BLUE, 0.25);
+
+  // "You" trying to push through
+  var youY = CY + 100;
+  var youX = CX;
+  var pushAnim = Math.sin(u * Math.PI * 4) * 5; // Subtle push animation
+  s += stickFigure(youX + pushAnim, youY, AMBER, 'push', 1);
+
+  // Denser crowd, some coral dots for friction
+  var crowdCount = lerp(18, 30, smooth(u));
+  var frictionRatio = smooth(u * 1.5) * 0.3; // Increase friction dots
+  var crowdYMin = TOP + 100;
+  var crowdYMax = BOT - 200;
+  var crowdXMin = CX - pathW / 2 + CROWD_DOT_R * 2;
+  var crowdXMax = CX + pathW / 2 - CROWD_DOT_R * 2;
+  s += generateCrowd(crowdXMin, crowdXMax, crowdYMin, crowdYMax, crowdCount, u, 0.08, -1, 0.9, frictionRatio);
+
+  // Resistance lines around "You"
+  var resistOp = ramp(u, 0.3, 0.8);
+  s += line(youX - 80, youY - 60, youX - 40, youY - 100, CORAL, 6, resistOp);
+  s += line(youX + 80, youY - 60, youX + 40, youY - 100, CORAL, 6, resistOp);
+  s += line(youX - 80, youY + 60, youX - 40, youY + 100, CORAL, 6, resistOp);
+  s += line(youX + 80, youY + 60, youX + 40, youY + 100, CORAL, 6, resistOp);
+
+  return s;
+}
+
+/* SCENE 3 (20-30): BOTTLENECK FORMS, YOU GET STUCK */
+function scene3(u) {
+  var s = '';
+  var bottleneckY = CY - 100;
+  var topW = lerp(W * 0.5, W * 0.3, smooth(u));
+  var botW = W * 0.5;
+
+  // Hero element: Bottleneck path
+  var pathD = "M " + (CX - botW / 2) + " " + BOT +
+              " L " + (CX - topW / 2) + " " + TOP +
+              " L " + (CX + topW / 2) + " " + TOP +
+              " L " + (CX + botW / 2) + " " + BOT + " Z";
+  s += pathTag(pathD, BLUE, 0, 0.2, BLUE); // Filled path
+
+  // Bottleneck friction highlight
+  var frictionW = lerp(W * 0.05, W * 0.15, smooth(u));
+  var frictionY = lerp(bottleneckY + 100, bottleneckY, smooth(u));
+  s += rrect(CX, frictionY, frictionW, 160, 80, CORAL, 0.3);
+
+  // "You" stuck at the bottleneck
+  var youY = lerp(CY + 100, bottleneckY + FIG_H / 2 + 30, smooth(u));
+  var youX = CX;
+  s += stickFigure(youX, youY, AMBER, 'stuck', 1);
+
+  // Dense, slow crowd around the bottleneck
+  var crowdCount = 45;
+  var crowdYMin = TOP + 50;
+  var crowdYMax = BOT - 50;
+  var crowdXMin = CX - botW / 2 + CROWD_DOT_R * 2;
+  var crowdXMax = CX + botW / 2 - CROWD_DOT_R * 2;
+  s += generateCrowd(crowdXMin, crowdXMax, crowdYMin, crowdYMax, crowdCount, u, 0.02, -1, 0.9, 0.5);
+
+  // Frustration lines
+  var frownOp = ramp(u, 0.5, 0.9);
+  s += line(youX - 40, youY - FIG_H / 2 - 50, youX - 20, youY - FIG_H / 2 - 70, CORAL, 7, frownOp);
+  s += line(youX + 40, youY - FIG_H / 2 - 50, youX + 20, youY - FIG_H / 2 - 70, CORAL, 7, frownOp);
+
+  return s;
+}
+
+/* SCENE 4 (30-40): VISUALIZING THE "WAVE" OF DENSITY */
+function scene4(u) {
+  var s = '';
+  var bottleneckY = CY - 100;
+  var topW = W * 0.3;
+  var botW = W * 0.5;
+
+  // Hero element: Bottleneck with wave pattern
+  var pathD = "M " + (CX - botW / 2) + " " + BOT +
+              " L " + (CX - topW / 2) + " " + TOP +
+              " L " + (CX + topW / 2) + " " + TOP +
+              " L " + (CX + botW / 2) + " " + BOT + " Z";
+  s += pathTag(pathD, BLUE, 0, 0.15, BLUE); // Base blue path
+
+  // Wave pattern within the path
+  var wavePeriod = 300; // Vertical distance for one wave cycle
+  var waveAmp = 40;     // Horizontal amplitude of the wave
+  var waveOffset = u * 150; // Wave moves upwards
+  var wavePath = "";
+  for (var y = TOP; y < BOT; y += 20) {
+    var xOffset = Math.sin((y + waveOffset) / wavePeriod * Math.PI * 2) * waveAmp;
+    if (y === TOP) wavePath += "M " + (CX + xOffset) + " " + y;
+    else wavePath += " L " + (CX + xOffset) + " " + y;
+  }
+  s += pathTag(wavePath, CORAL, 10, 0.4); // Coral wave line
+
+  // "You" observing the wave
+  var youY = bottleneckY + FIG_H / 2 + 30;
+  var youX = CX - 100; // Shifted slightly to observe
+  s += stickFigure(youX, youY, AMBER, 'look', 1);
+
+  // Crowd dots showing wave movement
+  var crowdCount = 50;
+  var crowdYMin = TOP + 50;
+  var crowdYMax = BOT - 50;
+  var crowdXMin = CX - botW / 2 + CROWD_DOT_R * 2;
+  var crowdXMax = CX + botW / 2 - CROWD_DOT_R * 2;
+  var waveCrowd = '';
+  for (var i = 0; i < crowdCount; i++) {
+    var ry = (rnd(i * 3 + 2) + u * 0.05) % 1; // Slow upward drift
+    var cy = lerp(crowdYMin, crowdYMax, ry);
+    var cxOffset = Math.sin((cy + waveOffset) / wavePeriod * Math.PI * 2) * waveAmp * 0.8;
+    var cx = lerp(crowdXMin, crowdXMax, rnd(i * 3 + 1)) + cxOffset;
+    var col = WHITE;
+    if (Math.abs(cxOffset) > waveAmp * 0.5) col = CORAL; // More coral at wave peaks
+    waveCrowd += dot(cx, cy, CROWD_DOT_R, col, 0.9);
+  }
+  s += waveCrowd;
+
+  // Sign with a simple glyph (wave)
+  var signX = CX + 250, signY = CY + 100;
+  s += rrect(signX, signY, 160, 120, 15, DIM, 0.8);
+  s += pathTag("M " + (signX - 40) + " " + (signY + 20) + " Q " + (signX - 20) + " " + (signY - 20) + " " + signX + " " + (signY + 20) +
+               " Q " + (signX + 20) + " " + (signY - 20) + " " + (signX + 40) + " " + (signY + 20), WHITE, 10, 1);
+
+  return s;
+}
+
+/* SCENE 5 (40-50): YOU FIND AN ALTERNATIVE PATH OR STRATEGY */
+function scene5(u) {
+  var s = '';
+  var bottleneckY = CY - 100;
+  var topW = W * 0.3;
+  var botW = W * 0.5;
+
+  // Main bottleneck path (still congested)
+  var pathD = "M " + (CX - botW / 2) + " " + BOT +
+              " L " + (CX - topW / 2) + " " + TOP +
+              " L " + (CX + topW / 2) + " " + TOP +
+              " L " + (CX + botW / 2) + " " + BOT + " Z";
+  s += pathTag(pathD, BLUE, 0, 0.1, BLUE); // Faint blue
+  s += rrect(CX, bottleneckY, W * 0.15, 160, 80, CORAL, 0.4); // Persistent friction
+
+  // Alternative path emerges
+  var altPathX = CX + 300;
+  var altPathW = lerp(0, 180, smooth(u * 1.5));
+  var altPathOp = ramp(u, 0.2, 0.8);
+  s += rrect(altPathX, CY, altPathW, BOT - TOP, altPathW / 2, AMBER, altPathOp * 0.2);
+
+  // "You" moving towards the alternative path
+  var youStartY = bottleneckY + FIG_H / 2 + 30;
+  var youStartX = CX;
+  var youTargetY = CY + 100;
+  var youTargetX = altPathX - altPathW / 2 + FIG_HEAD_R * 2;
+  var youX = lerp(youStartX, youTargetX, easeOut(u));
+  var youY = lerp(youStartY, youTargetY, easeOut(u));
+  s += stickFigure(youX, youY, AMBER, 'run', u * 10);
+
+  // Crowd in main bottleneck
+  var crowdCount = 35;
+  var crowdYMin = TOP + 50;
+  var crowdYMax = BOT - 50;
+  var crowdXMin = CX - botW / 2 + CROWD_DOT_R * 2;
+  var crowdXMax = CX + botW / 2 - CROWD_DOT_R * 2;
+  s += generateCrowd(crowdXMin, crowdXMax, crowdYMin, crowdYMax, crowdCount, u, 0.01, -1, 0.7, 0.6);
+
+  // A few crowd members follow "You"
+  var followerOp = ramp(u, 0.6, 0.9);
+  if (followerOp > 0.05) {
+    s += dot(youX + 60, youY + 80, CROWD_DOT_R, WHITE, followerOp);
+    s += dot(youX - 70, youY + 120, CROWD_DOT_R, WHITE, followerOp);
+  }
+
+  return s;
+}
+
+/* SCENE 6 (50-60): YOU MOVES FREELY, CROWD REMAINS A DISTANT PROBLEM */
+function scene6(u) {
+  var s = '';
+  var mainPathShift = lerp(0, -300, smooth(u)); // Shift main path left
+  var mainPathOp = lerp(0.1, 0.05, smooth(u));
+
+  // Main path (distant, still congested)
+  var bottleneckY = CY - 100;
+  var topW = W * 0.3;
+  var botW = W * 0.5;
+  var pathD = "M " + (CX - botW / 2 + mainPathShift) + " " + BOT +
+              " L " + (CX - topW / 2 + mainPathShift) + " " + TOP +
+              " L " + (CX + topW / 2 + mainPathShift) + " " + TOP +
+              " L " + (CX + botW / 2 + mainPathShift) + " " + BOT + " Z";
+  s += pathTag(pathD, BLUE, 0, mainPathOp, BLUE);
+  s += rrect(CX + mainPathShift, bottleneckY, W * 0.15, 160, 80, CORAL, mainPathOp * 2);
+
+  // Your clear, wide amber path
+  var altPathX = CX + lerp(300, 0, smooth(u));
+  var altPathW = lerp(180, W * 0.7, smooth(u));
+  s += rrect(altPathX, CY, altPathW, BOT - TOP, altPathW / 2, AMBER, 0.2);
+
+  // "You" walking freely
+  var youY = lerp(CY + 100, CY + 200, smooth(u));
+  var youX = altPathX - altPathW / 2 + FIG_HEAD_R * 2 + 50;
+  s += stickFigure(youX, youY, AMBER, 'walk', u * 10);
+
+  // Distant crowd in the main path
+  var crowdCount = 20;
+  var crowdYMin = TOP + 50;
+  var crowdYMax = BOT - 50;
+  var crowdXMin = CX - botW / 2 + CROWD_DOT_R * 2 + mainPathShift;
+  var crowdXMax = CX + botW / 2 - CROWD_DOT_R * 2 + mainPathShift;
+  s += generateCrowd(crowdXMin, crowdXMax, crowdYMin, crowdYMax, crowdCount, u, 0.005, -1, 0.5, 0.7);
+
+  // Chevrons indicating free movement
+  var chevronOp = ramp(u, 0.4, 0.9);
+  for (var c = 0; c < 3; c++) {
+    var cp = (u * 2 + c / 3) % 1;
+    s += line(youX, youY - 96 - cp * 150, youX - 25, youY - 96 - cp * 150 - 25, AMBER, 10, (1 - cp) * 0.7 * chevronOp);
+    s += line(youX, youY - 96 - cp * 150, youX + 25, youY - 96 - cp * 150 - 25, AMBER, 10, (1 - cp) * 0.7 * chevronOp);
+  }
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500); // Fallback if fonts.ready stalls
+} else { boot(); } // No font support, just boot
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

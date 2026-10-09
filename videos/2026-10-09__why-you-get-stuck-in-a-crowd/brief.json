@@ -1,0 +1,15 @@
+{
+  "id": "why-you-get-stuck-in-a-crowd",
+  "slug": "2026-10-09__why-you-get-stuck-in-a-crowd",
+  "title_working": "Why You Get Stuck in a Crowd",
+  "system": "density-dependent flow and emergent bottlenecks",
+  "cluster": "traffic-and-crowds",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-10-09T13:12:57+00:00",
+  "produced_at": "2026-10-09T13:18:38+00:00",
+  "verify": "PASS",
+  "takeaway": "Crowd jams aren't just about rude individuals, but an invisible system where density itself creates resistance.",
+  "animation_source": "llm"
+}

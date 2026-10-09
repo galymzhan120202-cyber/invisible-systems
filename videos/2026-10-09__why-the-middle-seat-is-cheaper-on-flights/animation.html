@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why the Middle Seat is Cheaper on Flights</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / rules
+var AMBER = "#F2A93B";              // warm amber   -> user / desire
+var CORAL = "#FF5B5B";              // coral red    -> naive model / friction
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function chevron(x, y, size, col, op) {
+  var d = "M " + (x - size) + " " + (y + size * 0.55) + " L " + x + " " + (y - size * 0.55) + " L " + (x + size) + " " + (y + size * 0.55);
+  return pathTag(d, col, 14, op);
+}
+
+// Custom shapes for this animation
+var SEAT_W = 220;
+var SEAT_H = 300;
+var SEAT_Y = CY + 200; // Base Y position for seats
+
+function stickFigure(x, y, scale, col, op) {
+  op = (op == null ? 1 : op);
+  scale = scale == null ? 1 : scale;
+  var sw = 7 * scale;
+  var headR = 20 * scale;
+  var bodyH = 80 * scale;
+  var armL = 40 * scale;
+  var legL = 50 * scale;
+
+  var g = '<g opacity="' + op + '">';
+  // Head
+  g += dot(x, y - bodyH / 2 - headR, headR, col);
+  // Body
+  g += line(x, y - bodyH / 2, x, y + bodyH / 2, col, sw);
+  // Arms
+  g += line(x - armL, y - bodyH / 4, x + armL, y - bodyH / 4, col, sw);
+  // Legs
+  g += line(x, y + bodyH / 2, x - armL / 2, y + bodyH / 2 + legL, col, sw);
+  g += line(x, y + bodyH / 2, x + armL / 2, y + bodyH / 2 + legL, col, sw);
+  g += '</g>';
+  return g;
+}
+
+function seat(x, y, w, h, rad, col, sw, op, backH, armW) {
+  op = (op == null ? 1 : op);
+  sw = sw == null ? 10 : sw;
+  backH = backH == null ? h * 0.8 : backH;
+  armW = armW == null ? w * 0.2 : armW;
+
+  var g = '<g opacity="' + op + '">';
+  // Seat base
+  g += rrectStroke(x, y, w, h * 0.3, rad, col, sw);
+  // Seat back
+  g += rrectStroke(x, y - h * 0.35, w, backH, rad, col, sw);
+  // Armrests (two small rectangles on top corners of base)
+  g += rrectStroke(x - w / 2 + armW / 2, y - h * 0.3 / 2, armW, h * 0.1, rad * 0.5, col, sw);
+  g += rrectStroke(x + w / 2 - armW / 2, y - h * 0.3 / 2, armW, h * 0.1, rad * 0.5, col, sw);
+  g += '</g>';
+  return g;
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+// Seat positions
+var X_WINDOW = CX - SEAT_W - 60;
+var X_MIDDLE = CX;
+var X_AISLE = CX + SEAT_W + 60;
+var SEAT_RAD = 30;
+
+/* SCENE 1 (0-10): The Basic Setup */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  var seatY = SEAT_Y;
+  var seatW = SEAT_W;
+  var seatH = SEAT_H;
+  var middleScale = lerp(1, 0.9, smooth(ramp(u, 0.5, 0.9))); // Middle seat shrinks slightly
+
+  // Window seat
+  s += seat(X_WINDOW, seatY, seatW, seatH, SEAT_RAD, WHITE, 10, 1);
+  // Middle seat
+  s += seat(X_MIDDLE, seatY, seatW * middleScale, seatH * middleScale, SEAT_RAD * middleScale, WHITE, 10 * middleScale, 1);
+  // Aisle seat
+  s += seat(X_AISLE, seatY, seatW, seatH, SEAT_RAD, WHITE, 10, 1);
+
+  // A subtle background element to fill vertical space
+  s += rrectStroke(CX, CY, W * 0.8, BOT - TOP, 80, DIM, 4, 0.1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): Perceived Value - Window vs. Aisle */
+function scene2(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var seatY = SEAT_Y;
+  var seatW = SEAT_W;
+  var seatH = SEAT_H;
+
+  // Window seat
+  s += seat(X_WINDOW, seatY, seatW, seatH, SEAT_RAD, WHITE, 10, 1);
+  // Aisle seat
+  s += seat(X_AISLE, seatY, seatW, seatH, SEAT_RAD, WHITE, 10, 1);
+  // Middle seat (slightly smaller)
+  s += seat(X_MIDDLE, seatY, seatW * 0.9, seatH * 0.9, SEAT_RAD * 0.9, WHITE, 9, 1);
+
+  // Stick figures in window/aisle, looking out/to side
+  var figScale = 0.7;
+  var figY = seatY - seatH * 0.1;
+
+  // Window figure looking left
+  s += stickFigure(X_WINDOW - seatW * 0.2, figY, figScale, WHITE, 1);
+  s += line(X_WINDOW - seatW * 0.2 - 10 * figScale, figY - 20 * figScale, X_WINDOW - seatW * 0.2 - 30 * figScale, figY - 30 * figScale, WHITE, 7); // Gaze line
+
+  // Aisle figure looking right
+  s += stickFigure(X_AISLE + seatW * 0.2, figY, figScale, WHITE, 1);
+  s += line(X_AISLE + seatW * 0.2 + 10 * figScale, figY - 20 * figScale, X_AISLE + seatW * 0.2 + 30 * figScale, figY - 30 * figScale, WHITE, 7); // Gaze line
+
+
+  // Value indicators (glowing aura / upward arrows)
+  var glowOp = 0.2 + 0.8 * Math.sin(u * Math.PI * 2) * 0.5 + 0.5;
+  var arrowOp = smooth(ramp(u, 0.2, 0.8));
+  var arrowYOffset = lerp(0, -30, easeOut(u));
+
+  // Window seat value
+  s += ring(X_WINDOW, seatY - 200, 80, AMBER, 12, glowOp * arrowOp);
+  s += chevron(X_WINDOW, seatY - 200 + arrowYOffset, 30, AMBER, arrowOp);
+  s += chevron(X_WINDOW, seatY - 200 + arrowYOffset + 40, 30, AMBER, arrowOp * 0.6);
+
+  // Aisle seat value
+  s += ring(X_AISLE, seatY - 200, 80, AMBER, 12, glowOp * arrowOp);
+  s += chevron(X_AISLE, seatY - 200 + arrowYOffset, 30, AMBER, arrowOp);
+  s += chevron(X_AISLE, seatY - 200 + arrowYOffset + 40, 30, AMBER, arrowOp * 0.6);
+
+  // Faint background element
+  s += rrectStroke(CX, CY, W * 0.8, BOT - TOP, 80, DIM, 4, 0.1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): The "Cost" of the Middle Seat */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var seatY = SEAT_Y;
+  var seatW = SEAT_W;
+  var seatH = SEAT_H;
+
+  var squish = smooth(ramp(u, 0.1, 0.6));
+  var middleW = lerp(seatW * 0.9, seatW * 0.6, squish);
+  var middleH = lerp(seatH * 0.9, seatH * 0.7, squish);
+  var middleSW = lerp(9, 12, squish);
+  var middleRad = lerp(SEAT_RAD * 0.9, SEAT_RAD * 0.5, squish);
+
+  // Window seat (normal)
+  s += seat(X_WINDOW, seatY, seatW, seatH, SEAT_RAD, WHITE, 10, 1);
+  // Aisle seat (normal)
+  s += seat(X_AISLE, seatY, seatW, seatH, SEAT_RAD, WHITE, 10, 1);
+  // Middle seat (squished)
+  s += seat(X_MIDDLE, seatY, middleW, middleH, middleRad, WHITE, middleSW, 1);
+
+  // Stick figures in window/aisle, leaning away from middle
+  var figScale = 0.7;
+  var figY = seatY - seatH * 0.1;
+  var leanAmount = lerp(0, 30, squish);
+
+  // Window figure leaning left
+  s += stickFigure(X_WINDOW - seatW * 0.2 - leanAmount, figY, figScale, WHITE, 1);
+  // Aisle figure leaning right
+  s += stickFigure(X_AISLE + seatW * 0.2 + leanAmount, figY, figScale, WHITE, 1);
+
+  // Red 'X' marks on middle seat (no text, so crossed lines)
+  var crossOp = smooth(ramp(u, 0.4, 0.9));
+  if (crossOp > 0.02) {
+    var crossSize = middleW * 0.3;
+    s += line(X_MIDDLE - crossSize, seatY - crossSize, X_MIDDLE + crossSize, seatY + crossSize, CORAL, 12, crossOp);
+    s += line(X_MIDDLE - crossSize, seatY + crossSize, X_MIDDLE + crossSize, seatY - crossSize, CORAL, 12, crossOp);
+  }
+
+  // Faint background element
+  s += rrectStroke(CX, CY, W * 0.8, BOT - TOP, 80, DIM, 4, 0.1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): Willingness-to-Pay Differentials */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var seatY = SEAT_Y;
+  var seatW = SEAT_W;
+  var seatH = SEAT_H;
+
+  // Seats (middle still slightly squished)
+  s += seat(X_WINDOW, seatY, seatW, seatH, SEAT_RAD, WHITE, 10, 1);
+  s += seat(X_AISLE, seatY, seatW, seatH, SEAT_RAD, WHITE, 10, 1);
+  s += seat(X_MIDDLE, seatY, seatW * 0.6, seatH * 0.7, SEAT_RAD * 0.5, WHITE, 12, 1);
+
+  // Stick figures (normal posture)
+  var figScale = 0.7;
+  var figY = seatY - seatH * 0.1;
+  s += stickFigure(X_WINDOW - seatW * 0.2, figY, figScale, WHITE, 1);
+  s += stickFigure(X_AISLE + seatW * 0.2, figY, figScale, WHITE, 1);
+
+  // Price tags (amber bars)
+  var priceYBase = seatY - seatH * 0.8;
+  var priceHeightAnim = easeOut(ramp(u, 0.1, 0.7));
+
+  var windowPriceH = lerp(0, 180, priceHeightAnim);
+  var aislePriceH = lerp(0, 160, priceHeightAnim);
+  var middlePriceH = lerp(0, 60, priceHeightAnim);
+
+  var priceW = 60;
+  var priceRad = 10;
+
+  // Window price
+  s += rrect(X_WINDOW, priceYBase - windowPriceH / 2, priceW, windowPriceH, priceRad, AMBER, 0.9);
+  // Aisle price
+  s += rrect(X_AISLE, priceYBase - aislePriceH / 2, priceW, aislePriceH, priceRad, AMBER, 0.9);
+  // Middle price (smaller)
+  s += rrect(X_MIDDLE, priceYBase - middlePriceH / 2, priceW, middlePriceH, priceRad, AMBER, 0.9);
+
+  // Faint background element
+  s += rrectStroke(CX, CY, W * 0.8, BOT - TOP, 80, DIM, 4, 0.1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): System Optimization */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.8, smooth(u));
+  s += '<g ' + camera(scale, 0, lerp(0, 90, smooth(u))) + '>';
+
+  var seatY = SEAT_Y;
+  var seatW = SEAT_W;
+  var seatH = SEAT_H;
+
+  // Seats (middle still slightly squished)
+  s += seat(X_WINDOW, seatY, seatW, seatH, SEAT_RAD, WHITE, 10, 1);
+  s += seat(X_AISLE, seatY, seatW, seatH, SEAT_RAD, WHITE, 10, 1);
+  s += seat(X_MIDDLE, seatY, seatW * 0.6, seatH * 0.7, SEAT_RAD * 0.5, WHITE, 12, 1);
+
+  // Stick figures (normal posture)
+  var figScale = 0.7;
+  var figY = seatY - seatH * 0.1;
+  s += stickFigure(X_WINDOW - seatW * 0.2, figY, figScale, WHITE, 1);
+  s += stickFigure(X_AISLE + seatW * 0.2, figY, figScale, WHITE, 1);
+
+  // Price tags (amber bars)
+  var priceYBase = seatY - seatH * 0.8;
+  var priceW = 60;
+  var priceRad = 10;
+
+  var windowPriceH = 180;
+  var aislePriceH = 160;
+  var middlePriceH = 60;
+
+  // Dynamic adjustment of prices
+  var fluctuate = Math.sin(u * Math.PI * 6);
+  var windowAdjust = fluctuate * 20 * pulse(u, 0.5, 0.4);
+  var aisleAdjust = -fluctuate * 15 * pulse(u, 0.5, 0.4);
+  var middleAdjust = fluctuate * 10 * pulse(u, 0.5, 0.4);
+
+  s += rrect(X_WINDOW, priceYBase - (windowPriceH + windowAdjust) / 2, priceW, windowPriceH + windowAdjust, priceRad, AMBER, 0.9);
+  s += rrect(X_AISLE, priceYBase - (aislePriceH + aisleAdjust) / 2, priceW, aislePriceH + aisleAdjust, priceRad, AMBER, 0.9);
+  s += rrect(X_MIDDLE, priceYBase - (middlePriceH + middleAdjust) / 2, priceW, middlePriceH + middleAdjust, priceRad, AMBER, 0.9);
+
+  // Blue "system" grid/network connecting seats and prices
+  var systemOp = smooth(ramp(u, 0.1, 0.8));
+  var gridYTop = TOP + 100;
+  var gridYBot = BOT - 100;
+  var gridXLeft = X_WINDOW - seatW / 2 - 50;
+  var gridXRight = X_AISLE + seatW / 2 + 50;
+
+  // Horizontal lines
+  for (var i = 0; i < 5; i++) {
+    var gy = lerp(gridYTop, gridYBot, i / 4);
+    s += line(gridXLeft, gy, gridXRight, gy, BLUE, 4, 0.2 * systemOp);
+  }
+  // Vertical lines
+  s += line(X_WINDOW, gridYTop, X_WINDOW, gridYBot, BLUE, 4, 0.2 * systemOp);
+  s += line(X_MIDDLE, gridYTop, X_MIDDLE, gridYBot, BLUE, 4, 0.2 * systemOp);
+  s += line(X_AISLE, gridYTop, X_AISLE, gridYBot, BLUE, 4, 0.2 * systemOp);
+
+  // Connecting pulses
+  var pulsePhase = u * 3;
+  var pulseOp = Math.sin(pulsePhase * Math.PI) * 0.8;
+  s += ring(X_WINDOW, priceYBase - windowPriceH, 20 + 10 * pulseOp, BLUE, 6, pulseOp * systemOp);
+  s += ring(X_AISLE, priceYBase - aislePriceH, 20 + 10 * pulseOp, BLUE, 6, pulseOp * systemOp);
+  s += ring(X_MIDDLE, priceYBase - middlePriceH, 20 + 10 * pulseOp, BLUE, 6, pulseOp * systemOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): The Outcome - Middle Seat is Cheaper */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.8, 0.92, smooth(clamp(u / 0.7, 0, 1)));
+  s += '<g ' + camera(scale, 0, lerp(90, 0, smooth(u))) + '>';
+
+  var seatY = SEAT_Y;
+  var seatW = SEAT_W;
+  var seatH = SEAT_H;
+
+  // Seats (middle still slightly squished)
+  s += seat(X_WINDOW, seatY, seatW, seatH, SEAT_RAD, WHITE, 10, 1);
+  s += seat(X_AISLE, seatY, seatW, seatH, SEAT_RAD, WHITE, 10, 1);
+  s += seat(X_MIDDLE, seatY, seatW * 0.6, seatH * 0.7, SEAT_RAD * 0.5, WHITE, 12, 1);
+
+  // Stick figures (normal posture)
+  var figScale = 0.7;
+  var figY = seatY - seatH * 0.1;
+  s += stickFigure(X_WINDOW - seatW * 0.2, figY, figScale, WHITE, 1);
+  s += stickFigure(X_AISLE + seatW * 0.2, figY, figScale, WHITE, 1);
+
+  // Price tags (amber bars) - stable, final values
+  var priceYBase = seatY - seatH * 0.8;
+  var priceW = 60;
+  var priceRad = 10;
+
+  var windowPriceH = 180;
+  var aislePriceH = 160;
+  var middlePriceH = 60;
+
+  s += rrect(X_WINDOW, priceYBase - windowPriceH / 2, priceW, windowPriceH, priceRad, AMBER, 0.9);
+  s += rrect(X_AISLE, priceYBase - aislePriceH / 2, priceW, aislePriceH, priceRad, AMBER, 0.9);
+  s += rrect(X_MIDDLE, priceYBase - middlePriceH / 2, priceW, middlePriceH, priceRad, AMBER, 0.9);
+
+  // Blue "system" elements (fading out or stable)
+  var systemOp = 0.2 * (1 - smooth(ramp(u, 0.6, 0.9)));
+  var gridYTop = TOP + 100;
+  var gridYBot = BOT - 100;
+  var gridXLeft = X_WINDOW - seatW / 2 - 50;
+  var gridXRight = X_AISLE + seatW / 2 + 50;
+
+  for (var i = 0; i < 5; i++) {
+    var gy = lerp(gridYTop, gridYBot, i / 4);
+    s += line(gridXLeft, gy, gridXRight, gy, BLUE, 4, systemOp);
+  }
+  s += line(X_WINDOW, gridYTop, X_WINDOW, gridYBot, BLUE, 4, systemOp);
+  s += line(X_MIDDLE, gridYTop, X_MIDDLE, gridYBot, BLUE, 4, systemOp);
+  s += line(X_AISLE, gridYTop, X_AISLE, gridYBot, BLUE, 4, systemOp);
+
+  // A "checkmark" or positive indicator over the system (no text, so a v-shape)
+  var checkOp = smooth(ramp(u, 0.4, 0.8));
+  var checkX = CX;
+  var checkY = CY - 300;
+  var checkSize = 60;
+  var dCheck = "M " + (checkX - checkSize) + " " + (checkY) + " L " + (checkX - checkSize / 3) + " " + (checkY + checkSize / 2) + " L " + (checkX + checkSize) + " " + (checkY - checkSize / 2);
+  s += pathTag(dCheck, BLUE, 14, checkOp);
+
+  // Subtle pulse on the middle seat's lower price
+  var middlePulse = Math.sin(u * Math.PI * 4) * 0.5 + 0.5;
+  s += ring(X_MIDDLE, priceYBase - middlePriceH / 2, priceW / 2 + 10, AMBER, 4, middlePulse * smooth(ramp(u, 0.5, 0.9)));
+
+  s += '</g>';
+  return s;
+}
+
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
