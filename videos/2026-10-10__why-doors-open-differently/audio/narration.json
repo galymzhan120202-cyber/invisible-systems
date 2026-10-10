@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You approach a common door, ready to enter a building. You reach out, then hesitate. Push or pull? A simple task, yet a moment of uncertainty.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "You guess wrong, pushing when it needs a pull, or vice versa. A brief, awkward fumble. Why do some doors feel unintuitive, almost designed to trick you?",
+    "rate": "+5%",
+    "start": 10.5
+  },
+  {
+    "id": "scene-03",
+    "text": "You might assume it's just bad design, an arbitrary architect's choice. Surely, a single, obvious way to open *every* door exists, right?",
+    "rate": "+5%",
+    "start": 20.7
+  },
+  {
+    "id": "scene-04",
+    "text": "But the door’s swing isn't random. Fire codes demand exit doors push *outwards* for quick escape. Available space dictates if it swings in or out.",
+    "rate": "+5%",
+    "start": 30.9
+  },
+  {
+    "id": "scene-05",
+    "text": "Imagine a crowded theater where exit doors pulled *inward*. Panic and crushing would ensue. Or an office door blocking essential movement.",
+    "rate": "+5%",
+    "start": 41.2
+  },
+  {
+    "id": "scene-06",
+    "text": "So next time you hesitate at a door, remember it’s not just wood or metal. It’s a silent guardian, designed by unseen rules to keep you safe and systems flowing.",
+    "rate": "+5%",
+    "start": 51.5
+  }
+]

@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Public Transport Runs on a Schedule</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary elements
+var BLUE  = "#4C86F0";              // signal blue  -> the system / network / schedule
+var AMBER = "#F2A93B";              // warm amber   -> YOU / your desire
+var CORAL = "#FF5B5B";              // coral red    -> naive model / frustration / delays
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+/* New helper: person (stick figure) */
+function person(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = 28;
+  var bodyH = 100;
+  var armL = 60;
+  var legL = 80;
+
+  // Head
+  g += dot(x, y - headR - bodyH / 2, headR, col);
+  // Body
+  g += line(x, y - bodyH / 2, x, y + bodyH / 2, col, 10);
+  // Arms
+  if (pose === 0) { // Waiting, hands on hips
+    g += line(x, y - bodyH / 4, x - armL, y - bodyH / 4, col, 8); // Left arm
+    g += line(x, y - bodyH / 4, x + armL, y - bodyH / 4, col, 8); // Right arm
+    g += dot(x - armL, y - bodyH / 4, 10, col); // Left hand
+    g += dot(x + armL, y - bodyH / 4, 10, col); // Right hand
+  } else if (pose === 1) { // Impatient, arms crossed, foot tapping (implied)
+    g += line(x, y - bodyH / 4, x - armL * 0.7, y + bodyH / 8, col, 8); // Left arm
+    g += line(x, y - bodyH / 4, x + armL * 0.7, y + bodyH / 8, col, 8); // Right arm
+    g += dot(x - armL * 0.7, y + bodyH / 8, 10, col); // Left hand
+    g += dot(x + armL * 0.7, y + bodyH / 8, 10, col); // Right hand
+  } else if (pose === 2) { // Looking around
+    g += line(x, y - bodyH / 4, x - armL * 0.5, y, col, 8);
+    g += line(x, y - bodyH / 4, x + armL * 0.5, y, col, 8);
+    g += dot(x - armL * 0.5, y, 10, col);
+    g += dot(x + armL * 0.5, y, 10, col);
+    g += line(x, y - headR - bodyH / 2, x - 10, y - headR - bodyH / 2 - 10, col, 7); // Gaze line
+  } else if (pose === 3) { // Confused/overwhelmed
+    g += line(x, y - bodyH / 4, x - armL * 0.6, y + bodyH / 4, col, 8);
+    g += line(x, y - bodyH / 4, x + armL * 0.6, y + bodyH / 4, col, 8);
+    g += dot(x - armL * 0.6, y + bodyH / 4, 10, col);
+    g += dot(x + armL * 0.6, y + bodyH / 4, 10, col);
+    g += line(x, y - headR - bodyH / 2, x, y - headR - bodyH / 2 + 10, col, 7); // Gaze line slightly down
+  } else if (pose === 4) { // Thoughtful/understanding
+    g += line(x, y - bodyH / 4, x - armL * 0.4, y + bodyH / 8, col, 8); // Left arm
+    g += line(x, y - bodyH / 4, x + armL * 0.4, y + bodyH / 8, col, 8); // Right arm
+    g += dot(x + armL * 0.4, y + bodyH / 8, 10, col); // Right hand
+    g += line(x - armL * 0.4, y + bodyH / 8, x - armL * 0.4 + 10, y + bodyH / 8 + 10, col, 7); // Hand to chin
+  } else if (pose === 5) { // Happy/relieved
+    g += line(x, y - bodyH / 4, x - armL * 0.8, y - bodyH / 2, col, 8); // Left arm up
+    g += line(x, y - bodyH / 4, x + armL * 0.8, y - bodyH / 2, col, 8); // Right arm up
+    g += dot(x - armL * 0.8, y - bodyH / 2, 10, col); // Left hand
+    g += dot(x + armL * 0.8, y - bodyH / 2, 10, col); // Right hand
+  }
+
+  // Legs
+  g += line(x, y + bodyH / 2, x - legL * 0.3, y + bodyH / 2 + legL, col, 10);
+  g += line(x, y + bodyH / 2, x + legL * 0.3, y + bodyH / 2 + legL, col, 10);
+  g += '</g>';
+  return g;
+}
+
+/* New helper: bus icon */
+function bus(x, y, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var bodyW = 160, bodyH = 100, bodyRad = 20;
+  var wheelR = 18;
+  var wheelXOff = bodyW / 3;
+  var wheelYOff = bodyH / 2 + wheelR / 2;
+
+  // Body
+  g += rrect(x, y, bodyW, bodyH, bodyRad, col, op);
+  // Wheels
+  g += dot(x - wheelXOff, y + wheelYOff, wheelR, WHITE);
+  g += dot(x + wheelXOff, y + wheelYOff, wheelR, WHITE);
+  g += '</g>';
+  return g;
+}
+
+/* New helper: bus stop sign (rectangle with a dot) */
+function busStop(x, y, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var poleH = 80;
+  var signW = 60, signH = 60;
+  g += line(x, y, x, y - poleH, col, 6);
+  g += rrect(x, y - poleH - signH / 2, signW, signH, 10, col, op);
+  g += dot(x, y - poleH - signH / 2, 12, WHITE);
+  g += '</g>';
+  return g;
+}
+
+/* New helper: clock (circle with two hands) */
+function clock(x, y, r, col, handAngle, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, r, col, 6);
+  // Hour hand (shorter, thicker)
+  var hx = x + r * 0.4 * Math.cos(handAngle - Math.PI / 2);
+  var hy = y + r * 0.4 * Math.sin(handAngle - Math.PI / 2);
+  g += line(x, y, hx, hy, col, 8);
+  // Minute hand (longer, thinner)
+  var mx = x + r * 0.7 * Math.cos(handAngle * 12 - Math.PI / 2); // 12x faster
+  var my = y + r * 0.7 * Math.sin(handAngle * 12 - Math.PI / 2);
+  g += line(x, y, mx, my, col, 6);
+  g += '</g>';
+  return g;
+}
+
+/* New helper: schedule icon (rectangle with bars) */
+function scheduleIcon(x, y, w, h, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, 10, col, 8);
+  g += line(x - w / 2 + w * 0.2, y - h / 2 + h * 0.2, x + w / 2 - w * 0.2, y - h / 2 + h * 0.2, col, 6);
+  g += line(x - w / 2 + w * 0.2, y - h / 2 + h * 0.4, x + w / 2 - w * 0.2, y - h / 2 + h * 0.4, col, 6);
+  g += line(x - w / 2 + w * 0.2, y - h / 2 + h * 0.6, x + w / 2 - w * 0.2, y - h / 2 + h * 0.6, col, 6);
+  g += line(x - w / 2 + w * 0.2, y - h / 2 + h * 0.8, x + w / 2 - w * 0.2, y - h / 2 + h * 0.8, col, 6);
+  g += '</g>';
+  return g;
+}
+
+var STOP_Y = BOT - 180;
+var BUS_START_Y = TOP + 80;
+
+/* Main hero element: route line (morphs across scenes) */
+function routeLine(u, sceneIdx, op) {
+  op = (op == null ? 1 : op);
+  var s = '';
+  var lineSW = 12;
+  var mainRouteX = CX;
+  var routeBandW = 300; // Total width for multi-lane/grid elements
+
+  if (sceneIdx === 0) { // Scene 1: Single straight line
+    s += line(mainRouteX, TOP, mainRouteX, BOT, BLUE, lineSW, op);
+  } else if (sceneIdx === 1) { // Scene 2: Wavy, unpredictable line (Coral)
+    // Morph from straight (u=0) to wavy (u=1)
+    var waveAmp = lerp(0, 80, smooth(u));
+    var waveFreq = 3;
+    var d = "M " + mainRouteX + " " + TOP;
+    for (var y = TOP; y <= BOT; y += 20) {
+      var x = mainRouteX + waveAmp * Math.sin(y / (BOT - TOP) * Math.PI * waveFreq + u * Math.PI * 2);
+      d += " L " + x + " " + y;
+    }
+    s += pathTag(d, CORAL, lineSW, op);
+  } else if (sceneIdx === 2) { // Scene 3: Multiple parallel blue lines
+    // Morph from single line (u=0) to three parallel lines (u=1)
+    var numLines = 1 + Math.round(lerp(0, 2, smooth(u))); // 1 -> 3 lines
+    var spacing = routeBandW / (numLines > 1 ? (numLines - 1) : 1);
+    var startX = CX - (numLines - 1) * spacing / 2;
+    for (var i = 0; i < numLines; i++) {
+      s += line(startX + i * spacing, TOP, startX + i * spacing, BOT, BLUE, lineSW, op);
+    }
+  } else if (sceneIdx === 3) { // Scene 4: Converging/diverging at a hub
+    // Morph from parallel lines (u=0) to hub (u=1)
+    var numLines = 3; // Start with 3 lines from S3
+    var spacing = routeBandW / (numLines - 1);
+    var startX = CX - (numLines - 1) * spacing / 2;
+    var hubY = CY;
+    var hubXSpan = 200;
+
+    for (var i = 0; i < numLines; i++) {
+      var x_start = startX + i * spacing;
+      var x_hub = lerp(x_start, CX - hubXSpan / 2 + i * (hubXSpan / (numLines - 1)), smooth(u));
+      var d = "M " + x_start + " " + TOP +
+              " Q " + x_start + " " + (hubY - 200) + " " + x_hub + " " + hubY +
+              " Q " + x_start + " " + (hubY + 200) + " " + x_start + " " + BOT;
+      s += pathTag(d, BLUE, lineSW, op * 0.8);
+    }
+    if (u > 0.5) { // Hub ring appears
+      s += ring(CX, hubY, lerp(0, 100, smooth(ramp(u, 0.5, 0.9))), BLUE, lineSW, op * 0.6);
+    }
+  } else if (sceneIdx === 4) { // Scene 5: Grid-like network
+    // Morph from hub (u=0) to grid (u=1)
+    var gridSize = 4;
+    var lineSpacing = routeBandW / (gridSize - 1);
+    var startX = CX - routeBandW / 2;
+    var startY = CY - routeBandW / 2;
+
+    // Vertical lines
+    for (var i = 0; i < gridSize; i++) {
+      var x_val = startX + i * lineSpacing;
+      s += line(x_val, TOP, x_val, BOT, BLUE, lineSW, op * 0.8);
+    }
+    // Horizontal lines (appear as u progresses)
+    for (var j = 0; j < gridSize - 1; j++) {
+      var y_val = startY + j * lineSpacing + lineSpacing / 2;
+      var h_len = lerp(0, routeBandW + lineSpacing, smooth(ramp(u, j * 0.2, j * 0.2 + 0.4)));
+      s += line(CX - h_len / 2, y_val, CX + h_len / 2, y_val, BLUE, lineSW * 0.6, op * 0.4);
+    }
+  } else if (sceneIdx === 5) { // Scene 6: Clean, optimized line
+    // Morph from grid (u=0) to single line (u=1)
+    var gridOp = lerp(1, 0, smooth(ramp(u, 0, 0.4)));
+    var singleOp = lerp(0, 1, smooth(ramp(u, 0.6, 1)));
+
+    // Fading grid
+    var gridSize = 4;
+    var lineSpacing = routeBandW / (gridSize - 1);
+    var startX = CX - routeBandW / 2;
+    var startY = CY - routeBandW / 2;
+    for (var i = 0; i < gridSize; i++) {
+      s += line(startX + i * lineSpacing, TOP, startX + i * lineSpacing, BOT, BLUE, lineSW, op * 0.8 * gridOp);
+    }
+    for (var j = 0; j < gridSize - 1; j++) {
+      var y_val = startY + j * lineSpacing + lineSpacing / 2;
+      s += line(CX - (routeBandW + lineSpacing) / 2, y_val, CX + (routeBandW + lineSpacing) / 2, y_val, BLUE, lineSW * 0.6, op * 0.4 * gridOp);
+    }
+
+    // Emerging single line
+    s += line(mainRouteX, TOP, mainRouteX, BOT, BLUE, lineSW, op * singleOp);
+  }
+  return s;
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU waiting, simple route. */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  s += routeLine(u, 0, 1); // Single straight line
+
+  var personY = STOP_Y;
+  s += busStop(CX + 100, personY + 40, WHITE, 1);
+  s += person(CX, personY, AMBER, 0, 1); // Waiting
+  s += ring(CX + 30, personY - 30, 15, WHITE, 4, pulse(u * 2, 0.5, 0.1)); // Checking watch
+
+  // Bus approaching slowly
+  var busY = lerp(BUS_START_Y, personY - 100, easeOut(u * 0.2));
+  s += bus(CX, busY, BLUE, 0.8);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): Frustration, wavy route. */
+function scene2(u) {
+  var s = '';
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14);
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+
+  s += routeLine(u, 1, 1); // Wavy, unpredictable line (Coral)
+
+  var personY = STOP_Y;
+  s += busStop(CX + 100, personY + 40, WHITE, lerp(1, 0.6, smooth(u))); // Fades slightly
+  s += person(CX, personY, AMBER, 1, 1); // Impatient, arms crossed
+
+  // Bus moves erratically, maybe off path
+  var busX = CX + Math.sin(u * Math.PI * 4) * lerp(0, 30, smooth(u));
+  var busY = lerp(BUS_START_Y + 100, personY - 100, easeOut(u * 0.3));
+  s += bus(busX, busY, CORAL, 0.8); // Coral bus for frustration
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): Other passengers, multiple routes. */
+function scene3(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.9, smooth(u)); // Zoom out slightly
+  var shiftY = lerp(0, 50, smooth(u));
+  s += '<g ' + camera(scale, 0, shiftY) + '>';
+
+  s += routeLine(u, 2, 1); // Multiple parallel blue lines
+
+  var personY = STOP_Y;
+  var mainPersonX = CX - 150;
+  s += busStop(mainPersonX + 100, personY + 40, WHITE, 1);
+  s += person(mainPersonX, personY, AMBER, 2, 1); // Looking around
+
+  // Other people appear on other routes
+  var otherPersonOp = smooth(ramp(u, 0.3, 0.7));
+  s += person(CX + 150, personY, DIM, 0, otherPersonOp);
+
+  // Bus on another route
+  var busY = lerp(BUS_START_Y + 200, personY - 200, easeOut(u * 0.4));
+  s += bus(CX + 150, busY, BLUE, 0.8);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): System complexity, hub, clock. */
+function scene4(u) {
+  var s = '';
+  var scale = lerp(0.9, 0.8, smooth(u)); // Zoom out more
+  var shiftY = lerp(50, 100, smooth(u));
+  s += '<g ' + camera(scale, 0, shiftY) + '>';
+
+  s += routeLine(u, 3, 1); // Converging/diverging at a hub
+
+  var personY = CY + 300; // Person is smaller, further away
+  s += person(CX - 250, personY, AMBER, 3, 1); // Confused/overwhelmed
+
+  // Multiple buses moving along complex paths
+  var busOp = 0.7;
+  s += bus(CX + 100, lerp(TOP, BOT, (u * 0.8 + rnd(1)) % 1), BLUE, busOp);
+  s += bus(CX - 100, lerp(TOP, BOT, (u * 0.6 + rnd(2)) % 1), BLUE, busOp);
+  s += bus(CX + 200, lerp(TOP, BOT, (u * 0.9 + rnd(3)) % 1), DIM, busOp * 0.6); // Dim bus
+  s += bus(CX - 200, lerp(TOP, BOT, (u * 0.7 + rnd(4)) % 1), DIM, busOp * 0.6); // Dim bus
+
+  // Clock appears, hands spin to show time passing
+  var clockOp = smooth(ramp(u, 0.2, 0.6));
+  s += clock(CX, TOP + 150, 60, WHITE, u * Math.PI * 2, clockOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): Schedule is solution, grid network. */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(0.8, 0.9, smooth(u)); // Zoom in slightly
+  var shiftY = lerp(100, 50, smooth(u));
+  s += '<g ' + camera(scale, 0, shiftY) + '>';
+
+  s += routeLine(u, 4, 1); // Grid-like network
+
+  var personY = CY + 300;
+  s += person(CX - 250, personY, AMBER, 4, 1); // Thoughtful/understanding
+
+  // Schedule icon appears
+  var scheduleOp = smooth(ramp(u, 0.3, 0.7));
+  s += scheduleIcon(CX + 200, CY - 100, 180, 240, BLUE, scheduleOp);
+
+  // Buses moving efficiently
+  s += bus(CX + 120, lerp(TOP, BOT, (u * 0.7 + rnd(1)) % 1), BLUE, 0.9);
+  s += bus(CX - 120, lerp(TOP, BOT, (u * 0.9 + rnd(2)) % 1), BLUE, 0.9);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): Collective benefit, bus arrives. */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.9, 1.0, smooth(u)); // Zoom back to normal
+  var shiftY = lerp(50, 0, smooth(u));
+  s += '<g ' + camera(scale, 0, shiftY) + '>';
+
+  s += routeLine(u, 5, 1); // Clean, optimized line
+
+  var personY = STOP_Y;
+  s += busStop(CX + 100, personY + 40, WHITE, 1);
+  s += person(CX, personY, AMBER, 5, 1); // Happy/relieved
+
+  // Bus smoothly arrives
+  var busArrivalU = easeOut(ramp(u, 0.2, 0.8)); // Bus arrives between 52s and 58s
+  var busY = lerp(BUS_START_Y + 200, personY - 100, busArrivalU);
+  s += bus(CX, busY, BLUE, 1);
+
+  // Other people at stops
+  s += person(CX - 200, personY, DIM, 0, 0.6);
+  s += person(CX + 200, personY, DIM, 0, 0.6);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

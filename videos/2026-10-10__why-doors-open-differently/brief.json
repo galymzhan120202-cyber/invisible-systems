@@ -1,0 +1,15 @@
+{
+  "id": "why-doors-open-differently",
+  "slug": "2026-10-10__why-doors-open-differently",
+  "title_working": "Why Doors Open Differently",
+  "system": "hardware constraints and universal design principles",
+  "cluster": "rules-and-defaults",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "failed",
+  "created_at": "2026-10-10T12:29:55+00:00",
+  "produced_at": "2026-10-10T12:33:02+00:00",
+  "verify": "FAIL",
+  "takeaway": "The way a door opens is a subtle dance between physics, human safety, and the building's hidden logic, designed by unseen rules.",
+  "animation_source": "llm"
+}

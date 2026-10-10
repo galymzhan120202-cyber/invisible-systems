@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Ads Follow You Around the Internet</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> system / tracker
+var AMBER = "#F2A93B";              // warm amber   -> YOU / user
+var CORAL = "#FF5B5B";              // coral red    -> ads / confusion
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* the stick figure: head, body, two arms, two legs */
+function stickFigure(x, y, h, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var sw = 8;
+  var headR = h * 0.12;
+  var bodyL = h * 0.4;
+  var armL = h * 0.3;
+  var legL = h * 0.35;
+  var g = '<g opacity="' + op + '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round">';
+  // Head
+  g += '<circle cx="' + x + '" cy="' + (y - h / 2 + headR) + '" r="' + headR + '" fill="' + col + '"/>';
+  var neckY = y - h / 2 + headR * 2;
+  var bodyY = neckY + bodyL;
+  // Body
+  g += line(x, neckY, x, bodyY, col, sw);
+
+  // Arms & Legs based on pose
+  switch (pose) {
+    case 'browsing':
+      g += line(x, neckY + bodyL * 0.2, x - armL * 0.6, neckY + bodyL * 0.2 + armL * 0.6, col, sw); // Left arm bent
+      g += line(x, neckY + bodyL * 0.2, x + armL * 0.6, neckY + bodyL * 0.2 + armL * 0.6, col, sw); // Right arm bent
+      g += line(x - sw, bodyY, x - sw - legL * 0.2, bodyY + legL * 0.8, col, sw); // Left leg slightly bent
+      g += line(x + sw, bodyY, x + sw + legL * 0.2, bodyY + legL * 0.8, col, sw); // Right leg slightly bent
+      break;
+    case 'confused':
+      g += line(x, neckY + bodyL * 0.2, x - armL * 0.5, neckY + bodyL * 0.2 + armL * 0.5, col, sw); // Left arm slightly up
+      g += line(x, neckY + bodyL * 0.2, x + armL * 0.5, neckY + bodyL * 0.2 + armL * 0.5, col, sw); // Right arm slightly up
+      g += line(x - sw, bodyY, x - sw, bodyY + legL, col, sw); // Straight legs
+      g += line(x + sw, bodyY, x + sw, bodyY + legL, col, sw);
+      break;
+    case 'walking':
+      g += line(x, neckY + bodyL * 0.2, x - armL * 0.4, neckY + bodyL * 0.2 + armL * 0.6, col, sw); // Left arm back
+      g += line(x, neckY + bodyL * 0.2, x + armL * 0.4, neckY + bodyL * 0.2 - armL * 0.2, col, sw); // Right arm forward
+      g += line(x - sw, bodyY, x - sw - legL * 0.3, bodyY + legL * 0.7, col, sw); // Left leg back
+      g += line(x + sw, bodyY, x + sw + legL * 0.3, bodyY + legL * 0.7, col, sw); // Right leg forward
+      break;
+    case 'overwhelmed':
+      g += line(x, neckY + bodyL * 0.1, x - armL * 0.8, neckY + bodyL * 0.1 - armL * 0.4, col, sw); // Arms up and out
+      g += line(x, neckY + bodyL * 0.1, x + armL * 0.8, neckY + bodyL * 0.1 - armL * 0.4, col, sw);
+      g += line(x - sw, bodyY, x - sw, bodyY + legL, col, sw); // Straight legs
+      g += line(x + sw, bodyY, x + sw, bodyY + legL, col, sw);
+      break;
+    case 'resigned':
+      g += line(x, neckY + bodyL * 0.2, x - armL * 0.6, neckY + bodyL * 0.2 + armL * 0.2, col, sw); // Arms slightly out, down
+      g += line(x, neckY + bodyL * 0.2, x + armL * 0.6, neckY + bodyL * 0.2 + armL * 0.2, col, sw);
+      g += line(x - sw, bodyY, x - sw, bodyY + legL, col, sw); // Straight legs
+      g += line(x + sw, bodyY, x + sw, bodyY + legL, col, sw);
+      break;
+    case 'idle':
+    default:
+      g += line(x, neckY + bodyL * 0.2, x - armL * 0.2, neckY + bodyL * 0.2 + armL * 0.6, col, sw); // Arms down
+      g += line(x, neckY + bodyL * 0.2, x + armL * 0.2, neckY + bodyL * 0.2 + armL * 0.6, col, sw);
+      g += line(x - sw, bodyY, x - sw, bodyY + legL, col, sw); // Straight legs
+      g += line(x + sw, bodyY, x + sw, bodyY + legL, col, sw);
+      break;
+  }
+  g += '</g>';
+  return g;
+}
+
+/* generic product icon: box, shoe, gadget */
+function product(x, y, size, type, col, sw, op) {
+  op = (op == null ? 1 : op);
+  sw = sw || 9;
+  var g = '<g opacity="' + op + '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" fill="none">';
+  switch (type) {
+    case 'shoe':
+      // Simplified shoe outline
+      var d = "M " + (x - size * 0.8) + " " + (y + size * 0.3) +
+              " Q " + (x - size * 0.7) + " " + (y - size * 0.7) + " " + (x + size * 0.2) + " " + (y - size * 0.6) +
+              " L " + (x + size * 0.8) + " " + (y - size * 0.1) +
+              " Q " + (x + size * 0.9) + " " + (y + size * 0.4) + " " + (x + size * 0.6) + " " + (y + size * 0.5) +
+              " L " + (x - size * 0.8) + " " + (y + size * 0.3) + " Z";
+      g += pathTag(d, col, sw, op);
+      g += line(x + size * 0.1, y - size * 0.4, x + size * 0.4, y - size * 0.1, col, sw * 0.7, op); // Laces/detail
+      break;
+    case 'gadget':
+      // Simple rounded rectangle with a button
+      g += rrectStroke(x, y, size * 1.4, size * 1.8, size * 0.2, col, sw, op);
+      g += dot(x, y + size * 0.6, size * 0.15, col, op); // Button
+      break;
+    case 'box':
+    default:
+      g += rrectStroke(x, y, size * 1.6, size * 1.6, size * 0.1, col, sw, op);
+      g += line(x - size * 0.8, y - size * 0.8, x + size * 0.8, y + size * 0.8, col, sw * 0.4, op * 0.4); // X on box
+      g += line(x + size * 0.8, y - size * 0.8, x - size * 0.8, y + size * 0.8, col, sw * 0.4, op * 0.4);
+      break;
+  }
+  g += '</g>';
+  return g;
+}
+
+/* browser screen */
+function browserScreen(x, y, w, h, col, sw, op) {
+  op = (op == null ? 1 : op);
+  sw = sw || 10;
+  var rad = w * 0.08;
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, rad, col, sw, op);
+  g += rrect(x, y - h / 2 + rad / 2 + sw / 2, w, h * 0.1, rad * 0.5, col, op * 0.1); // Top bar
+  g += dot(x - w / 2 + rad * 0.8, y - h / 2 + rad / 2 + sw / 2, sw * 0.6, col, op * 0.6); // Close button
+  return g + '</g>';
+}
+
+/* cookie icon */
+function cookieIcon(x, y, size, col, sw, op) {
+  op = (op == null ? 1 : op);
+  sw = sw || 8;
+  var r = size / 2;
+  var d = "M " + (x + r) + " " + y +
+          " A " + r + " " + r + " 0 1 0 " + (x - r * Math.cos(Math.PI / 4)) + " " + (y - r * Math.sin(Math.PI / 4)) +
+          " L " + x + " " + y + " Z"; // Pie wedge cut out
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + op + '"/>' +
+         '<path d="' + d + '" fill="#000000" stroke="none" opacity="' + op + '"/>';
+}
+
+/* data node */
+function dataNode(x, y, r, col, op) {
+  return dot(x, y, r, col, op);
+}
+
+/* profile icon (stylized head) */
+function profileIcon(x, y, w, h, col, sw, op) {
+  op = (op == null ? 1 : op);
+  sw = sw || 10;
+  var headR = h * 0.25;
+  var bodyW = w * 0.8;
+  var bodyH = h * 0.4;
+  var d = "M " + x + " " + (y - h / 2 + headR) +
+          " A " + headR + " " + headR + " 0 1 0 " + x + " " + (y - h / 2 + headR * 2) +
+          " L " + (x + bodyW / 2) + " " + (y - h / 2 + headR * 2 + bodyH) +
+          " A " + (bodyW / 2) + " " + (bodyW / 2) + " 0 0 0 " + (x - bodyW / 2) + " " + (y - h / 2 + headR * 2 + bodyH) +
+          " Z";
+  return pathTag(d, col, sw, op);
+}
+
+/* persistent faint network grid (hero element, always present) */
+function networkGrid(op) {
+  op = (op == null ? 0.08 : op);
+  var s = '';
+  var gridSize = 120;
+  for (var i = 0; i < W / gridSize; i++) {
+    for (var j = 0; j < H / gridSize; j++) {
+      s += dot(i * gridSize + gridSize / 2, j * gridSize + gridSize / 2, 4, BLUE, op);
+      if (i < W / gridSize - 1) s += line(i * gridSize + gridSize / 2, j * gridSize + gridSize / 2, (i + 1) * gridSize + gridSize / 2, j * gridSize + gridSize / 2, BLUE, 1, op * 0.6);
+      if (j < H / gridSize - 1) s += line(i * gridSize + gridSize / 2, j * gridSize + gridSize / 2, i * gridSize + gridSize / 2, (j + 1) * gridSize + gridSize / 2, BLUE, 1, op * 0.6);
+    }
+  }
+  return s;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + PRODUCT - User browsing, sees a product. */
+function scene1(u) {
+  var s = '';
+  var userH = 220;
+  var screenW = W * 0.8, screenH = BOT - TOP - 100;
+  var screenY = CY + 40;
+
+  var scale = lerp(1.02, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-10, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  s += networkGrid(0); // Absent in S1
+
+  var screenPulse = Math.sin(u * Math.PI * 2) * 0.02;
+  s += browserScreen(CX, screenY, screenW, screenH, BLUE, 10, 0.8 + screenPulse);
+
+  var productSize = lerp(0, 80, easeOut(ramp(u, 0.2, 0.6)));
+  var productOp = lerp(0, 1, easeOut(ramp(u, 0.2, 0.6)));
+  s += product(CX, screenY - 100, productSize, 'box', DIM, 9, productOp);
+
+  var userY = BOT - userH / 2 - 100;
+  s += stickFigure(CX, userY, userH, AMBER, 'browsing', 1);
+
+  // User gaze/interaction
+  var gazeX = lerp(CX, CX, smooth(ramp(u, 0.6, 0.8)));
+  var gazeY = lerp(userY - userH * 0.3, screenY - 100, smooth(ramp(u, 0.6, 0.8)));
+  s += line(CX, userY - userH * 0.3, gazeX, gazeY, WHITE, 5, ramp(u, 0.5, 0.9));
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO + CONFUSION - User leaves site, product ad appears elsewhere. */
+function scene2(u) {
+  var s = '';
+  var userH = 220;
+  var userY = BOT - userH / 2 - 100;
+
+  // Initial screen fades out, network grid fades in
+  var screenFade = 1 - smooth(ramp(u, 0.0, 0.4));
+  var screenW = W * 0.8, screenH = BOT - TOP - 100;
+  var screenY = CY + 40;
+  s += browserScreen(CX, screenY, screenW, screenH, BLUE, 10, 0.8 * screenFade);
+
+  var gridOp = smooth(ramp(u, 0.2, 0.6));
+  s += networkGrid(gridOp * 0.12);
+
+  // User moves from left to right, then stops and looks confused
+  var userMoveX = lerp(CX - 150, CX + 150, smooth(ramp(u, 0.0, 0.4)));
+  var userPose = (u < 0.4) ? 'walking' : 'confused';
+  s += stickFigure(userMoveX, userY, userH, AMBER, userPose, 1);
+
+  // New product ad appears on a smaller screen (e.g., phone)
+  var adScreenW = 300, adScreenH = 500;
+  var adScreenX = lerp(userMoveX + 100, userMoveX + 180, smooth(ramp(u, 0.5, 0.7)));
+  var adScreenY = lerp(userY - 100, userY - adScreenH / 2 + 50, smooth(ramp(u, 0.5, 0.7)));
+  var adScreenOp = smooth(ramp(u, 0.4, 0.7));
+  s += browserScreen(adScreenX, adScreenY, adScreenW, adScreenH, BLUE, 7, adScreenOp * 0.7);
+
+  var productAdSize = lerp(0, 60, smooth(ramp(u, 0.6, 0.8)));
+  var productAdOp = smooth(ramp(u, 0.6, 0.8));
+  s += product(adScreenX, adScreenY - 50, productAdSize, 'shoe', CORAL, 7, productAdOp);
+
+  // Confusion indicator (question mark glyph)
+  var qOp = smooth(ramp(u, 0.7, 0.9));
+  if (qOp > 0.05) {
+    s += ring(userMoveX + 40, userY - userH * 0.6, 26, WHITE, 6, qOp);
+    s += dot(userMoveX + 40, userY - userH * 0.6 - 20, 8, WHITE, qOp);
+  }
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH + TRACKER - A cookie is placed. */
+function scene3(u) {
+  var s = '';
+  var userH = 220;
+  var userY = CY + 200; // User path will be central
+
+  // Network grid background, slightly more prominent
+  s += networkGrid(0.15);
+
+  // User path (amber line)
+  var pathStart = CX - 300, pathEnd = CX + 300;
+  var pathCurrentX = lerp(pathStart, pathEnd, smooth(u));
+  s += line(pathStart, userY, pathCurrentX, userY, AMBER, 8, 1); // User's journey
+  s += stickFigure(pathCurrentX, userY, userH, AMBER, 'walking', 1);
+
+  // Tracker (blue dot) following the user
+  var trackerX = lerp(pathStart - 50, pathEnd + 50, smooth(u * 1.1)); // Tracker slightly ahead/behind
+  s += dot(trackerX, userY + 80, 18, BLUE, 0.9); // Tracker icon
+
+  // Cookie icon appears and attaches to the tracker/path
+  var cookieSize = lerp(0, 40, easeOut(ramp(u, 0.3, 0.6)));
+  var cookieX = lerp(trackerX - 80, trackerX + 20, smooth(ramp(u, 0.4, 0.7)));
+  var cookieY = lerp(userY + 120, userY + 80, smooth(ramp(u, 0.4, 0.7)));
+  s += cookieIcon(cookieX, cookieY, cookieSize, BLUE, 8, smooth(ramp(u, 0.3, 0.8)));
+
+  // Coral product ad (fading from previous scene)
+  var adOp = 1 - smooth(ramp(u, 0.7, 1.0));
+  var adSize = lerp(60, 40, smooth(ramp(u, 0.0, 0.5)));
+  s += product(CX + 300, TOP + 100, adSize, 'shoe', CORAL, 7, adOp);
+
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND + DATA - Behavioral profile built. */
+function scene4(u) {
+  var s = '';
+  var userH = 220;
+  var userY = CY + 200;
+  var userX = CX;
+
+  s += networkGrid(0.2); // Background grid
+
+  s += stickFigure(userX, userY, userH, AMBER, 'idle', 1);
+
+  var trackerX = CX, trackerY = userY + 80;
+  s += dot(trackerX, trackerY, 18, BLUE, 0.9); // Tracker icon
+
+  // Data nodes appear around the user
+  var numNodes = 8;
+  var nodeRadius = lerp(0, 12, smooth(ramp(u, 0.1, 0.4)));
+  var nodesOp = smooth(ramp(u, 0.1, 0.4));
+  var nodeDist = 200;
+  var dataNodes = [];
+  for (var i = 0; i < numNodes; i++) {
+    var angle = (i / numNodes) * Math.PI * 2 + Math.sin(u * 2) * 0.1;
+    var nx = userX + Math.cos(angle) * nodeDist;
+    var ny = userY + Math.sin(angle) * nodeDist - 100; // Shifted up
+    dataNodes.push({x: nx, y: ny});
+    s += dataNode(nx, ny, nodeRadius, DIM, nodesOp);
+    // Lines connecting tracker to data nodes
+    s += line(trackerX, trackerY, nx, ny, BLUE, 2, nodesOp * 0.6);
+  }
+
+  // Data nodes coalesce into a profile icon
+  var profileOp = smooth(ramp(u, 0.6, 0.9));
+  var profileScale = lerp(0, 1, profileOp);
+  var profileX = CX, profileY = CY - 100;
+  if (profileOp > 0.05) {
+    s += profileIcon(profileX, profileY, 200 * profileScale, 280 * profileScale, BLUE, 10, profileOp);
+    // Lines from data nodes to profile center
+    for (var i = 0; i < numNodes; i++) {
+      var node = dataNodes[i];
+      s += line(node.x, node.y, profileX, profileY, BLUE, 2, profileOp * 0.8);
+    }
+  }
+
+  // Coral product ad (now more prominent, targeted)
+  var adSize = lerp(40, 80, smooth(ramp(u, 0.7, 1.0)));
+  var adX = lerp(CX + 300, CX + 200, smooth(ramp(u, 0.7, 1.0)));
+  var adY = lerp(TOP + 100, CY + 100, smooth(ramp(u, 0.7, 1.0)));
+  s += product(adX, adY, adSize, 'shoe', CORAL, 9, 1);
+
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE + TARGETING - Ads delivered based on profile. */
+function scene5(u) {
+  var s = '';
+  var userH = 220;
+  var userY = BOT - userH / 2 - 100;
+  var userX = CX;
+
+  var shake = Math.sin(u * 42) * 2 * pulse(u, 0.5, 0.4); // Shake when ads fly
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+
+  s += networkGrid(0.25); // Background grid
+
+  s += stickFigure(userX, userY, userH, AMBER, 'overwhelmed', 1);
+
+  var profileX = CX, profileY = TOP + 200;
+  var profileScale = 1;
+  s += profileIcon(profileX, profileY, 200 * profileScale, 280 * profileScale, BLUE, 10, 1);
+
+  // Profile "aims" at the user (a beam or line)
+  var beamOp = smooth(ramp(u, 0.1, 0.4));
+  s += line(profileX, profileY + 140, userX, userY - userH * 0.2, BLUE, 6, beamOp);
+
+  // Multiple coral product ads fly towards the user
+  var numAds = 5;
+  for (var i = 0; i < numAds; i++) {
+    var adU = (u * 1.2 + i / numAds) % 1; // Staggered appearance
+    var adOp = (1 - adU) * smooth(ramp(u, 0.2, 0.8));
+    if (adOp < 0.05) continue;
+
+    var startX = profileX + Math.sin(i * 0.7) * 80;
+    var startY = profileY + 140;
+    var endX = userX + Math.cos(i * 1.2) * 100;
+    var endY = userY - userH * 0.1;
+
+    var currentX = lerp(startX, endX, easeIn(adU));
+    var currentY = lerp(startY, endY, easeIn(adU));
+    var adSize = lerp(30, 70, adU);
+    s += product(currentX, currentY, adSize, 'shoe', CORAL, 8, adOp);
+  }
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + PERSISTENCE - The cycle continues. */
+function scene6(u) {
+  var s = '';
+  var userH = 220;
+  var userY = BOT - userH / 2 - 100;
+
+  // Blue system background, more abstract and omnipresent
+  var gridOp = lerp(0.25, 0.15, smooth(u));
+  s += networkGrid(gridOp);
+
+  // User trying to move, but ads persist
+  var userX = lerp(CX - 150, CX + 150, smooth(u));
+  var userPose = (u < 0.7) ? 'walking' : 'resigned';
+  s += stickFigure(userX, userY, userH, AMBER, userPose, 1);
+
+  // Persistent coral product ads, appearing and fading around the user
+  var numAds = 6;
+  for (var i = 0; i < numAds; i++) {
+    var adPhase = (u * 0.8 + rnd(i)) % 1; // Staggered and looping
+    var adOp = (1 - adPhase) * 0.8;
+    if (adOp < 0.05) continue;
+
+    var adX = userX + Math.sin(adPhase * Math.PI * 2 + i * 0.8) * lerp(100, 200, adPhase);
+    var adY = userY - userH * 0.3 + Math.cos(adPhase * Math.PI * 2 + i * 0.8) * lerp(80, 150, adPhase);
+    var adSize = lerp(40, 70, adPhase);
+    s += product(adX, adY, adSize, 'shoe', CORAL, 8, adOp);
+  }
+
+  // Subtle tracker dot in the background
+  s += dot(CX + 400, TOP + 100, 18, BLUE, 0.3);
+  s += dot(CX - 400, BOT - 100, 18, BLUE, 0.3);
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

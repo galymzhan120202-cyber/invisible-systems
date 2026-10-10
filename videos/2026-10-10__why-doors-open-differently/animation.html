@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Doors Open Differently</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;
+
+var DOOR_W = 240, DOOR_H = 480;
+var DOOR_X = CX, DOOR_Y = CY + 100; // Adjusted Y for better vertical distribution
+
+var STICK_H = 200; // Stick figure height
+var STICK_X_START = CX - 300; // Starting X for stick figure
+var STICK_X_DOOR = CX - 100; // X when standing at door, aligned with door's left edge
+var STICK_Y = BOT - 180; // Ground level for stick figure
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue
+var AMBER = "#F2A93B";              // warm amber
+var CORAL = "#FF5B5B";              // coral red
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, fill) {
+  return '<path d="' + d + '" fill="' + (fill || 'none') + '" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* Stick figure: y is the base of the feet */
+function stickFigure(x, y, h, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var swBody = 8, swLimb = 6;
+  var headR = h * 0.1;
+  var headY = y - h * 0.9;
+  var bodyY1 = y - h * 0.8;
+  var bodyY2 = y - h * 0.4;
+  var armY = y - h * 0.6;
+  var legY = y - h * 0.4;
+  var footY = y - h * 0.05;
+
+  // Head
+  g += dot(x, headY, headR, col);
+  // Body
+  g += line(x, bodyY1, x, bodyY2, col, swBody);
+
+  switch (pose) {
+    case 'walk1':
+      g += line(x - h * 0.1, armY, x - h * 0.25, armY + h * 0.1, col, swLimb); // Left arm back
+      g += line(x + h * 0.1, armY, x + h * 0.25, armY - h * 0.1, col, swLimb); // Right arm forward
+      g += line(x, legY, x - h * 0.1, footY, col, swLimb); // Left leg forward
+      g += line(x, legY, x + h * 0.1, footY + h * 0.05, col, swLimb); // Right leg back
+      break;
+    case 'walk2':
+      g += line(x - h * 0.1, armY, x - h * 0.25, armY - h * 0.1, col, swLimb); // Left arm forward
+      g += line(x + h * 0.1, armY, x + h * 0.25, armY + h * 0.1, col, swLimb); // Right arm back
+      g += line(x, legY, x + h * 0.1, footY, col, swLimb); // Right leg forward
+      g += line(x, legY, x - h * 0.1, footY + h * 0.05, col, swLimb); // Left leg back
+      break;
+    case 'hesitate':
+      g += line(x - h * 0.1, armY, x - h * 0.2, armY + h * 0.05, col, swLimb); // Left arm slightly bent
+      g += line(x + h * 0.1, armY, x + h * 0.2, armY + h * 0.05, col, swLimb); // Right arm slightly bent
+      g += line(x, headY, x - h * 0.08, headY - h * 0.08, WHITE, swLimb-1); // Head tilt
+      g += line(x, legY, x, footY, col, swLimb); // Legs straight
+      g += line(x, legY, x, footY, col, swLimb);
+      break;
+    case 'push':
+      g += line(x - h * 0.1, armY, x - h * 0.1 - h * 0.15, armY, col, swLimb); // Left arm extended
+      g += line(x + h * 0.1, armY, x + h * 0.1 - h * 0.15, armY, col, swLimb); // Right arm extended
+      g += line(x, legY, x, footY, col, swLimb); // Legs straight
+      g += line(x, legY, x, footY, col, swLimb);
+      break;
+    case 'pull':
+      g += line(x - h * 0.1, armY, x - h * 0.1 + h * 0.15, armY + h * 0.1, col, swLimb); // Left arm pulled back
+      g += line(x + h * 0.1, armY, x + h * 0.1 + h * 0.15, armY + h * 0.1, col, swLimb); // Right arm pulled back
+      g += line(x, legY, x, footY, col, swLimb); // Legs straight
+      g += line(x, legY, x, footY, col, swLimb);
+      break;
+    case 'crossed':
+      g += line(x - h * 0.1, armY, x + h * 0.05, armY + h * 0.05, col, swLimb); // Left arm across body
+      g += line(x + h * 0.1, armY, x - h * 0.05, armY + h * 0.05, col, swLimb); // Right arm across body
+      g += line(x, legY, x, footY, col, swLimb); // Legs straight
+      g += line(x, legY, x, footY, col, swLimb);
+      break;
+    case 'confident_push':
+      g += line(x - h * 0.1, armY, x - h * 0.1 - h * 0.1, armY, col, swLimb);
+      g += line(x + h * 0.1, armY, x + h * 0.1 - h * 0.1, armY, col, swLimb);
+      g += line(x, legY, x, footY, col, swLimb);
+      g += line(x, legY, x, footY, col, swLimb);
+      break;
+    default: // 'stand'
+      g += line(x - h * 0.1, armY, x - h * 0.1, armY + h * 0.1, col, swLimb);
+      g += line(x + h * 0.1, armY, x + h * 0.1, armY + h * 0.1, col, swLimb);
+      g += line(x, legY, x, footY, col, swLimb);
+      g += line(x, legY, x, footY, col, swLimb);
+      break;
+  }
+  g += '</g>';
+  return g;
+}
+
+/* Door frame (fixed part) */
+function doorFrame(x, y, w, h, col, sw, op) {
+  return rrectStroke(x, y, w, h, 0, col, sw, op);
+}
+
+/* Door slab (moving part) */
+function doorSlab(x, y, w, h, col, sw, fill, op, rotate, pivotX, pivotY) {
+  var g = '<g';
+  if (rotate != null) {
+    g += ' transform="rotate(' + rotate + ' ' + pivotX + ' ' + pivotY + ')"';
+  }
+  g += '>';
+  g += rrect(x, y, w, h, 0, fill, op);
+  g += rrectStroke(x, y, w, h, 0, col, sw, op);
+  g += '</g>';
+  return g;
+}
+
+/* Question mark */
+function questionMark(x, y, size, col, op) {
+  var d = "M " + (x - size * 0.4) + " " + (y - size * 0.2) +
+          " A " + (size * 0.4) + " " + (size * 0.4) + " 0 1 1 " + (x + size * 0.4) + " " + (y - size * 0.2) +
+          " L " + (x + size * 0.05) + " " + (y + size * 0.2) +
+          " M " + x + " " + (y + size * 0.4);
+  return pathTag(d, col, 8, op);
+}
+
+/* Simple door icon (for thought bubble) */
+function doorIcon(x, y, size, col, op) {
+  var d = "M " + (x - size / 2) + " " + (y - size / 2) +
+          " L " + (x - size / 2) + " " + (y + size / 2) +
+          " L " + (x + size / 2) + " " + (y + size / 2) +
+          " L " + (x + size / 2) + " " + (y - size / 2) +
+          " Z";
+  d += " M " + (x - size / 2) + " " + (y - size / 2) + " L " + (x - size / 2) + " " + (y + size / 2); // Hinge line
+  return pathTag(d, col, 6, op);
+}
+
+/* Simple arrow pointing in a direction */
+function arrow(x, y, size, angle, col, sw, op) {
+  var d = "M " + (x - size * 0.8) + " " + y +
+          " L " + (x + size * 0.8) + " " + y +
+          " M " + (x + size * 0.8) + " " + y +
+          " L " + (x + size * 0.4) + " " + (y - size * 0.4) +
+          " M " + (x + size * 0.8) + " " + y +
+          " L " + (x + size * 0.4) + " " + (y + size * 0.4);
+  return '<g transform="rotate(' + angle + ' ' + x + ' ' + y + ')">' + pathTag(d, col, sw, op) + '</g>';
+}
+
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var sfX = lerp(STICK_X_START, STICK_X_DOOR, smooth(ramp(u, 0.0, 0.3)));
+  var sfPose = (u > 0.0 && u < 0.25) ? (Math.floor(u * 10) % 2 === 0 ? 'walk1' : 'walk2') : 'stand';
+  if (u > 0.4 && u < 0.8) sfPose = 'hesitate';
+
+  s += stickFigure(sfX, STICK_Y, STICK_H, AMBER, sfPose, 1);
+
+  var doorOp = ramp(u, 0.0, 0.15);
+  s += doorFrame(DOOR_X, DOOR_Y, DOOR_W, DOOR_H, WHITE, 12, doorOp);
+  s += doorSlab(DOOR_X, DOOR_Y, DOOR_W - 24, DOOR_H - 24, WHITE, 8, WHITE, doorOp);
+
+  var qmOp = ramp(u, 0.5, 0.7);
+  s += questionMark(sfX + 50, STICK_Y - STICK_H * 1.2, 50, AMBER, qmOp);
+
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  s += stickFigure(STICK_X_DOOR, STICK_Y, STICK_H, AMBER, 'stand', 1); // Base pose
+
+  s += doorFrame(DOOR_X, DOOR_Y, DOOR_W, DOOR_H, WHITE, 12, 1);
+
+  var pushTime = ramp(u, 0.0, 0.3);
+  var pullTime = ramp(u, 0.4, 0.7);
+  var wiggleX = Math.sin(u * Math.PI * 10) * 8 * (pushTime + pullTime);
+  var effortOp = 0;
+  var sfPose = 'stand';
+
+  if (pushTime > 0 && pushTime < 1) {
+    effortOp = pushTime;
+    sfPose = 'push';
+    s += line(STICK_X_DOOR - 50, STICK_Y - STICK_H * 0.6, DOOR_X - (DOOR_W/2) + 12 - 5, STICK_Y - STICK_H * 0.6, CORAL, 7, effortOp); // Push line
+  } else if (pullTime > 0 && pullTime < 1) {
+    effortOp = pullTime;
+    sfPose = 'pull';
+    s += line(STICK_X_DOOR - 50, STICK_Y - STICK_H * 0.6, DOOR_X - (DOOR_W/2) + 12 + 50, STICK_Y - STICK_H * 0.6, CORAL, 7, effortOp); // Pull line
+  }
+  
+  s += doorSlab(DOOR_X + wiggleX, DOOR_Y, DOOR_W - 24, DOOR_H - 24, WHITE, 8, WHITE, 1);
+  s += stickFigure(STICK_X_DOOR, STICK_Y, STICK_H, AMBER, sfPose, 1);
+
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var sfX = lerp(STICK_X_DOOR, STICK_X_DOOR - 100, smooth(ramp(u, 0.0, 0.2)));
+  s += stickFigure(sfX, STICK_Y, STICK_H, AMBER, 'crossed', 1);
+
+  s += doorFrame(DOOR_X, DOOR_Y, DOOR_W, DOOR_H, WHITE, 12, 1);
+
+  var coralPulse = pulse(u, 0.5, 0.2);
+  var slabCol = WHITE;
+  var slabOp = 1;
+  if (coralPulse > 0) {
+    slabCol = CORAL;
+    slabOp = 0.8 + 0.2 * Math.sin(u * 30);
+  }
+  s += doorSlab(DOOR_X, DOOR_Y, DOOR_W - 24, DOOR_H - 24, WHITE, 8, slabCol, slabOp); // Slab can be coral
+
+  var bubbleOp = ramp(u, 0.3, 0.5);
+  var bubbleShatter = ramp(u, 0.7, 0.9);
+  var bubbleScale = lerp(1, 0, easeIn(bubbleShatter));
+  var bubbleY = STICK_Y - STICK_H * 1.5;
+
+  if (bubbleOp > 0) {
+    s += '<g transform="translate(' + (sfX + 50) + ' ' + bubbleY + ') scale(' + bubbleScale + ')">';
+    s += dot(0, 0, 80, DIM, bubbleOp * (1 - bubbleShatter)); // Thought bubble
+    s += doorIcon(0, 0, 80, WHITE, bubbleOp * (1 - bubbleShatter));
+    s += '</g>';
+  }
+  if (bubbleShatter > 0) { // Shatter animation
+    for (var i = 0; i < 4; i++) {
+      var fragX = (rnd(i) - 0.5) * 100 * bubbleShatter;
+      var fragY = (rnd(i + 1) - 0.5) * 100 * bubbleShatter;
+      s += dot(sfX + 50 + fragX, bubbleY + fragY, 10 * (1 - bubbleShatter), WHITE, bubbleShatter * 0.8);
+    }
+  }
+
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var frameSW = lerp(12, 4, smooth(ramp(u, 0.0, 0.2)));
+  var slabOp = lerp(1, 0.05, smooth(ramp(u, 0.0, 0.2)));
+  var slabSW = lerp(8, 2, smooth(ramp(u, 0.0, 0.2)));
+
+  s += doorFrame(DOOR_X, DOOR_Y, DOOR_W, DOOR_H, WHITE, frameSW, 1);
+  s += doorSlab(DOOR_X, DOOR_Y, DOOR_W - 24, DOOR_H - 24, WHITE, slabSW, WHITE, slabOp);
+
+  // Outward swing path (fire exit)
+  var swingOutOp = ramp(u, 0.2, 0.5);
+  var swingOutScale = lerp(0.8, 1.0, easeOut(ramp(u, 0.2, 0.5)));
+  var swingOutArc = "M " + (DOOR_X - DOOR_W / 2 + 12) + " " + (DOOR_Y - DOOR_H / 2 + 12) +
+                    " A " + (DOOR_W - 24) + " " + (DOOR_W - 24) + " 0 0 1 " + (DOOR_X + DOOR_W / 2 - 12) + " " + (DOOR_Y - DOOR_H / 2 + 12);
+  s += '<g transform="scale(' + swingOutScale + ' ' + swingOutScale + ') translate(' + (CX - CX * swingOutScale) + ' ' + (CY - CY * swingOutScale) + ')">';
+  s += pathTag(swingOutArc, BLUE, 8, swingOutOp);
+  s += arrow(DOOR_X + DOOR_W/2 - 12, DOOR_Y - DOOR_H/2 + 12, 30, 90, BLUE, 8, swingOutOp);
+  s += '</g>';
+
+  // Inward swing path (space constraint)
+  var swingInOp = ramp(u, 0.5, 0.8);
+  var swingInScale = lerp(0.8, 1.0, easeOut(ramp(u, 0.5, 0.8)));
+  var swingInArc = "M " + (DOOR_X + DOOR_W / 2 - 12) + " " + (DOOR_Y - DOOR_H / 2 + 12) +
+                   " A " + (DOOR_W - 24) + " " + (DOOR_W - 24) + " 0 0 0 " + (DOOR_X - DOOR_W / 2 + 12) + " " + (DOOR_Y - DOOR_H / 2 + 12);
+  s += '<g transform="scale(' + swingInScale + ' ' + swingInScale + ') translate(' + (CX - CX * swingInScale) + ' ' + (CY - CY * swingInScale) + ')">';
+  s += pathTag(swingInArc, BLUE, 8, swingInOp);
+  s += arrow(DOOR_X - DOOR_W/2 + 12, DOOR_Y - DOOR_H/2 + 12, 30, -90, BLUE, 8, swingInOp);
+  s += '</g>';
+
+  // Blueprint icon with highlight
+  var blueprintOp = ramp(u, 0.7, 0.9);
+  var blueprintX = CX + 250, blueprintY = BOT - 300;
+  var blueprintW = 180, blueprintH = 120;
+  s += rrectStroke(blueprintX, blueprintY, blueprintW, blueprintH, 10, DIM, 4, blueprintOp);
+  s += line(blueprintX - blueprintW/2 + 20, blueprintY - blueprintH/2 + 30, blueprintX + blueprintW/2 - 20, blueprintY - blueprintH/2 + 30, DIM, 2, blueprintOp);
+  s += line(blueprintX - blueprintW/2 + 20, blueprintY + blueprintH/2 - 30, blueprintX + blueprintW/2 - 20, blueprintY + blueprintH/2 - 30, DIM, 2, blueprintOp);
+  s += line(blueprintX - blueprintW/2 + 30, blueprintY - blueprintH/2 + 20, blueprintX - blueprintW/2 + 30, blueprintY + blueprintH/2 - 20, DIM, 2, blueprintOp);
+  // Highlighted corridor
+  s += rrect(blueprintX, blueprintY, blueprintW * 0.6, blueprintH * 0.4, 5, BLUE, blueprintOp * 0.4);
+
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var crowdX = CX - 250, crowdY = CY + 300;
+  var officeX = CX + 250, officeY = CY - 200;
+
+  // Scenario 1: Crowd pile-up
+  var crowdOp = ramp(u, 0.0, 0.3);
+  var doorPushIn = ramp(u, 0.1, 0.4);
+  var pileUpOffset = lerp(0, 30, easeIn(doorPushIn));
+
+  s += rrect(crowdX, crowdY, DOOR_W + 100, DOOR_H + 100, DIM, 0.2 * crowdOp); // Room outline
+  s += doorFrame(crowdX, crowdY, DOOR_W, DOOR_H, CORAL, 10, crowdOp);
+  s += doorSlab(crowdX - pileUpOffset, crowdY, DOOR_W - 24, DOOR_H - 24, CORAL, 8, CORAL, 0.8 * crowdOp); // Door pulled inward
+
+  for (var i = 0; i < 5; i++) {
+    var sfOffset = (i - 2) * 40;
+    var sfPushY = crowdY + DOOR_H / 2 + STICK_H / 2 - 20 + pileUpOffset * 0.8;
+    s += stickFigure(crowdX + sfOffset, sfPushY, STICK_H * 0.8, WHITE, 'push', crowdOp * (1 - ramp(u, 0.3, 0.6)));
+    if (i === 2) { // Central figure
+      s += line(crowdX + sfOffset, sfPushY - STICK_H * 0.6, crowdX - DOOR_W/2 + 12 - pileUpOffset, sfPushY - STICK_H * 0.6, CORAL, 7, crowdOp * (1 - ramp(u, 0.3, 0.6)));
+    }
+  }
+  // Pile-up effect
+  var pileOp = ramp(u, 0.3, 0.5);
+  s += dot(crowdX, crowdY + DOOR_H / 2 + STICK_H / 2 + 50, 60, CORAL, pileOp * 0.6);
+  s += dot(crowdX + 40, crowdY + DOOR_H / 2 + STICK_H / 2 + 30, 40, CORAL, pileOp * 0.4);
+
+  // Scenario 2: Office door blocking
+  var officeOp = ramp(u, 0.5, 0.8);
+  s += rrect(officeX, officeY, DOOR_W + 150, DOOR_H + 150, DIM, 0.2 * officeOp); // Room outline
+  s += doorFrame(officeX, officeY, DOOR_W, DOOR_H, WHITE, 10, officeOp);
+
+  var doorAngle = lerp(0, -90, smooth(ramp(u, 0.6, 0.9)));
+  var doorPivotX = officeX + DOOR_W / 2 - 12;
+  var doorPivotY = officeY - DOOR_H / 2 + 12;
+  s += doorSlab(officeX, officeY, DOOR_W - 24, DOOR_H - 24, WHITE, 8, WHITE, officeOp, doorAngle, doorPivotX, doorPivotY);
+
+  var deskX = officeX + 100;
+  var deskY = officeY + 100;
+  var deskW = 100, deskH = 60;
+  s += rrect(deskX, deskY, deskW, deskH, 10, DIM, officeOp);
+  s += rrectStroke(deskX, deskY, deskW, deskH, 10, WHITE, 4, officeOp);
+
+  // Collision indicator
+  var collisionOp = ramp(u, 0.8, 1.0);
+  var collisionX = deskX - deskW/2 + 10;
+  var collisionY = deskY;
+  s += ring(collisionX, collisionY, 20 + Math.sin(u * 50) * 5, CORAL, 6, collisionOp);
+
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var sfX = lerp(STICK_X_DOOR - 100, STICK_X_DOOR, smooth(ramp(u, 0.0, 0.2)));
+  var sfPose = 'stand';
+  var pushOp = ramp(u, 0.3, 0.6);
+  var doorOpen = ramp(u, 0.6, 0.9);
+
+  if (pushOp > 0) sfPose = 'confident_push';
+  s += stickFigure(sfX, STICK_Y, STICK_H, AMBER, sfPose, 1);
+
+  s += doorFrame(DOOR_X, DOOR_Y, DOOR_W, DOOR_H, WHITE, 12, 1);
+
+  var pushPlateX = DOOR_X - DOOR_W / 2 + 25; // Left side of the door
+  var pushPlateY = DOOR_Y;
+  s += rrect(pushPlateX, pushPlateY, 40, 80, 8, BLUE, ramp(u, 0.1, 0.3)); // Push plate
+
+  var doorAngle = lerp(0, 90, smooth(doorOpen));
+  var doorPivotX = DOOR_X - DOOR_W / 2 + 12; // Left hinge
+  var doorPivotY = DOOR_Y;
+  s += doorSlab(DOOR_X, DOOR_Y, DOOR_W - 24, DOOR_H - 24, WHITE, 8, WHITE, 1, doorAngle, doorPivotX, doorPivotY);
+
+  // Clear path ahead (amber glow)
+  var pathOp = ramp(u, 0.7, 1.0);
+  s += rrect(DOOR_X + DOOR_W/2, DOOR_Y, W - (DOOR_X + DOOR_W/2 - 12), DOOR_H * 1.5, 0, AMBER, pathOp * 0.1);
+  s += line(DOOR_X + DOOR_W/2 + 10, DOOR_Y - DOOR_H/2, DOOR_X + DOOR_W/2 + 10, DOOR_Y + DOOR_H/2, AMBER, 10, pathOp * 0.8); // Vertical line inside open door
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "id": "why-ads-follow-you-around-the-internet",
+  "slug": "2026-10-10__why-ads-follow-you-around-the-internet",
+  "title_working": "Why Ads Follow You Around the Internet",
+  "system": "retargeting via cookie tracking and behavioral profiling",
+  "cluster": "platforms-and-algorithms",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-10-10T12:22:27+00:00",
+  "produced_at": "2026-10-10T12:26:17+00:00",
+  "verify": "PASS",
+  "takeaway": "Ads follow you online because invisible trackers remember what you've looked at, broadcasting your interests to other platforms.",
+  "animation_source": "llm"
+}

@@ -1,0 +1,15 @@
+{
+  "id": "why-public-transport-runs-on-a-schedule",
+  "slug": "2026-10-10__why-public-transport-runs-on-a-schedule",
+  "title_working": "Why Public Transport Runs on a Schedule",
+  "system": "fixed-route optimization and passenger expectation management",
+  "cluster": "institutions-and-bureaucracy",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-10-10T12:26:20+00:00",
+  "produced_at": "2026-10-10T12:29:52+00:00",
+  "verify": "PASS",
+  "takeaway": "Public transport schedules are not for individual convenience but for optimizing a complex network to serve many people reliably.",
+  "animation_source": "llm"
+}
