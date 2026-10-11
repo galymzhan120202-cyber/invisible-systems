@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Your Favorite Song is Hard to Find</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for general notes
+var BLUE  = "#4C86F0";              // signal blue  -> system/algorithm
+var AMBER = "#F2A93B";              // warm amber   -> YOU / desired song
+var CORAL = "#FF5B5B";              // coral red    -> frustration / naive model
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, fill) {
+  return '<path d="' + d + '" fill="' + (fill || 'none') + '" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom shape builders ---------- */
+
+// Stick figure: x, y is base of feet.
+// pose: 'standing', 'holding-player', 'swiping', 'dejected', 'confident'
+function stickFigure(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headY = y - 130; // Head center
+  var bodyTopY = headY + 20;
+  var bodyBotY = bodyTopY + 80;
+  var armMidY = bodyTopY + 30;
+  var legSplitY = bodyBotY;
+  var legEndL = y + 40;
+  var legEndR = y + 40;
+
+  // Head
+  g += dot(x, headY, 22, col);
+
+  // Body
+  g += line(x, bodyTopY, x, bodyBotY, col, 10);
+
+  // Arms and Legs based on pose
+  switch (pose) {
+    case 'standing':
+      g += line(x, armMidY, x - 45, armMidY + 20, col, 10); // Left arm
+      g += line(x, armMidY, x + 45, armMidY + 20, col, 10); // Right arm
+      g += line(x, legSplitY, x - 25, legEndL, col, 10); // Left leg
+      g += line(x, legSplitY, x + 25, legEndR, col, 10); // Right leg
+      break;
+    case 'holding-player':
+      g += line(x, armMidY, x - 50, armMidY + 10, col, 10); // Left arm
+      g += line(x, armMidY, x + 50, armMidY + 10, col, 10); // Right arm
+      g += line(x, legSplitY, x - 25, legEndL, col, 10); // Left leg
+      g += line(x, legSplitY, x + 25, legEndR, col, 10); // Right leg
+      break;
+    case 'swiping':
+      g += line(x, armMidY, x - 50, armMidY + 10, col, 10); // Left arm
+      g += line(x, armMidY, x + 60, armMidY - 30, col, 10); // Right arm (up for swipe)
+      g += line(x + 60, armMidY - 30, x + 80, armMidY - 10, col, 10); // Hand
+      g += line(x, legSplitY, x - 25, legEndL, col, 10); // Left leg
+      g += line(x, legSplitY, x + 25, legEndR, col, 10); // Right leg
+      break;
+    case 'dejected':
+      g += line(x, armMidY, x - 40, armMidY + 40, col, 10); // Left arm (down)
+      g += line(x, armMidY, x + 40, armMidY + 40, col, 10); // Right arm (down)
+      g += line(x, legSplitY, x - 25, legEndL, col, 10); // Left leg
+      g += line(x, legSplitY, x + 25, legEndR, col, 10); // Right leg
+      // Slumped shoulders:
+      g += line(x - 30, bodyTopY + 10, x + 30, bodyTopY + 10, col, 10);
+      break;
+    case 'confident':
+      g += line(x, armMidY, x - 55, armMidY - 10, col, 10); // Left arm (akimbo)
+      g += line(x, armMidY, x + 55, armMidY - 10, col, 10); // Right arm (akimbo)
+      g += line(x, legSplitY, x - 25, legEndL, col, 10); // Left leg
+      g += line(x, legSplitY, x + 25, legEndR, col, 10); // Right leg
+      break;
+  }
+  g += '</g>';
+  return g;
+}
+
+// Abstract music note icon
+function musicNote(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var headR = size * 0.4;
+  var stemH = size * 0.8;
+  var flagW = size * 0.5;
+  var g = '<g opacity="' + op + '">';
+  g += dot(x, y, headR, col);
+  g += line(x + headR, y, x + headR, y - stemH, col, size * 0.2);
+  g += pathTag("M " + (x + headR) + " " + (y - stemH * 0.7) + " C " + (x + headR + flagW) + " " + (y - stemH * 0.9) + " " + (x + headR + flagW) + " " + (y - stemH * 0.4) + " " + (x + headR) + " " + (y - stemH * 0.2), col, size * 0.2, op, col);
+  g += '</g>';
+  return g;
+}
+
+// Music player icon: x, y is center
+function musicPlayer(x, y, col, op) {
+  op = (op == null ? 1 : op);
+  var playerW = 400, playerH = 600, playerRad = 40;
+  var screenW = playerW * 0.8, screenH = playerH * 0.7;
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, playerW, playerH, playerRad, col); // Outer body
+  g += rrect(x, y - playerH * 0.05, screenW, screenH, playerRad * 0.5, "#000000"); // Screen background
+  g += rrectStroke(x, y - playerH * 0.05, screenW, screenH, playerRad * 0.5, WHITE, 4); // Screen border
+  g += '</g>';
+  return g;
+}
+
+// Thought bubble path
+function thoughtBubble(x, y, w, h, rad, col, op) {
+  op = (op == null ? 1 : op);
+  var d = "M " + (x - w / 2 + rad) + " " + (y - h / 2) +
+          " H " + (x + w / 2 - rad) +
+          " A " + rad + " " + rad + " 0 0 1 " + (x + w / 2) + " " + (y - h / 2 + rad) +
+          " V " + (y + h / 2 - rad) +
+          " A " + rad + " " + rad + " 0 0 1 " + (x + w / 2 - rad) + " " + (y + h / 2) +
+          " H " + (x - w / 2 + rad) +
+          " A " + rad + " " + rad + " 0 0 1 " + (x - w / 2) + " " + (y + h / 2 - rad) +
+          " V " + (y - h / 2 + rad) +
+          " A " + rad + " " + rad + " 0 0 1 " + (x - w / 2 + rad) + " " + (y - h / 2) +
+          " Z";
+  // Tail for thought bubble, pointing towards the figure's head
+  d += " M " + (x + w * 0.1) + " " + (y + h * 0.5 - rad) + " L " + (x + w * 0.2) + " " + (y + h * 0.5 + 40) + " L " + (x + w * 0.0) + " " + (y + h * 0.5 + 20);
+  return pathTag(d, col, 8, op, WHITE);
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var figureX = CX, figureY = BOT - 200;
+  var bubbleX = CX, bubbleY = CY - 200;
+  var noteX = bubbleX, noteY = bubbleY + 20;
+
+  // Stick figure appears and stands
+  var figureOp = ramp(u, 0.0, 0.2);
+  s += stickFigure(figureX, figureY, AMBER, 'standing', figureOp);
+
+  // Thought bubble and music note expand
+  var bubbleScale = lerp(0.1, 1.0, easeOut(ramp(u, 0.2, 0.8)));
+  var bubbleOp = ramp(u, 0.1, 0.7);
+  var bubbleW = 400 * bubbleScale, bubbleH = 300 * bubbleScale;
+  s += '<g transform="translate(' + bubbleX + ' ' + bubbleY + ') scale(' + bubbleScale + ') translate(' + (-bubbleX) + ' ' + (-bubbleY) + ')">';
+  s += thoughtBubble(bubbleX, bubbleY, bubbleW, bubbleH, 30, AMBER, bubbleOp);
+  s += musicNote(noteX, noteY, 60 * bubbleScale, AMBER, bubbleOp);
+  s += '</g>';
+
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var figureX = CX, figureY = BOT - 200;
+  var playerX = CX, playerY = CY + 100;
+
+  // Stick figure transitions to holding player
+  var figurePose = (u < 0.5) ? 'standing' : 'holding-player';
+  s += stickFigure(figureX, figureY, AMBER, figurePose, 1);
+
+  // Music player slides into view
+  var playerSlideY = lerp(H + 300, playerY, easeOut(ramp(u, 0.1, 0.6)));
+  s += musicPlayer(playerX, playerSlideY, AMBER, 1);
+
+  // Grey music notes appear inside the player screen
+  var screenW = 400 * 0.8, screenH = 600 * 0.7;
+  var screenTop = playerSlideY - 600 * 0.05 - screenH / 2;
+  var screenLeft = playerX - screenW / 2;
+
+  var notesOp = ramp(u, 0.4, 0.9);
+  for (var i = 0; i < 4; i++) {
+    var noteY = screenTop + 80 + i * 120 + Math.sin(u * 5 + i) * 10;
+    var noteX = screenLeft + screenW / 2 + rnd(i) * 60 - 30;
+    if (noteY > screenTop + 40 && noteY < screenTop + screenH - 40) {
+      s += musicNote(noteX, noteY, 30, DIM, notesOp);
+    }
+  }
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var figureX = CX - 250, figureY = BOT - 200;
+  var playerX = CX + 150, playerY = CY + 100;
+
+  s += stickFigure(figureX, figureY, AMBER, 'swiping', 1);
+  s += musicPlayer(playerX, playerY, AMBER, 1);
+
+  var screenW = 400 * 0.8, screenH = 600 * 0.7;
+  var screenTop = playerY - 600 * 0.05 - screenH / 2;
+  var screenLeft = playerX - screenW / 2;
+
+  // Scrolling list of grey notes, a few amber, target amber note
+  var scrollSpeed = u * 400; // Faster scroll
+  
+  for (var i = 0; i < 10; i++) {
+    var noteBaseY = screenTop + 80 + i * 120;
+    var noteY = noteBaseY - scrollSpeed + rnd(i) * 20;
+    var noteX = screenLeft + screenW / 2 + rnd(i + 10) * 80 - 40;
+    
+    // Make some notes amber, but not the target one (which is at i=5 conceptually)
+    var noteCol = (i % 3 === 0 && i !== 5) ? AMBER : DIM;
+    var noteSize = (i % 3 === 0 && i !== 5) ? 35 : 30;
+
+    if (noteY > screenTop + 40 && noteY < screenTop + screenH - 40) {
+      s += musicNote(noteX, noteY, noteSize, noteCol, 0.9);
+    }
+  }
+
+  // The specific amber note, scrolls past
+  var specificNoteY_initial = screenTop + 80 + 5 * 120; // Target is initially lower down
+  var specificNoteY = specificNoteY_initial - scrollSpeed * 1.2; // Slightly different scroll speed to make it "miss"
+  if (specificNoteY > screenTop + 40 && specificNoteY < screenTop + screenH - 40) {
+    s += musicNote(screenLeft + screenW / 2 + 10, specificNoteY, 40, AMBER, 1);
+  }
+
+  // Coral red flashes around the edges of the player screen
+  var frustrationOp = pulse(u, 0.5, 0.4) * 0.8 + pulse(u, 0.8, 0.2) * 0.8;
+  if (frustrationOp > 0.05) {
+    s += rrectStroke(playerX, playerY - 600 * 0.05, screenW + 20, screenH + 20, 30, CORAL, 12, frustrationOp);
+  }
+
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var playerX = CX, playerY = CY + 100;
+
+  // Zoom into the music player screen
+  var zoomScale = lerp(1.0, 1.8, smooth(ramp(u, 0.0, 0.3)));
+  var zoomY = lerp(playerY, CY, smooth(ramp(u, 0.0, 0.3)));
+  s += '<g ' + camera(zoomScale, 0, zoomY - CY) + '>';
+  s += musicPlayer(playerX, playerY, AMBER, 1);
+
+  var screenW = 400 * 0.8, screenH = 600 * 0.7;
+  var screenTop = playerY - 600 * 0.05 - screenH / 2;
+  var screenLeft = playerX - screenW / 2;
+
+  // Initial notes on screen
+  var specificNoteY_initial = screenTop + 140; // The amber note is initially visible
+  var specificNoteX = screenLeft + screenW / 2 + 20;
+  s += musicNote(specificNoteX, specificNoteY_initial, 40, AMBER, 1);
+
+  for (var i = 0; i < 3; i++) {
+    var noteY = screenTop + 80 + i * 150 + rnd(i) * 30;
+    var noteX = screenLeft + screenW / 2 + rnd(i + 10) * 80 - 40;
+    if (Math.abs(noteY - specificNoteY_initial) > 60) { // Avoid placing a grey note too close to the amber one
+      s += musicNote(noteX, noteY, 30, DIM, 0.9);
+    }
+  }
+
+  // Signal blue algorithmic filter grid slides over
+  var filterOffset = lerp(-screenH, 0, easeOut(ramp(u, 0.3, 0.7)));
+  var filterOp = ramp(u, 0.2, 0.5);
+
+  s += '<g opacity="' + filterOp + '">';
+  s += rrect(playerX, screenTop + screenH / 2 + filterOffset, screenW, screenH, 0, BLUE, 0.15); // Transparent blue overlay
+
+  // Grid lines
+  var numLines = 5;
+  for (var i = 0; i < numLines; i++) {
+    var ly = screenTop + screenH / numLines * i + filterOffset;
+    s += line(screenLeft, ly, screenLeft + screenW, ly, BLUE, 6);
+    var lx = screenLeft + screenW / numLines * i;
+    s += line(lx, screenTop + filterOffset, lx, screenTop + screenH + filterOffset, BLUE, 6);
+  }
+  s += '</g>';
+
+  // The amber note is pushed down and out of view
+  var pushedNoteY = specificNoteY_initial;
+  if (u > 0.4) {
+    pushedNoteY = lerp(specificNoteY_initial, screenTop + screenH + 100, easeIn(ramp(u, 0.4, 0.9)));
+    s += musicNote(specificNoteX, pushedNoteY, 40, AMBER, 1); // Re-render the pushed note
+  }
+  
+  // New or popular grey notes appear on top of the filter
+  var newNotesOp = ramp(u, 0.6, 1.0);
+  for (var i = 0; i < 2; i++) {
+    var noteY = screenTop + 100 + i * 180 + rnd(i+20) * 20;
+    var noteX = screenLeft + screenW / 2 + rnd(i+30) * 60 - 30;
+    s += musicNote(noteX, noteY, 35, DIM, newNotesOp);
+  }
+
+  s += '</g>'; // End camera group
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var figureX = CX, figureY = BOT - 200;
+  var playerX = CX, playerY = CY + 100;
+
+  // Stick figure looks dejected
+  s += stickFigure(figureX, figureY, AMBER, 'dejected', 1);
+
+  // Music player icon persists
+  s += musicPlayer(playerX, playerY, AMBER, 1);
+
+  var screenW = 400 * 0.8, screenH = 600 * 0.7;
+  var screenTop = playerY - 600 * 0.05 - screenH / 2;
+  var screenLeft = playerX - screenW / 2;
+
+  // Many generic grey notes
+  for (var i = 0; i < 8; i++) {
+    var noteY = screenTop + 60 + i * 70 + rnd(i) * 20;
+    var noteX = screenLeft + screenW / 2 + rnd(i + 10) * 80 - 40;
+    s += musicNote(noteX, noteY, 25, DIM, 0.8);
+  }
+
+  // The specific amber music note is now very small and almost hidden
+  var amberNoteSize = lerp(40, 15, smooth(ramp(u, 0.0, 0.5)));
+  var amberNoteY = lerp(screenTop + 140, screenTop + screenH - 60, smooth(ramp(u, 0.0, 0.5)));
+  s += musicNote(screenLeft + screenW / 2 + 10, amberNoteY, amberNoteSize, AMBER, 0.7);
+
+  // Coral red glow surrounds the figure
+  var auraOp = pulse(u, 0.5, 0.4) * 0.6 + pulse(u, 0.8, 0.2) * 0.6;
+  if (auraOp > 0.05) {
+    s += ring(figureX, figureY - 60, 120 + Math.sin(u * 15) * 10, CORAL, 10, auraOp);
+  }
+
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var figureX = CX, figureY = BOT - 200;
+  var playerX = CX, playerY = CY + 100;
+
+  // Stick figure stands confidently
+  s += stickFigure(figureX, figureY, AMBER, 'confident', 1);
+
+  // Music player icon persists
+  s += musicPlayer(playerX, playerY, AMBER, 1);
+
+  var screenW = 400 * 0.8, screenH = 600 * 0.7;
+  var screenTop = playerY - 600 * 0.05 - screenH / 2;
+  var screenLeft = playerX - screenW / 2;
+
+  // Input bar animates in at the top of the screen
+  var inputBarH = 60;
+  var inputBarY = lerp(screenTop - inputBarH, screenTop + inputBarH / 2 + 10, easeOut(ramp(u, 0.0, 0.4)));
+  var inputBarW = screenW * 0.9;
+  s += rrect(playerX, inputBarY, inputBarW, inputBarH, 15, WHITE, 1);
+
+  // Blinking cursor
+  var cursorOp = (Math.floor(u * 8) % 2 === 0) ? 1 : 0;
+  s += line(playerX - inputBarW / 2 + 40, inputBarY - 15, playerX - inputBarW / 2 + 40, inputBarY + 15, DIM, 6, cursorOp);
+
+  // The distinct amber music note icon instantly pops up large and clear
+  var notePopScale = lerp(0.1, 1.0, easeOut(ramp(u, 0.5, 0.9)));
+  var notePopY = lerp(inputBarY, screenTop + screenH / 2 + 50, easeOut(ramp(u, 0.5, 0.9)));
+  s += '<g transform="translate(' + playerX + ' ' + notePopY + ') scale(' + notePopScale + ') translate(' + (-playerX) + ' ' + (-notePopY) + ')">';
+  s += musicNote(playerX, notePopY, 60, AMBER, 1);
+  s += '</g>';
+
+  // Faint grey notes in the background, fading out
+  var dimNotesOp = lerp(0.8, 0.1, smooth(ramp(u, 0.4, 0.8)));
+  for (var i = 0; i < 3; i++) {
+    var noteY = screenTop + screenH / 2 + 200 + i * 100 + rnd(i) * 20;
+    var noteX = screenLeft + screenW / 2 + rnd(i + 10) * 80 - 40;
+    s += musicNote(noteX, noteY, 25, DIM, dimNotesOp);
+  }
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "id": "why-your-favorite-song-is-hard-to-find",
+  "slug": "2026-10-11__why-your-favorite-song-is-hard-to-find",
+  "title_working": "Why Your Favorite Song is Hard to Find",
+  "system": "algorithmic curation and filtering of music libraries",
+  "cluster": "platforms-and-algorithms",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "failed",
+  "created_at": "2026-10-11T12:38:24+00:00",
+  "produced_at": "2026-10-11T12:42:08+00:00",
+  "verify": "FAIL",
+  "takeaway": "Music streaming algorithms prioritize discovery and engagement for a broad audience, making your specific, un-searched favorite hard to surface.",
+  "animation_source": "llm"
+}
