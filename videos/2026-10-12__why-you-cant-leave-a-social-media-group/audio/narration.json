@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You're in an online group, now noisy, just digital clutter. You want to quietly slip away, declutter your online life. A reasonable urge.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "You tap the group, find settings, click \"Leave Group.\" Seems simple, a basic function. You're ready for that clean break.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "But instead of instant freedom, a pop-up asks if you're *sure*. It offers \"mute\" or \"snooze,\" making direct exit surprisingly elusive.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "This isn't accidental; it's deliberate design. The platform *wants* to retain you. Leaving is multi-step, with friction and alternatives, keeping you in orbit.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "The cost is subtle: your time, attention, and the mental load of clutter you never escaped. The system wins by making departure difficult, keeping you a data point.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "You close the app, still in the group, but now you understand. Next time, you'll see these \"friction points\" as features designed to keep you trapped.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]
