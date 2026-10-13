@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why You See the Same Ads Everywhere</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / the wave
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want
+var CORAL = "#FF5B5B";              // coral red    -> the naive model / false signal
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+/* Stick figure: x, y (base), scale (height multiplier), headCol, bodyCol,
+   armAngle (0=down, 1=forward), legAngle (0=straight, 1=step),
+   gazeX, gazeY (relative to head center), tag (true/false) */
+function stickFigure(x, y, scale, headCol, bodyCol, armAngle, legAngle, gazeX, gazeY, tag, op) {
+  op = (op == null ? 1 : op);
+  var sw = 9 * scale;
+  var headR = 30 * scale;
+  var bodyH = 100 * scale;
+  var armL = 60 * scale;
+  var legL = 70 * scale;
+
+  var g = '<g opacity="' + op + '">';
+
+  // Head
+  var headY = y - bodyH - headR;
+  g += dot(x, headY, headR, headCol);
+
+  // Gaze
+  if (gazeX != null && gazeY != null) {
+    g += line(x, headY, x + gazeX * headR * 0.5, headY + gazeY * headR * 0.5, WHITE, sw * 0.7);
+  }
+
+  // Body
+  g += line(x, y - bodyH, x, y, bodyCol, sw);
+
+  // Arms
+  var armY = y - bodyH * 0.6;
+  var armX_base = x;
+  var armX_end = armX_base + armL * Math.sin(armAngle * Math.PI * 0.5);
+  var armY_end = armY + armL * Math.cos(armAngle * Math.PI * 0.5);
+  g += line(armX_base, armY, armX_end, armY_end, bodyCol, sw); // Right arm
+  g += line(armX_base, armY, armX_base - armL * Math.sin(armAngle * Math.PI * 0.5), armY_end, bodyCol, sw); // Left arm
+
+  // Legs
+  var legX_base = x;
+  var legY_base = y;
+  var legX_end = legX_base + legL * Math.sin(legAngle * Math.PI * 0.5);
+  var legY_end = legY_base + legL * Math.cos(legAngle * Math.PI * 0.5);
+  g += line(legX_base, legY_base, legX_end, legY_end, bodyCol, sw); // Right leg
+  g += line(legX_base, legY_base, legX_base - legL * Math.sin(legAngle * Math.PI * 0.5), legY_end, bodyCol, sw); // Left leg
+
+  // Tag
+  if (tag) {
+    g += tagIcon(x + 40 * scale, headY + 20 * scale, 24 * scale, BLUE, 1);
+  }
+
+  g += '</g>';
+  return g;
+}
+
+/* Screen: x, y (center), w, h, rad, inner content (SVG string) */
+function screen(x, y, w, h, rad, content, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, rad, WHITE, 1);
+  g += '<g transform="translate(' + (x - w / 2) + ' ' + (y - h / 2) + ')">';
+  g += content;
+  g += '</g>';
+  g += '</g>';
+  return g;
+}
+
+/* Gadget icon: simple rectangle with a dot */
+function gadgetIcon(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, size * 0.8, size, size * 0.15, col);
+  g += dot(x, y - size * 0.3, size * 0.15, col);
+  g += '</g>';
+  return g;
+}
+
+/* Shopping cart icon: simple path */
+function shoppingCart(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var sw = size * 0.15;
+  var d = "M " + (x - size * 0.4) + " " + (y - size * 0.3) +
+          " L " + (x - size * 0.2) + " " + (y - size * 0.3) +
+          " L " + (x + size * 0.2) + " " + (y + size * 0.3) +
+          " L " + (x + size * 0.4) + " " + (y + size * 0.3) +
+          " M " + (x - size * 0.3) + " " + (y + size * 0.1) +
+          " L " + (x + size * 0.3) + " " + (y + size * 0.1) +
+          " M " + (x - size * 0.3) + " " + (y + size * 0.4) + " A " + (size * 0.1) + " " + (size * 0.1) + " 0 0 1 " + (x - size * 0.2) + " " + (y + size * 0.4) +
+          " M " + (x + size * 0.2) + " " + (y + size * 0.4) + " A " + (size * 0.1) + " " + (size * 0.1) + " 0 0 1 " + (x + size * 0.3) + " " + (y + size * 0.4);
+  return pathTag(d, col, sw, op);
+}
+
+/* Browser icon: circle with quarter segments */
+function browserIcon(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var r = size * 0.4;
+  var sw = size * 0.1;
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, r, col, sw);
+  g += line(x, y - r, x, y + r, col, sw);
+  g += line(x - r, y, x + r, y, col, sw);
+  g += dot(x, y, sw * 0.8, col);
+  g += '</g>';
+  return g;
+}
+
+/* Question mark glyph */
+function questionMark(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var sw = size * 0.15;
+  var d = "M " + (x - size * 0.2) + " " + (y - size * 0.3) +
+          " A " + (size * 0.2) + " " + (size * 0.2) + " 0 1 1 " + (x + size * 0.2) + " " + (y - size * 0.1) +
+          " L " + x + " " + (y + size * 0.1) +
+          " M " + x + " " + (y + size * 0.3);
+  return pathTag(d, col, sw, op);
+}
+
+/* Eye icon */
+function eyeIcon(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var sw = size * 0.1;
+  var r = size * 0.3;
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, r, col, sw);
+  g += dot(x, y, r * 0.4, col);
+  g += line(x - r, y, x - r * 1.5, y, col, sw * 0.6);
+  g += line(x + r, y, x + r * 1.5, y, col, sw * 0.6);
+  g += '</g>';
+  return g;
+}
+
+/* Tag icon: simple rectangle with a corner cut */
+function tagIcon(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var w = size * 0.8, h = size * 0.6;
+  var d = "M " + (x - w / 2) + " " + (y - h / 2) +
+          " L " + (x + w / 2) + " " + (y - h / 2) +
+          " L " + (x + w / 2) + " " + (y + h / 2) +
+          " L " + (x - w / 2 + size * 0.2) + " " + (y + h / 2) +
+          " L " + (x - w / 2) + " " + (y + h / 2 - size * 0.2) + " Z";
+  return '<path d="' + d + '" fill="' + col + '" opacity="' + op + '"/>';
+}
+
+/* Ad frame: simple rectangular frame */
+function adFrame(x, y, w, h, col, sw, op) {
+  return rrectStroke(x, y, w, h, 12, col, sw, op);
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var figX = CX - 200, figY = BOT - 100;
+  var screenW = 380, screenH = 600;
+  var screenX = figX + 200, screenY = figY - screenH / 2 - 100;
+
+  var headCol = AMBER, bodyCol = WHITE;
+  var armAngle = lerp(0.1, 0.4, smooth(ramp(u, 0.0, 0.2))); // Gesture at screen
+  var legAngle = 0; // Sitting
+
+  // Gadget icon animation
+  var gadgetOp = 1;
+  var cartOp = 0;
+  var browserOp = 0;
+  var gadgetContent = gadgetIcon(screenW / 2, screenH / 2, 100, BLUE);
+
+  if (u < 0.4) { // Gadget on screen
+    // no change
+  } else if (u < 0.6) { // Gadget moves to cart
+    var moveT = ramp(u, 0.4, 0.6);
+    var gx = lerp(screenW / 2, screenW * 0.75, easeOut(moveT));
+    var gy = lerp(screenH / 2, screenH * 0.85, easeOut(moveT));
+    gadgetContent = gadgetIcon(gx, gy, 100, BLUE, 1 - moveT);
+    cartOp = moveT;
+  } else if (u < 0.8) { // Cart visible
+    cartOp = 1;
+  } else { // Screen swipes to browser
+    var swipeT = ramp(u, 0.8, 1.0);
+    var sx = lerp(0, -screenW, easeOut(swipeT));
+    gadgetContent = '<g transform="translate(' + sx + ' 0)">' + shoppingCart(screenW * 0.75, screenH * 0.85, 100, BLUE, 1 - swipeT) + '</g>';
+    browserOp = swipeT;
+  }
+
+  s += stickFigure(figX, figY, 1, headCol, bodyCol, armAngle, legAngle, 0.6, -0.4, false);
+  s += screen(screenX, screenY, screenW, screenH, 20, gadgetContent + shoppingCart(screenW * 0.75, screenH * 0.85, 100, BLUE, cartOp) + browserIcon(screenW / 2, screenH / 2, 120, BLUE, browserOp));
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var figX = CX - 200, figY = BOT - 100;
+  var screenW = 380, screenH = 600;
+  var screenX = figX + 200, screenY = figY - screenH / 2 - 100;
+
+  var headCol = AMBER, bodyCol = WHITE;
+  var armAngle = lerp(0, 0.2, smooth(ramp(u, 0.6, 0.8))); // Surprise gesture
+  var legAngle = 0.05; // Standing
+
+  var screenContent = '';
+  var adSize = 200;
+  var adX = screenW / 2, adY = screenH / 2;
+
+  // Cycle through app icons
+  var cycleSpeed = 6;
+  var currentCycle = Math.floor(u * cycleSpeed);
+  var cycleU = (u * cycleSpeed) % 1;
+
+  var appIcons = [
+    browserIcon(adX, adY, 120, DIM),
+    rrect(adX, adY, 120, 100, 10, DIM), // Generic newsfeed
+    dot(adX, adY, 60, DIM) // Generic social media
+  ];
+
+  var appIdx = currentCycle % appIcons.length;
+  screenContent += appIcons[appIdx];
+
+  // Ad icon pops up
+  var adScale = lerp(0.5, 1.0, easeOut(ramp(cycleU, 0.2, 0.6)));
+  var adOp = lerp(0, 1, ramp(cycleU, 0.1, 0.3)) * (1 - ramp(cycleU, 0.7, 0.9));
+  screenContent += adFrame(adX, adY, adSize * adScale, adSize * adScale * 1.2, BLUE, 8, adOp);
+  screenContent += gadgetIcon(adX, adY, adSize * 0.6 * adScale, BLUE, adOp);
+
+  s += stickFigure(figX, figY, 1, headCol, bodyCol, armAngle, legAngle, 0.2, -0.8, false);
+  s += screen(screenX, screenY, screenW, screenH, 20, screenContent);
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH — feeling spied on, wondering if it's personal */
+function scene3(u) {
+  var s = '';
+  var figX = CX - 200, figY = BOT - 100;
+  var screenW = 380, screenH = 600;
+  var screenX = figX + 200, screenY = figY - screenH / 2 - 100;
+
+  var headCol = AMBER, bodyCol = WHITE;
+  var armAngle = lerp(0.1, 0.2, smooth(ramp(u, 0.0, 0.3))); // Hunched, uneasy
+  var legAngle = 0; // Standing
+
+  var screenContent = '';
+  var pulseSpeed = 10;
+  var pulseOp = 0.5 + 0.5 * Math.sin(u * pulseSpeed * Math.PI);
+
+  // Question marks and eyes
+  var qSize = 80, eSize = 70;
+  screenContent += questionMark(screenW * 0.3, screenH * 0.3, qSize, CORAL, pulseOp);
+  screenContent += questionMark(screenW * 0.7, screenH * 0.7, qSize, CORAL, pulseOp);
+  screenContent += eyeIcon(screenW * 0.5, screenH * 0.5, eSize, CORAL, pulseOp);
+  screenContent += eyeIcon(screenW * 0.2, screenH * 0.7, eSize, CORAL, pulseOp * 0.7);
+  screenContent += eyeIcon(screenW * 0.8, screenH * 0.3, eSize, CORAL, pulseOp * 0.7);
+
+  s += stickFigure(figX, figY, 1, headCol, bodyCol, armAngle, legAngle, 0.0, -0.6, false);
+  s += screen(screenX, screenY, screenW, screenH, 20, screenContent);
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND — the mechanism of retargeting explained */
+function scene4(u) {
+  var s = '';
+  var figX = CX - 200, figY = BOT - 100;
+  var screenW = 380, screenH = 600;
+  var screenX = figX + 200, screenY = figY - screenH / 2 - 100;
+
+  var headCol = AMBER, bodyCol = WHITE;
+  var armAngle = 0;
+  var legAngle = 0;
+
+  var screenContent = '';
+  var tagSize = 60;
+  var tagOp = 1;
+
+  var siteX = screenW / 2, siteY = screenH / 2;
+  var siteW = screenW * 0.7, siteH = screenH * 0.6;
+
+  // Screen transforms to abstract website
+  var transformT = ramp(u, 0.0, 0.2);
+  var currentScreenW = lerp(screenW, siteW, transformT);
+  var currentScreenH = lerp(screenH, siteH, transformT);
+  var currentScreenRad = lerp(20, 10, transformT);
+  var currentScreenX = lerp(screenX, screenX, transformT);
+  var currentScreenY = lerp(screenY, screenY, transformT);
+
+  // Tag detaches and moves to YOU
+  var tagAttachT = ramp(u, 0.3, 0.6);
+  var tagStartX = siteX;
+  var tagStartY = siteY + siteH / 2 - tagSize / 2;
+  var tagEndX = figX + 40, tagEndY = figY - 100; // Position on stick figure
+
+  var currentTagX = lerp(tagStartX, tagEndX - (currentScreenX - screenW/2), tagAttachT);
+  var currentTagY = lerp(tagStartY, tagEndY - (currentScreenY - screenH/2), tagAttachT);
+  var tagScale = lerp(0.8, 1.0, tagAttachT);
+
+  // Ad frames appear from the tag
+  var adAppearT = ramp(u, 0.7, 1.0);
+  var adCount = 3;
+  var ads = '';
+  for (var i = 0; i < adCount; i++) {
+    var adU = clamp((adAppearT - i * 0.1) * 2, 0, 1);
+    var adOp = adU;
+    var adW = 100, adH = 140;
+    var adOffset = 100;
+    var adX_base = figX + 200 + (i - 1) * adOffset * 1.2;
+    var adY_base = figY - 300 - rnd(i) * 50;
+    ads += adFrame(adX_base, adY_base, adW, adH, BLUE, 8, adOp);
+    ads += gadgetIcon(adX_base, adY_base, adW * 0.6, BLUE, adOp);
+  }
+
+  s += stickFigure(figX, figY, 1, headCol, bodyCol, armAngle, legAngle, 0, -0.4, tagAttachT > 0.9);
+  s += rrectStroke(currentScreenX, currentScreenY, currentScreenW, currentScreenH, currentScreenRad, DIM, 4, 1 - transformT * 0.5); // Abstract website
+  s += '<g transform="translate(' + (currentScreenX - currentScreenW / 2) + ' ' + (currentScreenY - currentScreenH / 2) + ')">';
+  if (tagAttachT < 0.99) { // Tag detaching
+    s += tagIcon(currentTagX, currentTagY, tagSize * tagScale, BLUE, tagOp);
+  }
+  s += '</g>';
+  s += ads;
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE — repetitive feeling, cost, frequency capping */
+function scene5(u) {
+  var s = '';
+  var figX = CX - 200, figY = BOT - 100;
+  var headCol = AMBER, bodyCol = WHITE;
+  var armAngle = 0.1;
+  var legAngle = 0;
+
+  var adCount = 8;
+  var adW = 100, adH = 140;
+  var capY = TOP + 200; // Invisible frequency cap boundary
+
+  var ads = '';
+  for (var i = 0; i < adCount; i++) {
+    var baseAdX = figX + 200 + (i % 2 === 0 ? -1 : 1) * (100 + rnd(i) * 50);
+    var baseAdY = figY - 200 - i * 150 - u * 200 + rnd(i + 10) * 100;
+    while (baseAdY < TOP - 100) baseAdY += (BOT - TOP + 200);
+
+    var adOp = 1;
+    var adY = baseAdY;
+
+    // Simulate frequency capping: ads hitting the top boundary dissolve
+    if (adY < capY) {
+      var capT = ramp(adY, capY - 100, capY);
+      adOp = 1 - capT;
+    }
+
+    if (adOp > 0.05) {
+      ads += adFrame(baseAdX, adY, adW, adH, BLUE, 8, adOp);
+      ads += gadgetIcon(baseAdX, adY, adW * 0.6, BLUE, adOp);
+    }
+  }
+
+  s += stickFigure(figX, figY, 1, headCol, bodyCol, armAngle, legAngle, 0.4, -0.6, true);
+  s += ads;
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE — understanding the system */
+function scene6(u) {
+  var s = '';
+  var figX = CX - 200, figY = BOT - 100;
+  var headCol = AMBER, bodyCol = WHITE;
+  var armAngle = 0;
+  var legAngle = lerp(0, 0.3, smooth(ramp(u, 0.0, 0.4))); // Walking confidently
+
+  // Stick figure walks across the screen
+  var walkX = lerp(figX, CX + 200, easeOut(ramp(u, 0.0, 0.6)));
+  var walkY = lerp(figY, figY, easeOut(ramp(u, 0.0, 0.6)));
+
+  // Single ad appears behind, less intrusive
+  var adW = 100, adH = 140;
+  var adX = walkX - 250;
+  var adY = walkY - 200;
+  var adOp = lerp(0.8, 0.2, smooth(ramp(u, 0.4, 0.8))); // Fades into background
+  var adScale = lerp(1, 0.8, smooth(ramp(u, 0.4, 0.8)));
+
+  s += adFrame(adX, adY, adW * adScale, adH * adScale, BLUE, 8, adOp);
+  s += gadgetIcon(adX, adY, adW * 0.6 * adScale, BLUE, adOp);
+
+  // Stick figure glances at ad, then looks forward
+  var gazeX = lerp(0.4, 0.0, smooth(ramp(u, 0.5, 0.7)));
+  var gazeY = lerp(-0.6, -0.4, smooth(ramp(u, 0.5, 0.7)));
+
+  s += stickFigure(walkX, walkY, 1, headCol, bodyCol, armAngle, legAngle, gazeX, gazeY, true);
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "id": "why-you-see-the-same-ads-everywhere",
+  "slug": "2026-10-13__why-you-see-the-same-ads-everywhere",
+  "title_working": "Why You See the Same Ads Everywhere",
+  "system": "retargeting and frequency capping in digital advertising",
+  "cluster": "platforms-and-algorithms",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "failed",
+  "created_at": "2026-10-13T14:03:58+00:00",
+  "produced_at": "2026-10-13T14:10:16+00:00",
+  "verify": "FAIL",
+  "takeaway": "You now understand how digital advertisers use anonymous markers for 'retargeting' and 'frequency capping' to efficiently reach you, rather than personally spying on your thoughts.",
+  "animation_source": "llm"
+}
