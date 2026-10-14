@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why You Have to Accept Cookies</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots / inactive text
+var BLUE  = "#4C86F0";              // signal blue  -> the system / rules
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want / easy path
+var CORAL = "#FF5B5B";              // coral red    -> the naive model / friction / complexity
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function fillPathTag(d, col, op) {
+  return '<path d="' + d + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+/* Stick figure: headX, headY, bodyLen, headAngle (radians), armAngle (radians), legAngle (radians) */
+function stickFigure(x, y, col, headAngle, armAngle, legAngle, op) {
+  op = (op == null ? 1 : op);
+  var headR = 28;
+  var bodyLen = 100;
+  var limbLen = 80;
+  var headX = x + Math.sin(headAngle) * 10;
+  var headY = y - bodyLen / 2 - headR + Math.cos(headAngle) * 10;
+
+  var g = '<g opacity="' + op + '">';
+  g += dot(headX, headY, headR, col); // Head
+
+  // Body
+  g += line(x, y - bodyLen / 2, x, y + bodyLen / 2, col, 10);
+
+  // Arms
+  g += line(x, y - 20, x - limbLen * Math.sin(armAngle), y - 20 + limbLen * Math.cos(armAngle), col, 10);
+  g += line(x, y - 20, x + limbLen * Math.sin(armAngle), y - 20 + limbLen * Math.cos(armAngle), col, 10);
+
+  // Legs
+  g += line(x, y + bodyLen / 2, x - limbLen * Math.sin(legAngle), y + bodyLen / 2 + limbLen * Math.cos(legAngle), col, 10);
+  g += line(x, y + bodyLen / 2, x + limbLen * Math.sin(legAngle), y + bodyLen / 2 + limbLen * Math.cos(legAngle), col, 10);
+  g += '</g>';
+  return g;
+}
+
+/* Generic website interface */
+function webPage(x, y, w, h, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  // Browser window frame
+  g += rrectStroke(x, y, w, h, 20, WHITE, 8);
+  // Header bar
+  g += line(x - w / 2 + 10, y - h / 2 + 40, x + w / 2 - 10, y - h / 2 + 40, DIM, 6);
+  g += dot(x - w / 2 + 30, y - h / 2 + 20, 8, DIM); // "traffic light" dots
+  g += dot(x - w / 2 + 50, y - h / 2 + 20, 8, DIM);
+  g += dot(x - w / 2 + 70, y - h / 2 + 20, 8, DIM);
+  // Content lines
+  g += line(x - w / 2 + 60, y - h / 2 + 100, x + w / 2 - 60, y - h / 2 + 100, WHITE, 7);
+  g += line(x - w / 2 + 60, y - h / 2 + 140, x + w / 2 - 100, y - h / 2 + 140, WHITE, 7);
+  g += line(x - w / 2 + 60, y - h / 2 + 180, x + w / 2 - 80, y - h / 2 + 180, WHITE, 7);
+  g += line(x - w / 2 + 60, y - h / 2 + 220, x + w / 2 - 120, y - h / 2 + 220, WHITE, 7);
+  g += line(x - w / 2 + 60, y - h / 2 + 260, x + w / 2 - 60, y - h / 2 + 260, WHITE, 7);
+
+  g += line(x - w / 2 + 60, y + h / 2 - 100, x + w / 2 - 60, y + h / 2 - 100, WHITE, 7);
+  g += line(x - w / 2 + 60, y + h / 2 - 140, x + w / 2 - 100, y + h / 2 - 140, WHITE, 7);
+  g += line(x - w / 2 + 60, y + h / 2 - 180, x + w / 2 - 80, y + h / 2 - 180, WHITE, 7);
+  g += line(x - w / 2 + 60, y + h / 2 - 220, x + w / 2 - 120, y + h / 2 - 220, WHITE, 7);
+  g += line(x - w / 2 + 60, y + h / 2 - 260, x + w / 2 - 60, y + h / 2 - 260, WHITE, 7);
+
+  g += rrect(x, y - 50, w * 0.7, h * 0.4, 15, DIM, 0.2); // Placeholder image
+  g += '</g>';
+  return g;
+}
+
+/* Cookie consent pop-up */
+function cookiePopup(x, y, w, h, declineCol, acceptCol, manageCol, op, acceptScale, declineScale, manageScale, cornerIcon) {
+  op = (op == null ? 1 : op);
+  acceptScale = (acceptScale == null ? 1 : acceptScale);
+  declineScale = (declineScale == null ? 1 : declineScale);
+  manageScale = (manageScale == null ? 1 : manageScale);
+  cornerIcon = (cornerIcon == null ? false : cornerIcon);
+
+  var g = '<g opacity="' + op + '">';
+
+  if (cornerIcon) {
+    g += rrect(x, y, 60, 60, 10, WHITE, op);
+    g += dot(x, y, 15, AMBER, op); // Cookie icon
+    g += line(x - 10, y - 10, x - 5, y - 5, DIM, 3, op);
+    g += line(x + 10, y - 10, x + 5, y - 5, DIM, 3, op);
+    g += line(x - 10, y + 10, x - 5, y + 5, DIM, 3, op);
+    g += line(x + 10, y + 10, x + 5, y + 5, DIM, 3, op);
+    g += '</g>';
+    return g;
+  }
+
+  g += rrect(x, y, w, h, 20, WHITE, op); // Pop-up background
+
+  // Abstract text lines
+  g += line(x - w / 2 + 60, y - h / 2 + 80, x + w / 2 - 60, y - h / 2 + 80, DIM, 6, op);
+  g += line(x - w / 2 + 60, y - h / 2 + 120, x + w / 2 - 100, y - h / 2 + 120, DIM, 6, op);
+  g += line(x - w / 2 + 60, y - h / 2 + 160, x + w / 2 - 80, y - h / 2 + 160, DIM, 6, op);
+
+  var btnH = 60;
+  var btnW = (w - 120) / 3;
+
+  // Decline button (left)
+  var decX = x - w / 2 + 60 + btnW / 2;
+  var decY = y + h / 2 - 60 - btnH / 2;
+  g += '<g transform="translate(' + decX + ' ' + decY + ') scale(' + declineScale + ') translate(' + (-decX) + ' ' + (-decY) + ')">';
+  g += rrect(decX, decY, btnW, btnH, 10, declineCol, op);
+  g += line(decX - 20, decY, decX + 20, decY, WHITE, 6, op); // Minus sign
+  g += '</g>';
+
+  // Accept All button (right)
+  var accX = x + w / 2 - 60 - btnW / 2;
+  var accY = y + h / 2 - 60 - btnH / 2;
+  g += '<g transform="translate(' + accX + ' ' + accY + ') scale(' + acceptScale + ') translate(' + (-accX) + ' ' + (-accY) + ')">';
+  g += rrect(accX, accY, btnW, btnH, 10, acceptCol, op);
+  g += pathTag("M " + (accX - 18) + " " + (accY + 0) + " L " + (accX - 6) + " " + (accY + 14) + " L " + (accX + 18) + " " + (accY - 14), WHITE, 6, op); // Checkmark
+  g += '</g>';
+
+  // Manage Preferences button (center)
+  var manX = x;
+  var manY = y + h / 2 - 60 - btnH / 2;
+  g += '<g transform="translate(' + manX + ' ' + manY + ') scale(' + manageScale + ') translate(' + (-manX) + ' ' + (-manY) + ')">';
+  g += rrectStroke(manX, manY, btnW, btnH, 10, manageCol, 4, op);
+  g += dot(manX, manY, 10, manageCol, op); // Gear icon (abstract)
+  g += ring(manX, manY, 18, manageCol, 4, op);
+  g += '</g>';
+
+  g += '</g>';
+  return g;
+}
+
+/* Rulebook icon */
+function rulebookIcon(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x - size * 0.15, y, size * 0.7, size, 10, col, op); // Main book
+  g += rrect(x + size * 0.25, y, size * 0.4, size, 10, col, op * 0.6); // Spine
+  g += line(x - size * 0.15 + 10, y - size / 2 + 20, x - size * 0.15 + 10, y + size / 2 - 20, WHITE, 4, op); // Page lines
+  g += line(x - size * 0.15 + 20, y - size / 2 + 20, x - size * 0.15 + 20, y + size / 2 - 20, WHITE, 4, op);
+  g += line(x - size * 0.15 + 30, y - size / 2 + 20, x - size * 0.15 + 30, y + size / 2 - 20, WHITE, 4, op);
+  g += '</g>';
+  return g;
+}
+
+/* Checklist icon */
+function checklistIcon(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, size, size * 0.8, 10, col, 8, op); // Box
+  g += pathTag("M " + (x - size * 0.25) + " " + (y + size * 0.05) + " L " + (x - size * 0.05) + " " + (y + size * 0.25) + " L " + (x + size * 0.25) + " " + (y - size * 0.25), col, 10, op); // Checkmark
+  g += '</g>';
+  return g;
+}
+
+/* Approved stamp icon */
+function stampIcon(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, size * 0.4, col, 10, op);
+  g += fillPathTag("M " + (x - size * 0.2) + " " + (y - size * 0.1) +
+                   " L " + (x - size * 0.05) + " " + (y + size * 0.2) +
+                   " L " + (x + size * 0.2) + " " + (y - size * 0.2) +
+                   " L " + (x + size * 0.05) + " " + (y + size * 0.1) + " Z", col, op); // Star-like shape
+  g += '</g>';
+  return g;
+}
+
+/* Tangled options for 'Manage Preferences' */
+function tangledOptions(x, y, w, h, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var numBoxes = 12;
+  for (var i = 0; i < numBoxes; i++) {
+    var bx = x + (rnd(i * 10) - 0.5) * w * 0.8;
+    var by = y + (rnd(i * 10 + 1) - 0.5) * h * 0.8;
+    var bw = lerp(40, 100, rnd(i * 10 + 2));
+    var bh = lerp(30, 80, rnd(i * 10 + 3));
+    g += rrectStroke(bx, by, bw, bh, 8, CORAL, 4, op * (0.4 + 0.6 * rnd(i * 10 + 4)));
+    g += line(bx - bw / 2 + 10, by - bh / 2 + 15, bx + bw / 2 - 10, by - bh / 2 + 15, DIM, 3, op * (0.4 + 0.6 * rnd(i * 10 + 5)));
+  }
+  // Connecting lines
+  for (var j = 0; j < numBoxes - 1; j++) {
+    var x1 = x + (rnd(j * 20) - 0.5) * w * 0.8;
+    var y1 = y + (rnd(j * 20 + 1) - 0.5) * h * 0.8;
+    var x2 = x + (rnd(j * 20 + 2) - 0.5) * w * 0.8;
+    var y2 = y + (rnd(j * 20 + 3) - 0.5) * h * 0.8;
+    g += line(x1, y1, x2, y2, CORAL, 3, op * 0.5);
+  }
+  return g;
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var webW = 800, webH = 1200;
+  var popW = webW * 0.8, popH = webH * 0.5;
+
+  // Stick figure enters
+  var sfX = lerp(CX - 400, CX + 200, easeOut(ramp(u, 0.0, 0.2)));
+  var sfY = lerp(CY + 200, CY + 200, easeOut(ramp(u, 0.0, 0.2)));
+  s += stickFigure(sfX, sfY, AMBER, 0, -0.2, 0);
+
+  // Website appears
+  var webOp = ramp(u, 0.0, 0.15);
+  s += webPage(CX, CY, webW, webH, webOp);
+
+  // Cookie pop-up slides up
+  var popUpY = lerp(BOT + popH / 2, CY + 100, easeOut(ramp(u, 0.6, 0.9)));
+  s += cookiePopup(CX, popUpY, popW, popH, CORAL, AMBER, DIM, ramp(u, 0.6, 0.9));
+
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var webW = 800, webH = 1200;
+  var popW = webW * 0.8, popH = webH * 0.5;
+
+  var sfX = CX + 200, sfY = CY + 200;
+  var headShake = Math.sin(u * Math.PI * 6) * 0.1 * pulse(u, 0.2, 0.1);
+  var armTap = lerp(-0.2, 0.8, easeOut(ramp(u, 0.4, 0.6)));
+  var fingerX = sfX + 80 * Math.sin(armTap);
+  var fingerY = sfY - 20 + 80 * Math.cos(armTap);
+
+  s += stickFigure(sfX, sfY, AMBER, headShake, armTap, 0);
+
+  // Pop-up interaction
+  var popUpShrink = ramp(u, 0.7, 0.95);
+  var popUpY = lerp(CY + 100, BOT + popH / 2, easeIn(popUpShrink));
+  var popUpOp = 1 - popUpShrink;
+  var acceptScale = 1 + pulse(u, 0.65, 0.15) * 0.2; // Button glow on tap
+
+  s += cookiePopup(CX, popUpY, popW, popH, CORAL, AMBER, DIM, popUpOp, acceptScale);
+
+  // Website content expands as pop-up disappears
+  var webScale = lerp(1, 1.1, easeOut(popUpShrink));
+  var webOp = lerp(1, 1, popUpShrink);
+  s += '<g ' + camera(webScale, 0, 0) + '>';
+  s += webPage(CX, CY, webW, webH, webOp);
+  s += '</g>';
+
+  // Finger tap indicator
+  if (u > 0.5 && u < 0.75) {
+    s += dot(fingerX + 40, fingerY + 40, 15, WHITE, 0.8 * (1 - ramp(u, 0.65, 0.75)));
+  }
+
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var webW = 800, webH = 1200;
+  var popW = webW * 0.8, popH = webH * 0.5;
+
+  var sfX = CX + 200, sfY = CY + 200;
+  var headAngle = lerp(0, -0.4, smooth(ramp(u, 0.2, 0.4))); // Contemplative look
+  var armManage = lerp(-0.2, 0.8, easeOut(ramp(u, 0.5, 0.7))); // Tap manage preferences
+  s += stickFigure(sfX, sfY, AMBER, headAngle, armManage, 0);
+
+  // Pop-up reappears
+  var popUpY = lerp(BOT + popH / 2, CY + 100, easeOut(ramp(u, 0.0, 0.2)));
+  var popUpOp = ramp(u, 0.0, 0.2);
+  var manageScale = 1 + pulse(u, 0.65, 0.15) * 0.2; // Button glow on tap
+
+  s += cookiePopup(CX, popUpY, popW, popH, CORAL, AMBER, DIM, popUpOp, 1, 1, manageScale);
+
+  // Tangled options appear
+  var tangleOp = ramp(u, 0.7, 0.95);
+  var tangleScale = lerp(0.5, 1.0, easeOut(ramp(u, 0.7, 0.95)));
+  s += '<g transform="translate(' + CX + ' ' + CY + ') scale(' + tangleScale + ') translate(' + (-CX) + ' ' + (-CY) + ')">';
+  s += tangledOptions(CX, CY, W * 0.8, H * 0.8, tangleOp);
+  s += '</g>';
+
+  // Website background fades slightly
+  s += webPage(CX, CY, webW, webH, 0.2 * (1 - tangleOp));
+
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var webW = 800, webH = 1200;
+
+  var sfX = CX + 200, sfY = CY + 200;
+  s += stickFigure(sfX, sfY, AMBER, -0.4, -0.2, 0); // Still contemplative
+
+  // Tangled options collapse
+  var tangleCollapse = ramp(u, 0.0, 0.2);
+  var tangleOp = 1 - tangleCollapse;
+  var tangleScale = lerp(1.0, 0.1, easeIn(tangleCollapse));
+  var tangleY = lerp(CY, BOT + 100, easeIn(tangleCollapse));
+  s += '<g transform="translate(' + CX + ' ' + tangleY + ') scale(' + tangleScale + ') translate(' + (-CX) + ' ' + (-CY) + ')">';
+  s += tangledOptions(CX, CY, W * 0.8, H * 0.8, tangleOp);
+  s += '</g>';
+
+  // Rulebook and other icons slide in
+  var iconsAppear = ramp(u, 0.3, 0.6);
+  var iconOp = iconsAppear;
+  var rulebookX = lerp(CX - 400, CX - 180, easeOut(iconsAppear));
+  var checklistX = lerp(CX + 400, CX + 180, easeOut(iconsAppear));
+  var stampScale = 1 + pulse(u, 0.75, 0.15) * 0.3; // Stamp effect
+  var stampOp = ramp(u, 0.7, 0.9);
+
+  s += rulebookIcon(rulebookX, CY - 100, 300, BLUE, iconOp);
+  s += checklistIcon(checklistX, CY - 100, 200, BLUE, iconOp);
+  s += '<g transform="translate(' + CX + ' ' + (CY + 200) + ') scale(' + stampScale + ') translate(' + (-CX) + ' ' + (-CY - 200) + ')">';
+  s += stampIcon(CX, CY + 200, 200, BLUE, stampOp);
+  s += '</g>';
+
+  // Website background
+  s += webPage(CX, CY, webW, webH, 0.2);
+
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var webW = 800, webH = 1200;
+  var popW = webW * 0.8, popH = webH * 0.5;
+
+  var sfX = CX + 200, sfY = CY + 200;
+  s += stickFigure(sfX, sfY, AMBER, -0.2, -0.2, 0); // Neutral
+
+  // Rulebook recedes
+  var rulebookFade = ramp(u, 0.0, 0.2);
+  s += rulebookIcon(CX - 180, CY - 100, 300, BLUE, 1 - rulebookFade);
+  s += checklistIcon(CX + 180, CY - 100, 200, BLUE, 1 - rulebookFade);
+  s += stampIcon(CX, CY + 200, 200, BLUE, 1 - rulebookFade);
+
+  // Cookie pop-up re-emerges, "Accept All" dominates
+  var popUpY = CY + 100;
+  var popUpOp = ramp(u, 0.2, 0.4);
+
+  var acceptScale = lerp(1, 1.4, smooth(ramp(u, 0.4, 0.8)));
+  var declineScale = lerp(1, 0.4, smooth(ramp(u, 0.4, 0.8)));
+  var manageScale = lerp(1, 0.4, smooth(ramp(u, 0.4, 0.8)));
+
+  s += cookiePopup(CX, popUpY, popW, popH, CORAL, AMBER, DIM, popUpOp, acceptScale, declineScale, manageScale);
+
+  // Website background
+  s += webPage(CX, CY, webW, webH, 0.2);
+
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var webW = 800, webH = 1200;
+  var popW = webW * 0.8, popH = webH * 0.5;
+
+  var sfX = lerp(CX + 200, CX - 100, easeOut(ramp(u, 0.6, 0.9)));
+  var sfY = CY + 200;
+  var headNod = lerp(-0.2, 0.1, smooth(ramp(u, 0.0, 0.3))); // Knowing nod
+  var legWalk = Math.sin(u * Math.PI * 4) * 0.2 * ramp(u, 0.6, 0.9);
+  s += stickFigure(sfX, sfY, AMBER, headNod, -0.2, legWalk);
+
+  // Pop-up shrinks to corner icon
+  var popUpShrink = ramp(u, 0.4, 0.8);
+  var popUpX = lerp(CX, W - 100, easeIn(popUpShrink));
+  var popUpY = lerp(CY + 100, TOP + 50, easeIn(popUpShrink));
+  var popUpScale = lerp(1, 0.1, easeIn(popUpShrink));
+  var popUpOp = 1 - ramp(u, 0.8, 0.95);
+
+  s += '<g transform="translate(' + popUpX + ' ' + popUpY + ') scale(' + popUpScale + ') translate(' + (-popUpX) + ' ' + (-popUpY) + ')">';
+  s += cookiePopup(CX, CY + 100, popW, popH, CORAL, AMBER, DIM, 1, 1, 1, 1, false); // Render full pop-up, then scale it
+  s += '</g>';
+
+  // Small corner icon appears
+  var cornerIconOp = ramp(u, 0.8, 0.95);
+  s += cookiePopup(W - 100, TOP + 50, 0, 0, null, null, null, cornerIconOp, null, null, null, true);
+
+  // Website content is now fully visible and active
+  var webScale = lerp(1, 1.05, smooth(ramp(u, 0.6, 0.9)));
+  var webOp = 1;
+  s += '<g ' + camera(webScale, 0, 0) + '>';
+  s += webPage(CX, CY, webW, webH, webOp);
+  s += '</g>';
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

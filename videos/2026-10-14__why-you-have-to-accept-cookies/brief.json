@@ -1,0 +1,15 @@
+{
+  "id": "why-you-have-to-accept-cookies",
+  "slug": "2026-10-14__why-you-have-to-accept-cookies",
+  "title_working": "Why You Have to Accept Cookies",
+  "system": "regulatory compliance friction in website design",
+  "cluster": "institutions-and-bureaucracy",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-10-14T11:46:48+00:00",
+  "produced_at": "2026-10-14T11:49:40+00:00",
+  "verify": "PASS",
+  "takeaway": "The constant cookie consent pop-ups are not about your choice, but about websites proving they asked, often designed to make you click 'accept' quickly.",
+  "animation_source": "llm"
+}

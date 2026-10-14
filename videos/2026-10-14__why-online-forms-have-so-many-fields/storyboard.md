@@ -1,0 +1,22 @@
+# Why Online Forms Have So Many Fields
+
+*   **System:** Data collection dependencies and user experience tradeoffs
+*   **Narrator:** Bright, energetic adult-female voice (e.g., AvaNeural)
+*   **Palette:** Dark theme (black canvas, white line art), warm amber (user/desire), coral red (frustration/naive model), signal blue (system/connections)
+*   **Hero Element:** A stick figure (amber) and an online form (white) that transforms from a simple button to a complex, connected system.
+
+| # | Time | Story beat | Stick-figure scene | Motion / camera / transition | English VO | SFX |
+|---|---|---|---|---|---|---|
+| 1 | 0-10s | **YOU + NEED**: Anticipation for frictionless access. | A simple stick figure (amber) floats towards a glowing "Sign Up" button (white) on a black canvas. | Stick figure approaches, a cursor appears and clicks the button. | You're excited to join, to start something new online. A quick click, a simple signup, that's all you're hoping for: frictionless access to what you want. | click-soft.mp3 (0.6) |
+| 2 | 10-20s | **GO**: Confronted with an overwhelming form. | The "Sign Up" button expands downwards, revealing a seemingly endless scroll of white form fields. The amber stick figure looks small and overwhelmed next to it. | Button transforms into the first field, then the form extends rapidly off-screen downwards. Camera slightly zooms out. | But then the page loads. It's not one field, or two. It's a never-ending scroll of questions: name, address, phone, email, date of birth. | whoosh.mp3 (10.6), stack-collapse.mp3 (11.5) |
+| 3 | 20-30s | **SEARCH**: Wondering about the reason for so many fields. | The stick figure (amber) stands next to the long form, some fields highlighted in coral red, representing annoyance. A thought bubble above the stick figure contains a question mark icon. | Stick figure taps fingers, gestures towards the coral red fields. Camera subtly pans down the form, emphasizing its length. | You tap your fingers, wondering why they need to know all of this. Is it just bad design, or are they deliberately making it difficult? | drop-thud.mp3 (21.0) |
+| 4 | 30-40s | **FIND**: The hidden system of data dependencies. | White form fields are now connected by glowing signal blue lines to various abstract icons (e.g., a gear, a dollar sign, a calendar, a megaphone) representing different internal departments or functions. | Blue lines emerge from fields, connecting to distinct icons. Camera focuses on the connections as they form. | Here's the invisible system: each field isn't just for *one* purpose. Your address goes to shipping, email to marketing, preferences to development. | transform.mp3 (30.8), focus.mp3 (32.5) |
+| 5 | 40-50s | **TAKE**: The cost of your friction is system efficiency. | The stick figure (amber) is now tiny, standing on one field, while the vast, intricate network of signal blue connections and department icons forms a complex, multi-layered machine above and around them. | Camera pulls back and pans up, revealing the entire interconnected system. The stick figure appears as a small, observant dot. | The form isn't just for *you*; it's an input portal for an entire organization. Your single click triggers data points crucial for many different teams. | whoosh-fast.mp3 (40.6), complete-done.mp3 (42.0) |
+| 6 | 50-60s | **RETURN + CHANGE**: Filling forms with new understanding. | The stick figure (amber) faces a new, still long, form. They calmly begin filling it out. Faint signal blue lines subtly glow in the background around the form. | Stick figure calmly types/fills. Gentle, knowing nod. Subtle blue background glow. | So next time you face a marathon form, you'll still feel the friction. But now you see past the annoyance, understanding the hidden machinery that needs all that data. | click-soft.mp3 (51.0) |
+
+**Continuity map:**
+*   **Scene 1 → 2:** The "Sign Up" button transforms directly into the initial field of the expanding form.
+*   **Scene 2 → 3:** The expanded form remains, and the stick figure shifts from overwhelmed to questioning its purpose.
+*   **Scene 3 → 4:** The form remains, but its fields begin to reveal their hidden signal blue connections.
+*   **Scene 4 → 5:** The connected form system persists, but the camera pulls back to emphasize its scale and complexity, showing the stick figure's small place within it.
+*   **Scene 5 → 6:** The stick figure returns to a new form, now with the subtle background hint of the previously revealed signal blue system.

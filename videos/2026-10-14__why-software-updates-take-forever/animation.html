@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Software Updates Take Forever</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue  -> true system, verified data
+var AMBER = "#F2A93B";              // warm amber   -> YOU, device, desire
+var CORAL = "#FF5B5B";              // coral red    -> frustration, naive model, slow data
+
+var DUR = 60;
+window.__duration = DUR;
+
+// Hero element dimensions
+var PHONE_W = 340;
+var PHONE_H = 600;
+var PHONE_CX = CX;
+var PHONE_CY = CY - 80; // Slightly above center to allow space for stick figure below
+
+var FIGURE_H = 220;
+var FIGURE_CX = CX;
+var FIGURE_CY = PHONE_CY + PHONE_H / 2 + FIGURE_H / 2 + 30; // Position stick figure holding the phone
+
+var SW_NORMAL = 8;
+var SW_ACCENT = 12;
+var SW_THIN = 4;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* the smartphone/tablet hero element */
+function phone(x, y, w, h, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var rad = w * 0.1;
+  return rrectStroke(x, y, w, h, rad, col, sw, op);
+}
+
+/* a simple stick figure */
+function stickFigure(x, y, h, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var headR = h * 0.12;
+  var bodyH = h * 0.4;
+  var armL = h * 0.25;
+  var legL = h * 0.35;
+
+  var headY = y - h / 2 + headR;
+  var bodyY1 = headY + headR * 1.5;
+  var bodyY2 = bodyY1 + bodyH;
+  var armY = bodyY1 + bodyH * 0.3;
+  var legY = bodyY2;
+
+  var g = '<g opacity="' + op + '">';
+  g += dot(x, headY, headR, col); // Head
+  g += line(x, bodyY1, x, bodyY2, col, SW_NORMAL); // Body
+
+  // Arms
+  if (pose === 'hold-phone') {
+    g += line(x - 20, armY, PHONE_CX - PHONE_W / 2 + 10, PHONE_CY + PHONE_H / 2 - 20, col, SW_NORMAL);
+    g += line(x + 20, armY, PHONE_CX + PHONE_W / 2 - 10, PHONE_CY + PHONE_H / 2 - 20, col, SW_NORMAL);
+  } else if (pose === 'lean') {
+    g += line(x - 20, armY, x - 50, armY + 20, col, SW_NORMAL);
+    g += line(x + 20, armY, x + 50, armY + 20, col, SW_NORMAL);
+  } else { // default pose
+    g += line(x - 20, armY, x - 20 - armL, armY, col, SW_NORMAL);
+    g += line(x + 20, armY, x + 20 + armL, armY, col, SW_NORMAL);
+  }
+
+  // Legs
+  g += line(x, legY, x - 30, legY + legL, col, SW_NORMAL);
+  g += line(x, legY, x + 30, legY + legL, col, SW_NORMAL);
+  g += '</g>';
+  return g;
+}
+
+/* a progress bar */
+function progressBar(x, y, w, h, fillPct, col, bgCol, sw, op) {
+  op = (op == null ? 1 : op);
+  var rad = h / 2;
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, rad, bgCol, sw); // Background bar
+  g += '<rect x="' + (x - w / 2 + sw / 2) + '" y="' + (y - h / 2 + sw / 2) + '" width="' + (w - sw) * clamp(fillPct, 0, 1) + '" height="' + (h - sw) + '" rx="' + (rad - sw / 2) + '" fill="' + col + '"/>';
+  g += '</g>';
+  return g;
+}
+
+/* a download icon (chevron down) */
+function downloadIcon(x, y, size, col, sw, op) {
+  var d = "M " + (x - size) + " " + (y - size * 0.4) + " L " + x + " " + (y + size * 0.4) + " L " + (x + size) + " " + (y - size * 0.4);
+  d += " M " + x + " " + (y + size * 0.4) + " L " + x + " " + (y - size * 1.1); // vertical line
+  return pathTag(d, col, sw, op);
+}
+
+/* a question mark glyph */
+function questionMark(x, y, size, col, sw, op) {
+  var d = "M " + (x - size * 0.3) + " " + (y - size * 0.5) +
+          " A " + (size * 0.4) + " " + (size * 0.4) + " 0 1 1 " + (x + size * 0.3) + " " + (y - size * 0.1) +
+          " L " + (x + size * 0.1) + " " + (y + size * 0.1) +
+          " L " + (x + size * 0.1) + " " + (y + size * 0.3) +
+          " M " + x + " " + (y + size * 0.5);
+  return pathTag(d, col, sw, op);
+}
+
+/* a checkmark glyph */
+function checkMark(x, y, size, col, sw, op) {
+  var d = "M " + (x - size * 0.5) + " " + (y + size * 0.1) +
+          " L " + (x - size * 0.1) + " " + (y + size * 0.5) +
+          " L " + (x + size * 0.5) + " " + (y - size * 0.5);
+  return pathTag(d, col, sw, op);
+}
+
+/* a simple data block */
+function dataBlock(x, y, w, h, col, sw, op) {
+  op = (op == null ? 1 : op);
+  return rrect(x, y, w, h, w * 0.1, col, op);
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  // Stick figure (amber)
+  s += stickFigure(FIGURE_CX, FIGURE_CY, FIGURE_H, AMBER, 'hold-phone', 1);
+
+  // Smartphone/tablet (amber)
+  s += phone(PHONE_CX, PHONE_CY, PHONE_W, PHONE_H, AMBER, SW_NORMAL, 1);
+
+  // Download icon appears
+  var iconOp = ramp(u, 0.1, 0.3);
+  s += downloadIcon(PHONE_CX, PHONE_CY - PHONE_H / 2 + 100, 40, AMBER, SW_NORMAL, iconOp);
+
+  // Coral progress bar slowly starts to fill
+  var barY = PHONE_CY + PHONE_H / 2 - 100;
+  var barW = PHONE_W * 0.7;
+  var barH = 30;
+  var progress = ramp(u, 0.4, 0.9);
+  if (progress > 0) {
+    s += progressBar(PHONE_CX, barY, barW, barH, progress * 0.1, CORAL, DIM, SW_THIN, 1);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14);
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+
+  // Stick figure leans closer
+  var leanX = lerp(FIGURE_CX, FIGURE_CX + 20, smooth(u * 0.5));
+  var leanY = lerp(FIGURE_CY, FIGURE_CY - 10, smooth(u * 0.5));
+  s += stickFigure(leanX, leanY, FIGURE_H, AMBER, 'lean', 1);
+
+  // Smartphone/tablet (amber)
+  s += phone(PHONE_CX, PHONE_CY, PHONE_W, PHONE_H, AMBER, SW_NORMAL, 1);
+
+  // Coral progress bar fills excruciatingly slowly
+  var barY = PHONE_CY + PHONE_H / 2 - 100;
+  var barW = PHONE_W * 0.7;
+  var barH = 30;
+  var progress = lerp(0.1, 0.3, u); // From 10% to 30% over 10 seconds
+  s += progressBar(PHONE_CX, barY, barW, barH, progress, CORAL, DIM, SW_THIN, 1);
+
+  // Thought bubble with a question mark (coral red) appears
+  var bubbleOp = ramp(u, 0.5, 0.8);
+  var bubbleR = lerp(0, 40, easeOut(bubbleOp));
+  var bubbleX = PHONE_CX + PHONE_W / 2 + 60;
+  var bubbleY = PHONE_CY - PHONE_H / 2 - 40;
+  if (bubbleOp > 0) {
+    s += ring(bubbleX, bubbleY, bubbleR, CORAL, SW_THIN, bubbleOp);
+    s += questionMark(bubbleX, bubbleY, 30, CORAL, SW_NORMAL, bubbleOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH — naive assumption about the process */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Smartphone/tablet (amber)
+  s += phone(PHONE_CX, PHONE_CY, PHONE_W, PHONE_H, AMBER, SW_NORMAL, 1);
+
+  // Coral progress bar
+  var barY = PHONE_CY + PHONE_H / 2 - 100;
+  var barW = PHONE_W * 0.7;
+  var barH = 30;
+  s += progressBar(PHONE_CX, barY, barW, barH, 0.3 + u * 0.2, CORAL, DIM, SW_THIN, 1); // Continues filling slowly
+
+  // Simplified, large coral red data block moves into the device
+  var dataW = PHONE_W * 0.8;
+  var dataH = PHONE_H * 0.4;
+  var dataEnterY = lerp(TOP + dataH / 2, PHONE_CY, smooth(ramp(u, 0.1, 0.6)));
+  var dataOp = (1 - ramp(u, 0.7, 0.9));
+  if (dataOp > 0.02) {
+    s += dataBlock(PHONE_CX, dataEnterY, dataW, dataH, CORAL, SW_NORMAL, dataOp);
+  }
+
+  // 'DONE' icon flashes briefly above it
+  var doneOp = pulse(u, 0.8, 0.1);
+  if (doneOp > 0.02) {
+    s += checkMark(PHONE_CX, PHONE_CY - PHONE_H / 2 - 40, 50, CORAL, SW_ACCENT, doneOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND — The real, complex system is revealed */
+function scene4(u) {
+  var s = '';
+  var scale = lerp(1.0, 1.1, smooth(u * 0.5));
+  var rot = lerp(0, 5, smooth(u * 0.5)); // Slight rotation for transform effect
+  s += '<g ' + camera(scale, 0, 0) + ' transform-origin="' + CX + ' ' + CY + '" transform="rotate(' + rot + ' ' + CX + ' ' + CY + ')">';
+
+  // Device transforms - color shifts from amber to blue
+  var phoneCol = lerpColor(AMBER, BLUE, ramp(u, 0.2, 0.8));
+  s += phone(PHONE_CX, PHONE_CY, PHONE_W, PHONE_H, phoneCol, SW_NORMAL, 1);
+
+  // Coral red block shatters
+  var shatterOp = (1 - ramp(u, 0.0, 0.3));
+  var dataW = PHONE_W * 0.8;
+  var dataH = PHONE_H * 0.4;
+  if (shatterOp > 0.02) {
+    s += dataBlock(PHONE_CX, PHONE_CY, dataW, dataH, CORAL, SW_NORMAL, shatterOp);
+    // Add small fragments flying out
+    for (var i = 0; i < 4; i++) {
+      var fragX = PHONE_CX + Math.cos(i * Math.PI / 2 + u * 10) * lerp(0, 100, smooth(u));
+      var fragY = PHONE_CY + Math.sin(i * Math.PI / 2 + u * 10) * lerp(0, 100, smooth(u));
+      s += rrect(fragX, fragY, 20, 20, 4, CORAL, shatterOp);
+    }
+  }
+
+  // Multiple signal blue layers assemble inside the device
+  var assembleOp = ramp(u, 0.4, 0.9);
+  var layerCount = 4;
+  for (var i = 0; i < layerCount; i++) {
+    var layerW = PHONE_W * 0.7 - i * 30;
+    var layerH = PHONE_H * 0.1;
+    var layerY = PHONE_CY - PHONE_H / 2 + 150 + i * (layerH + 20);
+    var targetY = PHONE_CY - PHONE_H / 2 + 150 + i * (layerH + 20);
+    var startY = PHONE_CY + PHONE_H / 2 + 100;
+    var currentY = lerp(startY, targetY, easeOut(clamp((u - 0.4 - i * 0.05) / 0.4, 0, 1)));
+    if (assembleOp > 0.02) {
+      s += dataBlock(PHONE_CX, currentY, layerW, layerH, BLUE, SW_NORMAL, assembleOp);
+    }
+  }
+
+  s += '</g>';
+  return s;
+}
+
+// Helper for color interpolation
+function lerpColor(a, b, t) {
+  var hex = function(x) {
+    return ("0" + parseInt(x).toString(16)).slice(-2);
+  };
+  var r1 = parseInt(a.substring(1, 3), 16);
+  var g1 = parseInt(a.substring(3, 5), 16);
+  var b1 = parseInt(a.substring(5, 7), 16);
+  var r2 = parseInt(b.substring(1, 3), 16);
+  var g2 = parseInt(b.substring(3, 5), 16);
+  var b2 = parseInt(b.substring(5, 7), 16);
+  var r = Math.round(lerp(r1, r2, t));
+  var g = Math.round(lerp(g1, g2, t));
+  var b = Math.round(lerp(b1, b2, t));
+  return "#" + hex(r) + hex(g) + hex(b);
+}
+
+
+/* SCENE 5 (40-50): TAKE — The cost of reliability */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.1, 1.0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, 0) + '>';
+
+  // Phone with integrated signal blue layers, glowing faintly signal blue
+  s += phone(PHONE_CX, PHONE_CY, PHONE_W, PHONE_H, BLUE, SW_NORMAL, 1);
+  var pulseOp = 0.2 + 0.3 * Math.sin(u * Math.PI * 4); // Gentle pulse
+  s += rrect(PHONE_CX, PHONE_CY, PHONE_W * 0.9, PHONE_H * 0.9, PHONE_W * 0.09, BLUE, pulseOp);
+
+  var layerCount = 4;
+  for (var i = 0; i < layerCount; i++) {
+    var layerW = PHONE_W * 0.7 - i * 30;
+    var layerH = PHONE_H * 0.1;
+    var layerY = PHONE_CY - PHONE_H / 2 + 150 + i * (layerH + 20);
+    s += dataBlock(PHONE_CX, layerY, layerW, layerH, BLUE, SW_NORMAL, 1);
+  }
+
+  // A protective shield (signal blue) briefly surrounds the device
+  var shieldOp = ramp(u, 0.2, 0.5) * (1 - ramp(u, 0.6, 0.9));
+  var shieldR = lerp(PHONE_W * 0.6, PHONE_W * 0.8, easeOut(ramp(u, 0.2, 0.5)));
+  if (shieldOp > 0.02) {
+    s += ring(PHONE_CX, PHONE_CY, shieldR, BLUE, SW_ACCENT, shieldOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE — New understanding */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.98, smooth(u));
+  s += '<g ' + camera(scale, 0, 0) + '>';
+
+  // Stick-figure (amber) holds the device (glowing signal blue).
+  s += stickFigure(FIGURE_CX, FIGURE_CY, FIGURE_H, AMBER, 'hold-phone', 1);
+
+  // Phone (glowing signal blue)
+  s += phone(PHONE_CX, PHONE_CY, PHONE_W, PHONE_H, BLUE, SW_NORMAL, 1);
+  var glowOp = 0.2 + 0.3 * Math.sin(u * Math.PI * 2); // Gentle glow
+  s += rrect(PHONE_CX, PHONE_CY, PHONE_W * 0.9, PHONE_H * 0.9, PHONE_W * 0.09, BLUE, glowOp);
+
+  // Completed progress bar (signal blue)
+  var barY = PHONE_CY + PHONE_H / 2 - 100;
+  var barW = PHONE_W * 0.7;
+  var barH = 30;
+  var progressFill = ramp(u, 0.2, 0.6); // Quickly fills to 100%
+  s += progressBar(PHONE_CX, barY, barW, barH, progressFill, BLUE, DIM, SW_THIN, 1);
+
+  // Stick figure nods slowly
+  var headNodX = lerp(FIGURE_CX, FIGURE_CX + 10, smooth(ramp(u, 0.6, 0.9)));
+  var headNodY = lerp(FIGURE_CY - FIGURE_H / 2 + FIGURE_H * 0.12, FIGURE_CY - FIGURE_H / 2 + FIGURE_H * 0.12 - 5, smooth(ramp(u, 0.6, 0.9)));
+  s += dot(headNodX, headNodY, FIGURE_H * 0.12, AMBER); // Head for nod
+
+  // A subtle checkmark for the full understanding
+  var checkOp = ramp(u, 0.7, 0.9);
+  s += checkMark(PHONE_CX, PHONE_CY - PHONE_H / 2 - 40, 50, BLUE, SW_ACCENT, checkOp);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
