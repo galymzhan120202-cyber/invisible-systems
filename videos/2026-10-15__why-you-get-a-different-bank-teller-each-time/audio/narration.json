@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You enter the bank, hoping for a quick transaction. You might even look for a familiar face, expecting a personal connection to make things smoother.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "But next time, it’s someone new. And again after that, someone else. It truly feels like you never see the same teller twice in a row.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "You start to wonder why. Is the bank just randomly assigning staff? Or is there some secret system preventing you from building any real rapport?",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "Banks are complex systems balancing fluctuating demand. Tellers have different skills, shifts, and tasks beyond just the service counter.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "So instead of one slow queue for *your* specific teller, staff are distributed across all available stations, ensuring someone is always ready.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "Now, approaching the counter, you don't just see random rotation. You see an optimized flow, designed to keep the entire operation moving efficiently.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

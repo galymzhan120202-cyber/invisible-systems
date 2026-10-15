@@ -1,0 +1,582 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Online Orders Arrive in Big Boxes</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue
+var AMBER = "#F2A93B";              // warm amber
+var CORAL = "#FF5B5B";              // coral red
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom shape builders for this animation ---------- */
+
+// Stick figure: x, y is base of feet. height is total figure height.
+function stickFigure(x, y, height, col, op, pose) {
+  op = (op == null ? 1 : op);
+  var sw = 8;
+  var headR = height * 0.12;
+  var bodyLen = height * 0.4;
+  var armLen = height * 0.3;
+  var legLen = height * 0.35;
+
+  var headY = y - height + headR;
+  var bodyStartY = headY + headR * 1.5;
+  var bodyEndY = bodyStartY + bodyLen;
+  var crotchY = bodyEndY;
+
+  var armL_x1 = x, armL_y1 = bodyStartY + armLen * 0.2;
+  var armR_x1 = x, armR_y1 = armL_y1;
+  var legL_x1 = x, legL_y1 = crotchY;
+  var legR_x1 = x, legR_y1 = crotchY;
+
+  var armL_x2 = armL_x1 + (pose.armL_dx || 0);
+  var armL_y2 = armL_y1 + (pose.armL_dy || armLen);
+  var armR_x2 = armR_x1 + (pose.armR_dx || 0);
+  var armR_y2 = armR_y1 + (pose.armR_dy || armLen);
+  var legL_x2 = legL_x1 + (pose.legL_dx || -legLen * 0.3);
+  var legL_y2 = legL_y1 + (pose.legL_dy || legLen);
+  var legR_x2 = legR_x1 + (pose.legR_dx || legLen * 0.3);
+  var legR_y2 = legR_y1 + (pose.legR_dy || legLen);
+
+  var g = '<g opacity="' + op + '">';
+  g += dot(x, headY, headR, col, op); // Head
+  g += line(x, bodyStartY, x, bodyEndY, col, sw, op); // Body
+  g += line(armL_x1, armL_y1, armL_x2, armL_y2, col, sw, op); // Left arm
+  g += line(armR_x1, armR_y1, armR_x2, armR_y2, col, sw, op); // Right arm
+  g += line(legL_x1, legL_y1, legL_x2, legL_y2, col, sw, op); // Left leg
+  g += line(legR_x1, legR_y1, legR_x2, legR_y2, col, sw, op); // Right leg
+  g += '</g>';
+  return g;
+}
+
+// Stylized phone item
+function phone(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var w = size * 0.6;
+  var h = size;
+  var rad = size * 0.1;
+  var sw = size * 0.08;
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, rad, col, op);
+  g += dot(x + w * 0.3, y - h * 0.4, sw * 0.6, WHITE, op); // Camera
+  g += rrect(x, y + h * 0.4, w * 0.3, sw * 0.8, sw * 0.2, WHITE, op); // Button/bar
+  g += '</g>';
+  return g;
+}
+
+// Shipping box
+function shippingBox(x, y, w, h, col, lidOpenFactor, op) {
+  op = (op == null ? 1 : op);
+  var sw = 10;
+  var rad = 12;
+  var lidH = h * 0.15; // Height of the lid flap
+  var lidY = y - h / 2; // Top edge of the box
+
+  var g = '<g opacity="' + op + '">';
+  // Main box body
+  g += rrectStroke(x, y + lidH / 2, w, h - lidH, rad, col, sw, op);
+  g += rrect(x, y + lidH / 2, w, h - lidH, rad, col, 0.05 * op); // Faint fill
+
+  // Lid (top flap)
+  var lidOpenAngle = lerp(0, Math.PI / 2.5, lidOpenFactor); // Max 90 degrees open
+  var lidOffset = Math.sin(lidOpenAngle) * lidH;
+
+  // Top edge line
+  g += line(x - w / 2 + rad, lidY, x + w / 2 - rad, lidY, col, sw, op);
+  // Rounded corners for the lid
+  g += pathTag("M " + (x - w / 2) + " " + (lidY + rad) +
+               " A " + rad + " " + rad + " 0 0 1 " + (x - w / 2 + rad) + " " + lidY, col, sw, op);
+  g += pathTag("M " + (x + w / 2 - rad) + " " + lidY +
+               " A " + rad + " " + rad + " 0 0 1 " + (x + w / 2) + " " + (lidY + rad), col, sw, op);
+
+  // Lid flap
+  var lidPath = "M " + (x - w / 2) + " " + lidY +
+                " L " + (x - w / 2) + " " + (lidY - lidOffset) +
+                " L " + (x + w / 2) + " " + (lidY - lidOffset) +
+                " L " + (x + w / 2) + " " + lidY + " Z";
+  g += '<path d="' + lidPath + '" fill="' + col + '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linejoin="round" opacity="' + op + '"/>';
+
+  return g;
+}
+
+// Simplified box for background/grid
+function simpleBox(x, y, w, h, col, op) {
+  op = (op == null ? 1 : op);
+  var sw = 4;
+  var rad = 8;
+  return rrectStroke(x, y, w, h, rad, col, sw, op);
+}
+
+// Conveyor belt
+function conveyorBelt(y, width, col, op, speedFactor, u) {
+  op = (op == null ? 1 : op);
+  var g = '';
+  var beltHeight = 40;
+  var beltY = y - beltHeight / 2;
+  var beltX = CX;
+  var beltW = width;
+
+  // Main belt rectangle
+  g += rrect(beltX, beltY, beltW, beltHeight, 10, col, op * 0.3);
+  g += rrectStroke(beltX, beltY, beltW, beltHeight, 10, col, 6, op);
+
+  // Dashes on the belt
+  var dashLen = 60;
+  var dashGap = 80;
+  var totalPattern = dashLen + dashGap;
+  var startX = beltX - beltW / 2;
+  var endX = beltX + beltW / 2;
+  var currentPhase = (u * speedFactor) % 1;
+  var offset = currentPhase * totalPattern;
+
+  for (var x = startX - totalPattern + offset; x < endX + totalPattern; x += totalPattern) {
+    var x1 = Math.max(x, startX);
+    var x2 = Math.min(x + dashLen, endX);
+    if (x2 > x1) {
+      g += line(x1, beltY, x2, beltY, col, 4, op * 0.8);
+    }
+  }
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var figureHeight = 240;
+  var figureX = CX - 200;
+  var figureY = BOT - 100;
+
+  var itemSize = 100;
+  var itemX = figureX + 60;
+  var itemY = figureY - figureHeight * 0.55; // Held near stomach/chest
+
+  var boxW = 400;
+  var boxH = 600;
+  var boxX = CX + 200;
+  var boxY = BOT - 100 - boxH / 2 + 50; // Base on ground
+
+  // Box appearance
+  var boxScale = lerp(0.5, 1.0, easeOut(ramp(u, 0.0, 0.3)));
+  var boxOpacity = lerp(0, 1, ramp(u, 0.0, 0.3));
+
+  // Figure pose: holding item
+  var pose = {
+    armL_dx: -itemSize * 0.6, armL_dy: itemSize * 0.2,
+    armR_dx: itemSize * 0.6, armR_dy: itemSize * 0.2,
+    legL_dx: -20, legL_dy: 80,
+    legR_dx: 20, legR_dy: 80
+  };
+
+  s += stickFigure(figureX, figureY, figureHeight, AMBER, 1, pose);
+  s += phone(itemX, itemY, itemSize, AMBER, 1);
+  s += '<g transform="scale(' + boxScale + ') translate(' + (boxX * (1 - boxScale)) + ' ' + (boxY * (1 - boxScale)) + ')">';
+  s += shippingBox(boxX / boxScale, boxY / boxScale, boxW / boxScale, boxH / boxScale, BLUE, 0, boxOpacity);
+  s += '</g>';
+
+  return s;
+}
+
+/* SCENE 2 (10-20): NAIVE ASSUMPTION */
+function scene2(u) {
+  var s = '';
+  var figureHeight = 240;
+  var figureX = CX - 200;
+  var figureY = BOT - 100;
+
+  var itemSize = 100;
+  var itemX_start = figureX + 60;
+  var itemY_start = figureY - figureHeight * 0.55;
+
+  var boxW = 400;
+  var boxH = 600;
+  var boxX = CX + 200;
+  var boxY = BOT - 100 - boxH / 2 + 50;
+
+  // Item moving into box
+  var itemIntoBox = smooth(ramp(u, 0.1, 0.4));
+  var itemX = lerp(itemX_start, boxX, itemIntoBox);
+  var itemY = lerp(itemY_start, boxY + boxH * 0.1, itemIntoBox); // Adjust for box interior
+
+  // Box lid closing
+  var lidClose = smooth(ramp(u, 0.3, 0.6));
+  var lidOpenFactor = 1 - lidClose;
+
+  // Figure pose: looking at box, then confused
+  var pose = {
+    armL_dx: lerp(-60, -20, itemIntoBox), armL_dy: lerp(20, 80, itemIntoBox),
+    armR_dx: lerp(60, 20, itemIntoBox), armR_dy: lerp(20, 80, itemIntoBox),
+    legL_dx: -20, legL_dy: 80,
+    legR_dx: 20, legR_dy: 80
+  };
+
+  // Coral red "waste" / empty space inside the box
+  var wasteOpacity = ramp(u, 0.6, 0.9);
+  var wasteH = lerp(0, boxH * 0.5, wasteOpacity);
+  var wasteY = boxY - boxH * 0.2; // Position above the item
+
+  s += stickFigure(figureX, figureY, figureHeight, AMBER, 1, pose);
+  s += phone(itemX, itemY, itemSize, AMBER, 1);
+  s += shippingBox(boxX, boxY, boxW, boxH, BLUE, lidOpenFactor, 1);
+
+  // Show empty space above the item as coral
+  if (wasteOpacity > 0.01 && lidOpenFactor < 0.1) { // Only show when box is closed or nearly closed
+    s += rrect(boxX, wasteY, boxW * 0.7, wasteH, 8, CORAL, wasteOpacity * 0.6);
+    s += line(boxX - boxW * 0.3, wasteY - wasteH / 2, boxX + boxW * 0.3, wasteY - wasteH / 2, CORAL, 6, wasteOpacity);
+  }
+
+  return s;
+}
+
+/* SCENE 3 (20-30): WAREHOUSE SYSTEM */
+function scene3(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.6, smooth(u));
+  var translateY = lerp(0, -300, smooth(u));
+  s += '<g ' + camera(scale, 0, translateY) + '>';
+
+  var boxW = 400, boxH = 600;
+  var mainBoxX = CX + 200;
+  var mainBoxY = BOT - 100 - boxH / 2 + 50;
+
+  // Morph main box into a smaller, standard warehouse box
+  var morphFactor = smooth(u);
+  var currentBoxW = lerp(boxW, 160, morphFactor);
+  var currentBoxH = lerp(boxH, 200, morphFactor);
+  var currentBoxY = lerp(mainBoxY, CY + 100, morphFactor);
+  var currentBoxX = lerp(mainBoxX, CX + 100, morphFactor);
+  s += shippingBox(currentBoxX, currentBoxY, currentBoxW, currentBoxH, BLUE, 0, 1);
+
+  // Grid of shelves
+  var shelfY_start = TOP + 200;
+  var shelfSpacing = 180;
+  var shelfCount = 6;
+  var shelfX_left = CX - 300;
+  var shelfX_right = CX + 300;
+
+  for (var i = 0; i < shelfCount; i++) {
+    var shelfY = shelfY_start + i * shelfSpacing;
+    s += line(shelfX_left, shelfY, shelfX_right, shelfY, DIM, 4, 0.4); // Shelf line
+  }
+
+  // Items and boxes on shelves
+  var shelfBoxW = 160;
+  var shelfBoxH = 200;
+
+  for (var i = 0; i < shelfCount; i++) {
+    var shelfY = shelfY_start + i * shelfSpacing - shelfSpacing * 0.2;
+    for (var j = 0; j < 3; j++) { // 3 items/boxes per shelf
+      var itemX = CX - 200 + j * 200 + rnd(i * 10 + j) * 40 - 20;
+      var itemY = shelfY + rnd(i * 10 + j + 100) * 20 - 10;
+      if (rnd(i * 10 + j + 200) > 0.5) { // Randomly place items or boxes
+        s += phone(itemX, itemY, 50, AMBER, 0.7); // Small items
+      } else {
+        s += simpleBox(itemX, itemY, shelfBoxW * 0.6, shelfBoxH * 0.6, BLUE, 0.7); // Smaller boxes
+      }
+    }
+  }
+
+  // Conveyor belt at the bottom
+  var beltY = BOT - 100;
+  s += conveyorBelt(beltY, 800, DIM, 0.6, 1.5, u);
+
+  // A box on the conveyor belt
+  var beltBoxX = lerp(CX - 400, CX + 400, (u * 0.8 + 0.2) % 1);
+  s += simpleBox(beltBoxX, beltY - 50, shelfBoxW, shelfBoxH, BLUE, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): STANDARDIZATION */
+function scene4(u) {
+  var s = '';
+  var scale = lerp(0.6, 0.8, smooth(u));
+  var translateY = lerp(-300, -100, smooth(u));
+  s += '<g ' + camera(scale, 0, translateY) + '>';
+
+  // Standard box morphing from previous scene
+  var boxW = 160;
+  var boxH = 200;
+  var boxX = CX;
+  var boxY = CY + 100;
+  s += shippingBox(boxX, boxY, boxW, boxH, BLUE, 0, 1);
+
+  // Items of various sizes, trying to fit into the box
+  var itemSizes = [40, 60, 80, 100, 120];
+  var itemColors = [AMBER, AMBER, CORAL]; // Use coral for items that don't fit well
+
+  var itemX_base = CX - 200;
+  var itemY_base = CY + 100;
+
+  // Show a few items
+  for (var i = 0; i < 3; i++) {
+    var size = itemSizes[Math.floor(rnd(i) * itemSizes.length)];
+    var col = itemColors[Math.floor(rnd(i + 10) * itemColors.length)];
+    var currentItemX = itemX_base + i * 200;
+    var currentItemY = itemY_base + 200;
+
+    // Item attempts to move into the box
+    var moveIntoBox = smooth(ramp(u, 0.2 + i * 0.1, 0.5 + i * 0.1));
+    var finalItemX = lerp(currentItemX, boxX, moveIntoBox);
+    var finalItemY = lerp(currentItemY, boxY + boxH * 0.1, moveIntoBox);
+
+    // If item is too big for the standard box, it "bumps"
+    var bumpFactor = 0;
+    if (size > boxW * 0.7 && moveIntoBox > 0.9) { // Example threshold
+      bumpFactor = Math.sin(u * 20) * 10 * pulse(u, 0.7 + i * 0.05, 0.1);
+      col = CORAL; // Mark as "problematic"
+    }
+
+    s += phone(finalItemX + bumpFactor, finalItemY, size, col, 1);
+  }
+
+  // "Standard" label (simple glyph)
+  var stdX = boxX - boxW / 2 - 100;
+  var stdY = boxY;
+  s += rrect(stdX, stdY, 60, 120, 10, BLUE, 0.2);
+  s += line(stdX - 15, stdY, stdX + 15, stdY, BLUE, 8, 0.8);
+  s += line(stdX, stdY - 30, stdX, stdY + 30, BLUE, 8, 0.8);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): EFFICIENCY */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(0.8, 1.0, smooth(u));
+  var translateY = lerp(-100, 0, smooth(u));
+  s += '<g ' + camera(scale, 0, translateY) + '>';
+
+  var beltY = CY + 300;
+  s += conveyorBelt(beltY, 900, DIM, 0.7, 2.0, u);
+
+  var boxW = 160;
+  var boxH = 200;
+
+  // Robotic arm
+  var armX = CX - 300;
+  var armY = beltY - 200;
+  var armJoint1X = armX;
+  var armJoint1Y = TOP + 200;
+  var armJoint2X = armX + 100;
+  var armJoint2Y = armJoint1Y + 150;
+  var armEndEffectorX = armJoint2X + 50;
+  var armEndEffectorY = armJoint2Y + 80;
+
+  // Arm movement: picks up item, places in box
+  var armMovePhase = smooth(u * 2 % 1); // Cycle through movement
+  var itemSourceX = armX - 100;
+  var itemSourceY = beltY - 100;
+  var boxTargetX = CX + 200;
+  var boxTargetY = beltY - 100;
+
+  var currentArmX = lerp(armEndEffectorX, itemSourceX, armMovePhase);
+  var currentArmY = lerp(armEndEffectorY, itemSourceY, armMovePhase);
+  if (armMovePhase > 0.5) {
+    currentArmX = lerp(itemSourceX, boxTargetX, smooth(armMovePhase * 2 - 1));
+    currentArmY = lerp(itemSourceY, boxTargetY, smooth(armMovePhase * 2 - 1));
+  }
+
+  s += line(armX, TOP, armJoint1X, armJoint1Y, DIM, 10, 0.8);
+  s += line(armJoint1X, armJoint1Y, armJoint2X, armJoint2Y, DIM, 10, 0.8);
+  s += line(armJoint2X, armJoint2Y, currentArmX, currentArmY, DIM, 10, 0.8);
+  s += ring(currentArmX, currentArmY, 15, DIM, 6, 1); // Gripper
+
+  // Items on conveyor
+  for (var i = 0; i < 4; i++) {
+    var itemPhase = (u * 1.2 + i * 0.25) % 1;
+    var itemX = lerp(CX - 450, CX + 450, itemPhase);
+    var itemY = beltY - 50;
+    var itemSize = lerp(50, 80, rnd(i * 10)); // Varying item sizes
+    if (itemPhase > 0.1 && itemPhase < 0.9) {
+        s += phone(itemX, itemY, itemSize, AMBER, 0.9);
+    }
+  }
+
+  // Boxes on conveyor
+  for (var i = 0; i < 3; i++) {
+    var boxPhase = (u * 1.2 + i * 0.33 + 0.5) % 1;
+    var boxX = lerp(CX - 450, CX + 450, boxPhase);
+    var boxY = beltY - 50;
+    if (boxPhase > 0.1 && boxPhase < 0.9) {
+        s += shippingBox(boxX, boxY, boxW, boxH, BLUE, 0, 1);
+    }
+  }
+
+  // Blue lines indicating flow/efficiency
+  var flowOpacity = Math.sin(u * Math.PI * 2) * 0.3 + 0.4;
+  s += line(armX - 150, itemSourceY, armX - 50, itemSourceY, BLUE, 8, flowOpacity);
+  s += line(boxTargetX - 50, boxTargetY, boxTargetX + 50, boxTargetY, BLUE, 8, flowOpacity);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): ARRIVAL + UNDERSTANDING */
+function scene6(u) {
+  var s = '';
+  var figureHeight = 240;
+  var figureX = CX - 200;
+  var figureY = BOT - 100;
+
+  var itemSize = 100;
+  var boxW = 400;
+  var boxH = 600;
+  var boxX = CX + 200;
+  var boxY = BOT - 100 - boxH / 2 + 50;
+
+  // Box arrives and lid opens
+  var boxArrival = smooth(ramp(u, 0.0, 0.3));
+  var boxCurrentX = lerp(CX + 500, boxX, boxArrival);
+  var boxCurrentY = lerp(CY, boxY, boxArrival);
+  var lidOpenFactor = smooth(ramp(u, 0.4, 0.7));
+  s += shippingBox(boxCurrentX, boxCurrentY, boxW, boxH, BLUE, lidOpenFactor, 1);
+
+  // Item emerges from box
+  var itemEmergence = smooth(ramp(u, 0.5, 0.8));
+  var itemX = lerp(boxCurrentX, figureX + 60, itemEmergence);
+  var itemY = lerp(boxCurrentY + boxH * 0.1, figureY - figureHeight * 0.55, itemEmergence);
+  s += phone(itemX, itemY, itemSize, AMBER, 1);
+
+  // Figure pose: receiving item, then understanding
+  var pose = {
+    armL_dx: lerp(-20, -60, itemEmergence), armL_dy: lerp(80, 20, itemEmergence),
+    armR_dx: lerp(20, 60, itemEmergence), armR_dy: lerp(80, 20, itemEmergence),
+    legL_dx: -20, legL_dy: 80,
+    legR_dx: 20, legR_dy: 80
+  };
+  s += stickFigure(figureX, figureY, figureHeight, AMBER, 1, pose);
+
+  // "Understanding" glyph (gears/flow)
+  var understandOpacity = ramp(u, 0.8, 1.0);
+  var thoughtBubbleX = figureX + 100;
+  var thoughtBubbleY = figureY - figureHeight - 50;
+  var bubbleR = 60;
+  s += dot(thoughtBubbleX, thoughtBubbleY, bubbleR, DIM, understandOpacity * 0.2); // Faint bubble
+  s += ring(thoughtBubbleX, thoughtBubbleY, bubbleR, WHITE, 4, understandOpacity);
+
+  // Simple gears/flow inside
+  if (understandOpacity > 0.01) {
+    var gear1X = thoughtBubbleX - 25, gear1Y = thoughtBubbleY - 15;
+    var gear2X = thoughtBubbleX + 25, gear2Y = thoughtBubbleY + 15;
+    s += ring(gear1X, gear1Y, 15, BLUE, 4, understandOpacity);
+    s += ring(gear2X, gear2Y, 15, BLUE, 4, understandOpacity);
+    s += line(gear1X + 15, gear1Y, gear2X - 15, gear2Y, BLUE, 4, understandOpacity); // Connecting line
+  }
+
+  // Box morphs into a simple blue outline (final state)
+  var finalBoxMorph = smooth(ramp(u, 0.8, 1.0));
+  var finalBoxW = lerp(boxW, 200, finalBoxMorph);
+  var finalBoxH = lerp(boxH, 300, finalBoxMorph);
+  var finalBoxX = lerp(boxX, CX, finalBoxMorph);
+  var finalBoxY = lerp(boxY, CY, finalBoxMorph);
+  var finalBoxOp = lerp(1, 0.3, finalBoxMorph);
+  if (u > 0.8) { // Only show the simplified box at the end
+    s += rrectStroke(finalBoxX, finalBoxY, finalBoxW, finalBoxH, 12, BLUE, 6, finalBoxOp);
+  }
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() {
+  render(0);
+  window.__ready = true;
+}
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

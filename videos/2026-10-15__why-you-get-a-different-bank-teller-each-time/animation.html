@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why You Get a Different Bank Teller Each Time</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / logic
+var AMBER = "#F2A93B";              // warm amber   -> YOU / desire
+var CORAL = "#FF5B5B";              // coral red    -> naive model / confusion
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* the "you" stick figure or a teller */
+function stickFigure(x, y, col, headR, bodyH, op, pose = 'standing') {
+  op = (op == null ? 1 : op);
+  const sw = 8;
+  const headY = y - bodyH - headR;
+  const bodyTopY = y - bodyH;
+  const armLen = headR * 2.5;
+  const legLen = bodyH * 0.5;
+
+  let g = '<g opacity="' + op + '">';
+  // Head
+  g += dot(x, headY, headR, col);
+
+  // Body
+  g += line(x, bodyTopY, x, y, col, sw);
+
+  // Arms and facial expressions
+  let arm1X = x - sw / 2, arm1Y = bodyTopY + bodyH * 0.2;
+  let arm2X = x + sw / 2, arm2Y = bodyTopY + bodyH * 0.2;
+  let arm1End, arm2End;
+
+  // Default relaxed arm positions
+  arm1End = { x: x - armLen * 0.6, y: arm1Y + armLen * 0.6 };
+  arm2End = { x: x + armLen * 0.6, y: arm2Y + armLen * 0.6 };
+
+  // Facial features (eyes, mouth)
+  const eye1X = x - headR * 0.25, eye2X = x + headR * 0.25;
+  const eyeY = headY - headR * 0.2;
+  const mouthY = headY + headR * 0.3;
+
+  g += line(eye1X - sw * 0.5, eyeY, eye1X + sw * 0.5, eyeY, col, sw * 0.6); // Eye 1
+  g += line(eye2X - sw * 0.5, eyeY, eye2X + sw * 0.5, eyeY, col, sw * 0.6); // Eye 2
+
+  switch (pose) {
+    case 'confused':
+      g += line(x, headY, x - headR * 0.8, headY - headR * 0.4, col, sw); // Head tilt
+      g += line(x - headR * 0.3, mouthY, x + headR * 0.3, mouthY, col, sw * 0.8); // Straight mouth (frown)
+      arm1End = { x: x - armLen * 0.7, y: arm1Y + armLen * 0.3 }; // Elbow out, hand near hip
+      arm2End = { x: x + armLen * 0.7, y: arm2Y + armLen * 0.3 };
+      break;
+    case 'pondering':
+      g += line(x, headY, x - headR * 0.8, headY - headR * 0.4, col, sw); // Head tilt
+      g += pathTag("M " + (x - headR * 0.3) + " " + (mouthY + headR * 0.1) + " Q " + x + " " + (mouthY - headR * 0.2) + " " + (x + headR * 0.3) + " " + (mouthY + headR * 0.1), col, sw * 0.8); // Slight frown/thoughtful
+      arm1End = { x: x - armLen * 0.7, y: arm1Y + armLen * 0.7 }; // Relaxed
+      arm2End = { x: x + headR * 0.5, y: headY + headR * 0.5 }; // Hand near chin
+      break;
+    case 'understanding':
+      g += pathTag("M " + (x - headR * 0.5) + " " + (mouthY - headR * 0.1) + " Q " + x + " " + (mouthY + headR * 0.2) + " " + (x + headR * 0.5) + " " + (mouthY - headR * 0.1), col, sw * 0.8); // Smile
+      // Head slightly up (implied by just not tilting down, and the smile)
+      break;
+    default: // 'standing'
+      g += pathTag("M " + (x - headR * 0.3) + " " + (mouthY + headR * 0.1) + " Q " + x + " " + (mouthY - headR * 0.1) + " " + (x + headR * 0.3) + " " + (mouthY + headR * 0.1), col, sw * 0.8); // Neutral mouth
+  }
+  g += line(arm1X, arm1Y, arm1End.x, arm1End.y, col, sw);
+  g += line(arm2X, arm2Y, arm2End.x, arm2End.y, col, sw);
+
+  // Legs
+  g += line(x, y, x - legLen * 0.4, y + legLen * 0.8, col, sw);
+  g += line(x, y, x + legLen * 0.4, y + legLen * 0.8, col, sw);
+
+  g += '</g>';
+  return g;
+}
+
+// Teller counter
+function tellerCounter(y, width, height, col, sw, op) {
+  const x = CX;
+  const topY = y - height;
+  let s = '';
+  s += rrectStroke(x, y - height / 2, width, height, 20, col, sw, op); // Main body
+  s += line(x - width / 2, topY, x + width / 2, topY, col, sw, op); // Top surface line
+  return s;
+}
+
+// Thought bubble
+function thoughtBubble(x, y, innerContentSVG, op) {
+  const bubblePath = "M " + x + " " + y +
+                     " Q " + (x + 80) + " " + (y - 120) + " " + (x + 0) + " " + (y - 200) +
+                     " Q " + (x - 80) + " " + (y - 120) + " " + x + " " + y + " Z";
+  let g = '<g opacity="' + op + '">';
+  g += pathTag(bubblePath, WHITE, 6, op);
+  g += '<g transform="translate(' + x + ' ' + (y - 150) + ')">' + innerContentSVG + '</g>';
+  g += '</g>';
+  return g;
+}
+
+// Smiling face for thought bubble
+function smilingFace(x, y, r, col, sw) {
+  let s = '';
+  s += dot(x, y, r, col); // Face circle
+  s += line(x - r * 0.4, y - r * 0.4, x - r * 0.1, y - r * 0.4, col, sw * 0.6); // Eye 1
+  s += line(x + r * 0.1, y - r * 0.4, x + r * 0.4, y - r * 0.4, col, sw * 0.6); // Eye 2
+  s += pathTag("M " + (x - r * 0.5) + " " + (y + r * 0.2) + " Q " + x + " " + (y + r * 0.6) + " " + (x + r * 0.5) + " " + (y + r * 0.2), col, sw * 0.8); // Smile
+  return s;
+}
+
+// Question mark
+function questionMark(x, y, size, col, sw, op) {
+  const qPath = "M " + (x - size * 0.3) + " " + (y - size * 0.5) +
+                " A " + (size * 0.3) + " " + (size * 0.3) + " 0 1 1 " + (x + size * 0.3) + " " + (y - size * 0.2) +
+                " L " + (x + size * 0.1) + " " + (y + size * 0.1) +
+                " M " + x + " " + (y + size * 0.3);
+  return pathTag(qPath, col, sw, op);
+}
+
+// Teller icon (simplified head for chaotic pile)
+function tellerIcon(x, y, r, col, sw, op) {
+  let s = '';
+  s += dot(x, y, r, col, op);
+  s += line(x - r * 0.4, y - r * 0.4, x - r * 0.1, y - r * 0.4, col, sw * 0.6, op); // Eye 1
+  s += line(x + r * 0.1, y - r * 0.4, x + r * 0.4, y - r * 0.4, col, sw * 0.6, op); // Eye 2
+  return s;
+}
+
+// Service slot (rectangle with rounded corners)
+function serviceSlot(x, y, w, h, rad, col, sw, op) {
+  return rrectStroke(x, y, w, h, rad, col, sw, op);
+}
+
+// System line
+function systemLine(x1, y1, x2, y2, col, sw, op) {
+  return line(x1, y1, x2, y2, col, sw, op);
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  let s = '';
+  const counterY = BOT - 200;
+  const tellerX = CX;
+  const youStartX = CX + 200;
+  const youEndX = CX - 150;
+
+  const panX = lerp(100, 0, smooth(u * 0.9)); // Pan from right to center
+  s += '<g ' + camera(1.0, panX, 0) + '>';
+
+  const youX = lerp(youStartX, youEndX, smooth(ramp(u, 0.0, 0.4)));
+  
+  s += tellerCounter(counterY, 700, 120, WHITE, 10, 1);
+  s += stickFigure(tellerX, counterY - 100, WHITE, 20, 140, 1, 'standing'); // Teller behind counter
+
+  s += stickFigure(youX, counterY - 100, AMBER, 20, 140, 1, 'standing'); // YOU
+
+  // Thought bubble
+  const bubbleOp = ramp(u, 0.4, 0.7);
+  if (bubbleOp > 0.02) {
+    s += thoughtBubble(youX + 80, counterY - 300, smilingFace(0, 0, 20, WHITE, 5), bubbleOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  let s = '';
+  const counterY = BOT - 200;
+  const tellerX = CX;
+  const youX = CX - 150;
+
+  s += tellerCounter(counterY, 700, 120, WHITE, 10, 1);
+
+  // Sequence of tellers
+  const numTellers = 4;
+  const tellerChangeTime = 0.2; // Each teller stays for 20% of the scene time
+  const currentTellerIdx = Math.floor(u / tellerChangeTime);
+  const tellerOp = 1; // Always visible
+
+  // Use rnd to slightly vary teller look but keep it deterministic per index
+  s += stickFigure(tellerX + (rnd(currentTellerIdx) - 0.5) * 10, counterY - 100, WHITE, 20, 140, tellerOp, 'standing');
+
+  // YOU's confusion
+  const confusionLevel = ramp(u, 0.7, 0.9);
+  s += stickFigure(youX, counterY - 100, AMBER, 20, 140, 1, confusionLevel > 0.5 ? 'confused' : 'standing');
+
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH — is something targeting me? (funnel + coral beam on the OTHER lane) */
+function scene3(u) {
+  let s = '';
+  const counterY = BOT - 200;
+  const tellerX = CX;
+  const youX = CX - 150;
+
+  const scale = lerp(1.0, 1.1, smooth(u));
+  s += '<g ' + camera(scale, 0, 0) + '>';
+
+  s += tellerCounter(counterY, 700, 120, WHITE, 10, 1);
+  s += stickFigure(tellerX, counterY - 100, WHITE, 20, 140, 1, 'standing'); // One generic teller
+
+  s += stickFigure(youX, counterY - 100, AMBER, 20, 140, 1, 'pondering'); // YOU pondering
+
+  // Question mark / chaotic pile
+  const qMarkOp = 1 - smooth(ramp(u, 0.3, 0.5));
+  if (qMarkOp > 0.02) {
+    s += questionMark(youX + 100, counterY - 300, 80, CORAL, 10, qMarkOp);
+  }
+
+  const pileOp = smooth(ramp(u, 0.4, 0.8));
+  if (pileOp > 0.02) {
+    const numIcons = 10;
+    for (let i = 0; i < numIcons; i++) {
+      const iconX = youX + 100 + Math.sin(u * 10 + rnd(i) * 10) * 60 * (1 - pileOp) + (rnd(i) - 0.5) * 100 * pileOp;
+      const iconY = counterY - 300 + Math.cos(u * 12 + rnd(i + 10) * 10) * 50 * (1 - pileOp) + (rnd(i + 10) - 0.5) * 120 * pileOp;
+      s += tellerIcon(iconX, iconY, 15, CORAL, 4, pileOp);
+    }
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND — belts; slow lane passed for minutes, fast lane overtakes in seconds */
+function scene4(u) {
+  let s = '';
+  const counterY = BOT - 200;
+  const tellerX = CX;
+
+  // Transformation from counter to system diagram
+  const transform = smooth(ramp(u, 0.0, 0.3));
+  const counterOp = 1 - transform;
+  const systemOp = transform;
+
+  // Basic counter fading out
+  if (counterOp > 0.02) {
+    s += tellerCounter(counterY, 700, 120, WHITE, 10, counterOp);
+    s += stickFigure(tellerX, counterY - 100, WHITE, 20, 140, counterOp, 'standing');
+  }
+
+  // System diagram fading in
+  if (systemOp > 0.02) {
+    const slotW = 180, slotH = 100;
+    const slotY = [TOP + 200, CY, BOT - 200];
+    const slotX = [CX - 250, CX + 250];
+
+    // Service slots
+    for (let i = 0; i < slotY.length; i++) {
+      for (let j = 0; j < slotX.length; j++) {
+        s += serviceSlot(slotX[j], slotY[i], slotW, slotH, 20, BLUE, 4, systemOp);
+      }
+    }
+
+    // Connecting lines (tasks/skills)
+    s += systemLine(slotX[0], slotY[0], slotX[1], slotY[1], BLUE, 6, systemOp);
+    s += systemLine(slotX[1], slotY[0], slotX[0], slotY[1], BLUE, 6, systemOp);
+    s += systemLine(slotX[0], slotY[1], slotX[1], slotY[2], BLUE, 6, systemOp);
+    s += systemLine(slotX[1], slotY[1], slotX[0], slotY[2], BLUE, 6, systemOp);
+    s += systemLine(slotX[0], slotY[0], slotX[0], slotY[1], BLUE, 6, systemOp * 0.5);
+    s += systemLine(slotX[1], slotY[0], slotX[1], slotY[1], BLUE, 6, systemOp * 0.5);
+
+    // Tellers moving purposefully
+    const numTellers = 4;
+    for (let i = 0; i < numTellers; i++) {
+      const pathPhase = (u * 0.5 + rnd(i)) % 1; // Different paths for different tellers
+      let curX, curY;
+      if (i % 2 === 0) { // Simple horizontal back and forth
+        curX = lerp(slotX[0], slotX[1], smooth(Math.sin(pathPhase * Math.PI * 2) * 0.5 + 0.5));
+        curY = slotY[Math.floor(rnd(i + 10) * slotY.length)];
+      } else { // Diagonal movement
+        const startSlot = Math.floor(rnd(i + 20) * slotY.length);
+        const endSlot = Math.floor(rnd(i + 30) * slotY.length);
+        curX = lerp(slotX[i % 2], slotX[(i + 1) % 2], pathPhase);
+        curY = lerp(slotY[startSlot], slotY[endSlot], pathPhase);
+      }
+      s += stickFigure(curX, curY - 50, WHITE, 15, 100, systemOp, 'standing');
+    }
+  }
+
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE — losing moments stack into a tall coral memory column */
+function scene5(u) {
+  let s = '';
+  const splitX = CX; // Vertical split line
+
+  const tellerY = BOT - 200;
+  const headR = 15, bodyH = 100;
+
+  // Left side: Single long amber queue (inefficient)
+  const leftTellerX = CX - 250;
+  s += tellerCounter(tellerY, 200, 90, WHITE, 8, 1); // Simple counter for the single teller
+  s += stickFigure(leftTellerX, tellerY - 50, WHITE, headR, bodyH, 1, 'standing'); // The specific teller
+
+  const queueLength = lerp(2, 12, smooth(ramp(u, 0.0, 0.5))); // Queue grows
+  const collapse = smooth(ramp(u, 0.8, 0.95)); // Queue collapses
+  const collapseOffset = collapse * (BOT - TOP);
+
+  for (let i = 0; i < queueLength; i++) {
+    const personY = BOT - 100 - i * 70 + collapseOffset;
+    if (personY > TOP && personY < BOT) {
+      s += stickFigure(leftTellerX, personY, AMBER, headR, bodyH, 1, 'standing');
+      if (i > 3 && u > 0.4 && collapse < 0.1) { // Show frustration for longer queues
+        s += dot(leftTellerX + 40, personY - 40, 6, CORAL, 0.8); // Frustration dot
+      }
+    }
+  }
+
+  s += line(splitX, TOP, splitX, BOT, WHITE, 2, 0.2); // Visual split
+
+  // Right side: Efficient multiple queues (blue system)
+  const rightTellerX1 = CX + 150;
+  const rightTellerX2 = CX + 350;
+  const slotW = 160, slotH = 90;
+  const systemOp = 0.8;
+
+  s += serviceSlot(rightTellerX1, tellerY, slotW, slotH, 20, BLUE, 4, systemOp);
+  s += serviceSlot(rightTellerX2, tellerY, slotW, slotH, 20, BLUE, 4, systemOp);
+  s += stickFigure(rightTellerX1, tellerY - 50, WHITE, headR, bodyH, systemOp, 'standing');
+  s += stickFigure(rightTellerX2, tellerY - 50, WHITE, headR, bodyH, systemOp, 'standing');
+
+  const numRightQueues = 2;
+  const queueLenR = 4;
+  for (let q = 0; q < numRightQueues; q++) {
+    for (let i = 0; i < queueLenR; i++) {
+      const personY = BOT - 100 - i * 80 - (u * 100 + rnd(q * 10 + i) * 20) % (queueLenR * 80);
+      if (personY > TOP && personY < BOT) {
+        s += stickFigure(rightTellerX1 + q * 200, personY, DIM, headR, bodyH, systemOp * 0.8, 'standing');
+      }
+    }
+  }
+
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE — one shared finish line, then snap back to plain lanes */
+function scene6(u) {
+  let s = '';
+  const counterY = BOT - 200;
+  const tellerX = CX;
+  const youStartX = CX + 200;
+  const youEndX = CX - 150;
+
+  const youX = lerp(youStartX, youEndX, smooth(ramp(u, 0.0, 0.4)));
+  
+  s += tellerCounter(counterY, 700, 120, WHITE, 10, 1);
+  s += stickFigure(tellerX, counterY - 100, WHITE, 20, 140, 1, 'standing'); // Teller behind counter
+
+  // YOU with understanding
+  const understanding = ramp(u, 0.6, 0.9);
+  s += stickFigure(youX, counterY - 100, AMBER, 20, 140, 1, understanding > 0.5 ? 'understanding' : 'standing');
+
+  // Subtle blue system lines emanating from the counter
+  const blueLineOp = ramp(u, 0.3, 0.7);
+  if (blueLineOp > 0.02) {
+    const numLines = 8;
+    for (let i = 0; i < numLines; i++) {
+      const angle = (i / numLines) * Math.PI * 0.8 + Math.PI * 0.1; // Fan out from counter
+      const len = lerp(50, 200, smooth(u));
+      const x1 = CX + Math.cos(angle) * 350;
+      const y1 = counterY - 60 + Math.sin(angle) * 60;
+      const x2 = x1 + Math.cos(angle) * len;
+      const y2 = y1 - Math.sin(angle) * len;
+      s += line(x1, y1, x2, y2, BLUE, 4, blueLineOp * (0.5 + 0.5 * Math.sin(u * 5 + rnd(i))));
+    }
+  }
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
