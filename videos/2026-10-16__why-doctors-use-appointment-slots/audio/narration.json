@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You wake up feeling unwell, and all you want is to see a doctor, right now. You need help, and quickly.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "But when you call, they don't say \"come right in.\" Instead, you're offered a specific time slot, perhaps days away.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "It feels frustrating. Why can't you just show up and be seen first-come, first-served? You might think it's just bad organization.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "This isn't just a queue; it's a system. Appointment slots balance unpredictable patient demand with limited doctor availability, ensuring dedicated time for your care.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "The \"cost\" is waiting longer *before* your visit, but the gain is a much shorter, more focused wait *during* your visit. This system avoids chaotic clinic waits.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "So next time you book, you'll still feel the initial wait. But now you understand it's a clever design, making sure everyone gets efficient, quality care.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

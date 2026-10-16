@@ -1,0 +1,15 @@
+{
+  "id": "why-doctors-use-appointment-slots",
+  "slug": "2026-10-16__why-doctors-use-appointment-slots",
+  "title_working": "Why Doctors Use Appointment Slots",
+  "system": "scheduling for queue management and resource allocation",
+  "cluster": "queues-and-waiting",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-10-16T11:25:00+00:00",
+  "produced_at": "2026-10-16T11:31:05+00:00",
+  "verify": "PASS",
+  "takeaway": "Appointment slots optimize doctor availability and patient wait times in a complex system, rather than just delaying your visit.",
+  "animation_source": "llm"
+}

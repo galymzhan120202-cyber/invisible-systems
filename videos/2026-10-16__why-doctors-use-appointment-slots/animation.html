@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Doctors Use Appointment Slots</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / the rule
+var AMBER = "#F2A93B";              // warm amber   -> YOU / the patient
+var CORAL = "#FF5B5B";              // coral red    -> the naive model / disruption
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function chevron(x, y, size, col, op) {
+  var d = "M " + (x - size) + " " + (y + size * 0.55) + " L " + x + " " + (y - size * 0.55) + " L " + (x + size) + " " + (y + size * 0.55);
+  return pathTag(d, col, 14, op);
+}
+
+// Stick figure: head (circle), body (line), arms (lines), legs (lines)
+function stickFigure(x, y, col, height, pose, op) {
+  op = (op == null ? 1 : op);
+  var headR = height * 0.1;
+  var bodyH = height * 0.4;
+  var limbL = height * 0.3;
+  var g = '<g opacity="' + op + '" stroke="' + col + '" stroke-width="8" stroke-linecap="round">';
+  // Head
+  g += dot(x, y - height / 2 + headR, headR, col);
+  // Body
+  g += line(x, y - height / 2 + headR * 2, x, y - height / 2 + headR * 2 + bodyH, col, 8);
+  var bodyBottom = y - height / 2 + headR * 2 + bodyH;
+
+  // Arms: pose 0=neutral, 1=waiting (hands down), 2=gesturing (arms out)
+  if (pose === 1) { // Waiting, hands down
+    g += line(x, bodyBottom - bodyH * 0.2, x - limbL * 0.6, bodyBottom + limbL * 0.4, col, 8);
+    g += line(x, bodyBottom - bodyH * 0.2, x + limbL * 0.6, bodyBottom + limbL * 0.4, col, 8);
+  } else if (pose === 2) { // Gesturing, arms out
+    g += line(x, bodyBottom - bodyH * 0.2, x - limbL * 0.8, bodyBottom - limbL * 0.4, col, 8);
+    g += line(x, bodyBottom - bodyH * 0.2, x + limbL * 0.8, bodyBottom - limbL * 0.4, col, 8);
+  } else { // Neutral
+    g += line(x, bodyBottom - bodyH * 0.2, x - limbL * 0.5, bodyBottom + limbL * 0.2, col, 8);
+    g += line(x, bodyBottom - bodyH * 0.2, x + limbL * 0.5, bodyBottom + limbL * 0.2, col, 8);
+  }
+
+  // Legs
+  g += line(x, bodyBottom, x - limbL * 0.4, bodyBottom + limbL * 0.8, col, 8);
+  g += line(x, bodyBottom, x + limbL * 0.4, bodyBottom + limbL * 0.8, col, 8);
+
+  g += '</g>';
+  return g;
+}
+
+// Doctor specific details (e.g., a cross on chest)
+function doctorFigure(x, y, height, pose, op) {
+  var s = stickFigure(x, y, WHITE, height, pose, op);
+  var chestY = y - height / 2 + height * 0.1 * 2 + height * 0.2; // roughly mid-chest
+  s += line(x - 10, chestY, x + 10, chestY, CORAL, 6, op);
+  s += line(x, chestY - 10, x, chestY + 10, CORAL, 6, op);
+  return s;
+}
+
+// Patient specific details (amber color)
+function patientFigure(x, y, height, pose, op) {
+  return stickFigure(x, y, AMBER, height, pose, op);
+}
+
+// Queue line
+function queueLine(x1, y, x2, col, sw, op) {
+  return line(x1, y, x2, y, col, sw, op);
+}
+
+// Queue person (simple rectangle)
+function queuePerson(x, y, w, h, col, op) {
+  return rrect(x, y, w, h, 8, col, op);
+}
+
+// Clock: circle with two hands
+function clock(x, y, r, col, sw, hourAngle, minAngle, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, r, col, sw); // Clock face
+  // Hour hand
+  g += line(x, y, x + r * 0.5 * Math.sin(hourAngle), y - r * 0.5 * Math.cos(hourAngle), col, sw * 0.8);
+  // Minute hand
+  g += line(x, y, x + r * 0.8 * Math.sin(minAngle), y - r * 0.8 * Math.cos(minAngle), col, sw * 0.6);
+  g += dot(x, y, sw * 0.5, col); // Center dot
+  g += '</g>';
+  return g;
+}
+
+// Desk/Counter
+function desk(x, y, w, h, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y - h/2, w, h, 12, col, op); // Top surface
+  g += line(x - w/2 + sw/2, y - h/2, x - w/2 + sw/2, y + h/2 + 80, col, sw, op); // Left leg
+  g += line(x + w/2 - sw/2, y - h/2, x + w/2 - sw/2, y + h/2 + 80, col, sw, op); // Right leg
+  g += '</g>';
+  return g;
+}
+
+// Door (simple rectangle)
+function door(x, y, w, h, col, sw, op) {
+  return rrectStroke(x, y, w, h, 10, col, sw, op);
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+var FIG_H = 220; // Standard figure height
+var FIG_SW = 8;  // Standard figure stroke width
+
+/* SCENE 1 (0-10): The Problem - Long Queue, Unpredictable Wait */
+function scene1(u) {
+  var s = '';
+  var queueY = BOT - 100; // Base Y for the queue
+  var queueX_start = CX - 200; // Starting X for the queue
+  var deskY = TOP + 280;
+  var doctorX = CX + 200;
+
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  // Doctor behind desk
+  s += desk(doctorX, deskY, 200, 120, WHITE, FIG_SW, 0.8);
+  s += doctorFigure(doctorX, deskY - FIG_H/2 - 20, FIG_H, 0, 1); // Doctor standing behind desk
+
+  // Queue line
+  var lineLen = 800;
+  var queueX_end = queueX_start + lineLen;
+  s += queueLine(queueX_start, queueY, queueX_end, WHITE, FIG_SW, 0.7);
+
+  // Queue people (grey rectangles)
+  var numQueue = 6;
+  var queueSpacing = 120;
+  var queueMotion = u * 40; // Slow motion
+  for (var i = 0; i < numQueue; i++) {
+    var personX = queueX_end - i * queueSpacing - queueMotion + rnd(i) * 10;
+    while (personX < queueX_start - 50) personX += numQueue * queueSpacing; // Wrap around
+    s += queuePerson(personX, queueY - 40, 60, 80, DIM, 0.8);
+  }
+
+  // Patient (amber) at the end of the queue
+  var patientX = queueX_end + 100 - queueMotion * 0.5; // Patient moves slightly slower
+  s += patientFigure(patientX, queueY - FIG_H/2 - 20, FIG_H, 1, 1); // Patient waiting pose
+
+  // Clock showing time passing
+  var clockR = 80;
+  var clockX = CX + 400;
+  var clockY = TOP + 180;
+  var minAngle = u * Math.PI * 2 * 0.5; // Half a rotation over 10s
+  var hourAngle = minAngle / 12;
+  s += clock(clockX, clockY, clockR, WHITE, 7, hourAngle, minAngle, 0.9);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): The "Naive" Solution - First-Come, First-Served */
+function scene2(u) {
+  var s = '';
+  var queueY = BOT - 100;
+  var queueX_start = CX - 200;
+  var deskY = TOP + 280;
+  var doctorX = CX + 200;
+  var doorX = doctorX - 180;
+  var doorH = FIG_H + 80;
+
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14);
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+
+  s += desk(doctorX, deskY, 200, 120, WHITE, FIG_SW, 0.8);
+  s += doctorFigure(doctorX, deskY - FIG_H/2 - 20, FIG_H, 0, 1);
+
+  var lineLen = 800;
+  var queueX_end = queueX_start + lineLen;
+  s += queueLine(queueX_start, queueY, queueX_end, WHITE, FIG_SW, 0.7);
+
+  var numQueue = 6;
+  var queueSpacing = 120;
+  var queueMotion = u * 60; // Faster, more erratic motion
+  for (var i = 0; i < numQueue; i++) {
+    var personX = queueX_end - i * queueSpacing - queueMotion + rnd(i) * 20 * Math.sin(u * 10); // Erratic movement
+    while (personX < queueX_start - 50) personX += numQueue * queueSpacing;
+    s += queuePerson(personX, queueY - 40, 60, 80, DIM, 0.8);
+  }
+
+  var patientX = queueX_end + 100 - queueMotion * 0.5;
+  s += patientFigure(patientX, queueY - FIG_H/2 - 20, FIG_H, 1, 1);
+
+  // "Wait time" indicator (coral bar) above patient
+  var waitBarW = lerp(0, 180, easeOut(Math.sin(u * Math.PI * 2) * 0.5 + 0.5)); // Pulsating/erratic growth
+  s += rrect(patientX, queueY - FIG_H - 60, waitBarW, 30, 10, CORAL, 0.9);
+  if (waitBarW > 10) s += dot(patientX + waitBarW/2 - 10, queueY - FIG_H - 60, 10, CORAL, 0.9); // Small indicator on bar
+
+  // Door where people enter/exit
+  s += door(doorX, BOT - doorH/2 - 20, 100, doorH, WHITE, 7, 0.6);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): Introducing Appointment Slots - Fixed Intervals */
+function scene3(u) {
+  var s = '';
+  var queueY = BOT - 100;
+  var deskY = TOP + 280;
+  var doctorX = CX + 200;
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  s += desk(doctorX, deskY, 200, 120, WHITE, FIG_SW, 0.8);
+  s += doctorFigure(doctorX, deskY - FIG_H/2 - 20, FIG_H, 0, 1);
+
+  // Queue morphs from line to slots
+  var lineLen = 800;
+  var queueX_start = CX - 200;
+  var queueX_end = queueX_start + lineLen;
+  var slotSpacing = 160;
+  var numSlots = 5;
+
+  var slotsMorph = smooth(ramp(u, 0.1, 0.6)); // Morphing progress
+
+  // Continuous line (fades out)
+  s += queueLine(queueX_start, queueY, queueX_end, WHITE, FIG_SW, 0.7 * (1 - slotsMorph));
+
+  // Individual slots (fade in and position)
+  for (var i = 0; i < numSlots; i++) {
+    var slotX = queueX_start + i * slotSpacing + slotSpacing / 2;
+    var slotW = 100;
+    var slotH = 60;
+    var currentSlotY = queueY - slotH/2;
+
+    // Morph position and opacity
+    var morphW = lerp(FIG_SW, slotW, slotsMorph);
+    var morphH = lerp(FIG_SW, slotH, slotsMorph);
+    var morphOpacity = slotsMorph * 0.9;
+
+    s += rrect(slotX, currentSlotY, morphW, morphH, 8, BLUE, morphOpacity);
+  }
+
+  // Patient (amber) moves into a slot
+  var patientSlotIdx = 2; // Patient in the 3rd slot
+  var patientTargetX = queueX_start + patientSlotIdx * slotSpacing + slotSpacing / 2;
+  var patientX = lerp(queueX_end + 100, patientTargetX, easeOut(slotsMorph));
+  s += patientFigure(patientX, queueY - FIG_H/2 - 20, FIG_H, 0, 1);
+
+  // Clock with marked intervals
+  var clockR = 80;
+  var clockX = CX + 400;
+  var clockY = TOP + 180;
+  var minAngle = u * Math.PI * 2 * 0.5;
+  var hourAngle = minAngle / 12;
+  s += clock(clockX, clockY, clockR, WHITE, 7, hourAngle, minAngle, 0.9);
+  // Add interval marks (small lines on the clock edge)
+  for (var k = 0; k < 4; k++) { // 4 intervals
+    var angle = k * Math.PI / 2;
+    s += line(clockX + clockR * Math.sin(angle), clockY - clockR * Math.cos(angle),
+              clockX + (clockR - 10) * Math.sin(angle), clockY - (clockR - 10) * Math.cos(angle),
+              BLUE, 4, 0.8 * slotsMorph);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): Benefits of Slots - Predictability & Efficiency */
+function scene4(u) {
+  var s = '';
+  var queueY = BOT - 100;
+  var deskY = TOP + 280;
+  var doctorX = CX + 200;
+  var doorX = doctorX - 180;
+  var doorH = FIG_H + 80;
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  s += desk(doctorX, deskY, 200, 120, WHITE, FIG_SW, 0.8);
+  s += doctorFigure(doctorX, deskY - FIG_H/2 - 20, FIG_H, 0, 1);
+  s += door(doorX, BOT - doorH/2 - 20, 100, doorH, WHITE, 7, 0.6);
+
+  var slotSpacing = 160;
+  var numSlots = 4; // Fewer slots to focus on flow
+  var patientSlotIdx = 0; // Patient is now in the first slot
+  var queueX_start = CX - 200;
+
+  // Slots (blue rectangles)
+  for (var i = 0; i < numSlots; i++) {
+    var slotX = queueX_start + i * slotSpacing + slotSpacing / 2;
+    var slotW = 100;
+    var slotH = 60;
+    s += rrect(slotX, queueY - slotH/2, slotW, slotH, 8, BLUE, 0.9);
+
+    // Small timer/progress indicator for each slot
+    var progress = (u * 2 + rnd(i + 10)) % 1; // Each slot has its own progress
+    var timerX = slotX - slotW/2 + 5;
+    var timerY = queueY - slotH - 20;
+    s += rrect(timerX, timerY, slotW - 10, 16, 4, DIM, 0.4);
+    s += rrect(timerX, timerY, (slotW - 10) * progress, 16, 4, BLUE, 0.8);
+  }
+
+  // Patient (amber) moves from slot to door
+  var patientStartX = queueX_start + patientSlotIdx * slotSpacing + slotSpacing / 2;
+  var patientDoorY = BOT - doorH/2 - 20;
+
+  var patientMove = smooth(ramp(u, 0.1, 0.8));
+  var currentPatientX = lerp(patientStartX, doorX, patientMove);
+  var currentPatientY = lerp(queueY - FIG_H/2 - 20, patientDoorY, patientMove);
+  // Add a slight arc for the path
+  if (patientMove > 0.01 && patientMove < 0.99) {
+    var arcY = Math.sin(patientMove * Math.PI) * 50;
+    currentPatientY -= arcY;
+  }
+
+  s += patientFigure(currentPatientX, currentPatientY, FIG_H, patientMove > 0.1 && patientMove < 0.9 ? 2 : 0, 1); // Gesturing while moving
+
+  // Flow indicator (blue arrows/lines)
+  for (var j = 0; j < 3; j++) {
+    var flowProg = (u * 1.5 + j / 3) % 1;
+    var flowX = lerp(patientStartX - 80, doorX + 80, flowProg);
+    var flowY = lerp(queueY - 40, patientDoorY, flowProg);
+    s += chevron(flowX, flowY, 20, BLUE, (1 - flowProg) * 0.6);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): Handling Emergencies/Variations */
+function scene5(u) {
+  var s = '';
+  var queueY = BOT - 100;
+  var deskY = TOP + 280;
+  var doctorX = CX + 200;
+  var doorX = doctorX - 180;
+  var doorH = FIG_H + 80;
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  s += desk(doctorX, deskY, 200, 120, WHITE, FIG_SW, 0.8);
+  s += doctorFigure(doctorX, deskY - FIG_H/2 - 20, FIG_H, 0, 1);
+  s += door(doorX, BOT - doorH/2 - 20, 100, doorH, WHITE, 7, 0.6);
+
+  var slotSpacing = 160;
+  var numSlots = 4;
+  var disruptedSlotIdx = 1; // The second slot is disrupted
+  var queueX_start = CX - 200;
+
+  var disruption = smooth(ramp(u, 0.2, 0.5)); // Disruption phase
+  var readjustment = smooth(ramp(u, 0.6, 0.9)); // Readjustment phase
+
+  for (var i = 0; i < numSlots; i++) {
+    var baseSlotX = queueX_start + i * slotSpacing + slotSpacing / 2;
+    var slotW = 100;
+    var slotH = 60;
+    var slotColor = BLUE;
+    var currentSlotX = baseSlotX;
+
+    if (i === disruptedSlotIdx) {
+      slotColor = CORAL;
+      var explodeScale = 1 + disruption * 0.5;
+      var explodeOpacity = 1 - disruption * 0.8;
+      s += rrect(baseSlotX, queueY - slotH/2, slotW * explodeScale, slotH * explodeScale, 8, slotColor, explodeOpacity);
+    } else {
+      // Slots after the disrupted one shift left
+      if (i > disruptedSlotIdx) {
+        currentSlotX = lerp(baseSlotX, baseSlotX - slotSpacing * readjustment, readjustment);
+      }
+      s += rrect(currentSlotX, queueY - slotH/2, slotW, slotH, 8, slotColor, 0.9);
+    }
+  }
+
+  // Patient (amber) is in the first slot, then moves towards door, but pauses/redirects
+  var patientStartX = queueX_start + 0 * slotSpacing + slotSpacing / 2;
+  var patientDoorY = BOT - doorH/2 - 20;
+
+  var patientMoveToDoor = smooth(ramp(u, 0.0, 0.3));
+  var patientPause = smooth(ramp(u, 0.3, 0.6));
+  var patientRedirect = smooth(ramp(u, 0.7, 0.9));
+
+  var currentPatientX = lerp(patientStartX, doorX, patientMoveToDoor);
+  var currentPatientY = lerp(queueY - FIG_H/2 - 20, patientDoorY, patientMoveToDoor);
+
+  var patientPose = 0;
+  if (patientPause > 0 && patientPause < 1) {
+    // Patient pauses and looks at the disrupted slot
+    currentPatientX = lerp(currentPatientX, patientStartX + slotSpacing * 0.5, patientPause); // Moves back slightly
+    patientPose = 2; // Gesturing/confused
+  }
+  if (patientRedirect > 0) {
+    // Patient redirected to a different path or waits longer
+    currentPatientX = lerp(currentPatientX, patientStartX + slotSpacing * 0.5 - 100, patientRedirect); // Moves further back
+    patientPose = 1; // Waiting again
+  }
+
+  s += patientFigure(currentPatientX, currentPatientY, FIG_H, patientPose, 1);
+
+  // Doctor's reaction
+  var doctorGazeX = lerp(doctorX, queueX_start + disruptedSlotIdx * slotSpacing + slotSpacing / 2, disruption);
+  var doctorGazeY = lerp(deskY - FIG_H/2 - 50, queueY - slotH/2, disruption);
+  s += line(doctorX, deskY - FIG_H/2 - 50, doctorGazeX, doctorGazeY, WHITE, 4, 0.6 * disruption); // Gaze line
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): Conclusion - The Organized System */
+function scene6(u) {
+  var s = '';
+  var queueY = BOT - 100;
+  var deskY = TOP + 280;
+  var doctorX = CX + 200;
+  var doorX = doctorX - 180;
+  var doorH = FIG_H + 80;
+
+  var scale = lerp(1.0, 0.92, smooth(clamp(u / 0.7, 0, 1)));
+  s += '<g ' + camera(scale, 0, lerp(90, 0, smooth(u))) + '>';
+
+  s += desk(doctorX, deskY, 200, 120, WHITE, FIG_SW, 0.8);
+  s += doctorFigure(doctorX, deskY - FIG_H/2 - 20, FIG_H, 0, 1);
+  s += door(doorX, BOT - doorH/2 - 20, 100, doorH, WHITE, 7, 0.6);
+
+  var slotSpacing = 160;
+  var numSlots = 4;
+  var startQueueX = CX - 200;
+  var endQueueX = startQueueX + (numSlots - 1) * slotSpacing;
+  var patientDoorY = BOT - doorH/2 - 20;
+
+  // Underlying system grid (blue)
+  var gridOpacity = lerp(0.1, 0.3, smooth(u));
+  for (var i = 0; i < numSlots + 1; i++) {
+    s += line(startQueueX + i * slotSpacing - slotSpacing/2, TOP + 100, startQueueX + i * slotSpacing - slotSpacing/2, BOT, BLUE, 2, gridOpacity);
+  }
+  s += line(startQueueX, queueY - 100, endQueueX + slotSpacing, queueY - 100, BLUE, 2, gridOpacity);
+  s += line(startQueueX, queueY + 50, endQueueX + slotSpacing, queueY + 50, BLUE, 2, gridOpacity);
+
+
+  // Slots (blue rectangles)
+  for (var i = 0; i < numSlots; i++) {
+    var slotX = startQueueX + i * slotSpacing + slotSpacing / 2;
+    var slotW = 100;
+    var slotH = 60;
+    s += rrect(slotX, queueY - slotH/2, slotW, slotH, 8, BLUE, 0.9);
+  }
+
+  // Patients flowing through slots
+  var patientFlowSpeed = u * 0.8;
+  for (var j = 0; j < 3; j++) { // 3 patients in various stages of flow
+    var flowProg = (patientFlowSpeed + j / 3) % 1;
+    var patientX = lerp(startQueueX - 100, doorX, flowProg);
+    var patientY = lerp(queueY - FIG_H/2 - 20, patientDoorY, smooth(flowProg)); // Arc towards door
+
+    // Ensure patients are visible and distinct
+    if (patientX > startQueueX - 150 && patientX < doorX + 50) {
+      s += patientFigure(patientX, patientY, FIG_H, 0, 0.8 * (1 - Math.abs(flowProg - 0.5) * 0.8)); // Fade at start/end
+    }
+  }
+
+  // Final patient (amber) exiting happily
+  var finalPatientMove = smooth(ramp(u, 0.7, 1.0));
+  var finalPatientX = lerp(doorX, doorX + 150, finalPatientMove);
+  var finalPatientY = lerp(patientDoorY, patientDoorY - 50, finalPatientMove);
+  s += patientFigure(finalPatientX, finalPatientY, FIG_H, 0, 1); // Happy, neutral pose
+
+  // A "checkmark" or "success" glyph near the door
+  var checkmarkOpacity = smooth(ramp(u, 0.8, 0.95));
+  if (checkmarkOpacity > 0.05) {
+    s += pathTag("M " + (doorX + 100) + " " + (patientDoorY + 40) + " L " + (doorX + 130) + " " + (patientDoorY + 70) + " L " + (doorX + 180) + " " + (patientDoorY + 20), BLUE, 10, checkmarkOpacity);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Games Show Loading Screen Tips</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots / elements
+var BLUE  = "#4C86F0";              // signal blue  -> the screen, the system of tips
+var AMBER = "#F2A93B";              // warm amber   -> the player, their controller
+var CORAL = "#FF5B5B";              // coral red    -> frustration, waiting, progress
+
+var DUR = 60;
+window.__duration = DUR;
+
+// Hero element positions
+var PLAYER_X = CX;
+var PLAYER_Y = BOT - 280; // Adjusted for full stick figure height
+var SCREEN_W = 700;
+var SCREEN_H = 1000;
+var SCREEN_X = CX;
+var SCREEN_Y = TOP + SCREEN_H / 2 + 80;
+var CONTROLLER_X = CX;
+var CONTROLLER_Y = PLAYER_Y - 100;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+// Helper for lerping colors (simple, for 2 colors)
+function lerpColor(c1, c2, t) {
+  var r1 = parseInt(c1.substring(1, 3), 16);
+  var g1 = parseInt(c1.substring(3, 5), 16);
+  var b1 = parseInt(c1.substring(5, 7), 16);
+  var r2 = parseInt(c2.substring(1, 3), 16);
+  var g2 = parseInt(c2.substring(3, 5), 16);
+  var b2 = parseInt(c2.substring(5, 7), 16);
+
+  var r = Math.round(lerp(r1, r2, t));
+  var g = Math.round(lerp(g1, g2, t));
+  var b = Math.round(lerp(b1, b2, t));
+
+  return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
+}
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom elements ---------- */
+// Stick figure: x, y is center of torso. armAngle: 0=down, PI/2=forward. headLookX: 0=straight, +ve=right.
+function stickFigure(x, y, armAngle, headLookX, col, sw, op) {
+  op = (op == null ? 1 : op);
+  sw = sw || 10;
+  var g = '<g opacity="' + op + '">';
+  var headR = 30;
+  var bodyLen = 100;
+  var armLen = 80;
+  var legLen = 100;
+
+  var headCx = x + headLookX * 15;
+  var headCy = y - bodyLen / 2 - headR - 10;
+  var shoulderY = y - bodyLen / 2;
+  var hipY = y + bodyLen / 2;
+
+  // Head
+  g += dot(headCx, headCy, headR, col);
+  // Body
+  g += line(x, shoulderY, x, hipY, col, sw);
+  // Arms (bent forward)
+  var armOffset = 20; // Distance from center line for shoulders/hips
+  var armStartX = x - armOffset;
+  var armEndX = armStartX + armLen * Math.cos(armAngle);
+  var armEndY = shoulderY + 5 + armLen * Math.sin(armAngle);
+  g += line(armStartX, shoulderY + 5, armEndX, armEndY, col, sw); // Left arm
+  g += line(x + armOffset, shoulderY + 5, x + armOffset + armLen * Math.cos(armAngle), armEndY, col, sw); // Right arm
+  // Hands (small dots at end of arms)
+  g += dot(armEndX, armEndY, sw / 2, col);
+  g += dot(x + armOffset + armLen * Math.cos(armAngle), armEndY, sw / 2, col);
+
+  // Legs (fixed pose)
+  g += line(x - armOffset, hipY, x - armOffset, hipY + legLen, col, sw); // Left leg
+  g += line(x + armOffset, hipY, x + armOffset, hipY + legLen, col, sw); // Right leg
+  // Feet
+  g += dot(x - armOffset, hipY + legLen, sw / 2, col);
+  g += dot(x + armOffset, hipY + legLen, sw / 2, col);
+
+  g += '</g>';
+  return g;
+}
+
+// Game controller: x, y is center.
+function controller(x, y, col, sw, op) {
+  op = (op == null ? 1 : op);
+  sw = sw || 10;
+  var g = '<g opacity="' + op + '">';
+  var bodyW = 180, bodyH = 100, bodyR = 40;
+  var stickR = 12;
+  var triggerW = 40, triggerH = 16;
+
+  // Body
+  g += rrectStroke(x, y, bodyW, bodyH, bodyR, col, sw);
+  // Thumbsticks
+  g += dot(x - 40, y + 15, stickR, col);
+  g += dot(x + 40, y + 15, stickR, col);
+  // Triggers (top corners) - fill these
+  g += rrect(x - bodyW/2 + triggerW/2, y - bodyH/2 - triggerH/2, triggerW, triggerH, 8, col);
+  g += rrect(x + bodyW/2 - triggerW/2, y - bodyH/2 - triggerH/2, triggerW, triggerH, 8, col);
+
+  g += '</g>';
+  return g;
+}
+
+// Game screen: x, y is center.
+function gameScreen(x, y, w, h, col, sw, op) {
+  op = (op == null ? 1 : op);
+  sw = sw || 10;
+  return rrectStroke(x, y, w, h, 20, col, sw, op);
+}
+
+// X glyph (frustration)
+function xGlyph(x, y, size, col, sw, op) {
+  sw = sw || 10;
+  var d = "M " + (x - size / 2) + " " + (y - size / 2) + " L " + (x + size / 2) + " " + (y + size / 2) +
+          " M " + (x + size / 2) + " " + (y - size / 2) + " L " + (x - size / 2) + " " + (y + size / 2);
+  return pathTag(d, col, sw, op);
+}
+
+// Question mark glyph
+function questionMark(x, y, size, col, sw, op) {
+  sw = sw || 10;
+  var headR = size * 0.3;
+  var stemLen = size * 0.4;
+  var dotR = size * 0.1;
+  var d = "M " + (x - headR) + " " + (y - size / 2 + headR) +
+          " A " + headR + " " + headR + " 0 1 1 " + (x + headR) + " " + (y - size / 2 + headR) +
+          " L " + x + " " + (y - size / 2 + headR + stemLen);
+  return pathTag(d, col, sw, op) + dot(x, y + size / 2 - dotR, dotR, col, op);
+}
+
+// Arrow glyph (pointing up)
+function arrowGlyph(x, y, size, col, sw, op) {
+  sw = sw || 10;
+  var d = "M " + x + " " + (y + size / 2) + " L " + x + " " + (y - size / 2) +
+          " M " + x + " " + (y - size / 2) + " L " + (x - size / 3) + " " + (y - size / 2 + size / 3) +
+          " M " + x + " " + (y - size / 2) + " L " + (x + size / 3) + " " + (y - size / 2 + size / 3);
+  return pathTag(d, col, sw, op);
+}
+
+// Progress bar
+function progressBar(x, y, w, h, progress, col, bgCol, sw, op) {
+  op = (op == null ? 1 : op);
+  sw = sw || 10;
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, h/2, bgCol, sw);
+  g += rrect(x - w/2 + (w * progress)/2, y, w * progress, h, h/2, col);
+  g += '</g>';
+  return g;
+}
+
+// Tip box (rectangle with a simple glyph inside)
+function tipBox(x, y, w, h, col, sw, op, glyphType, glyphCol) {
+  op = (op == null ? 1 : op);
+  sw = sw || 10;
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 15, col, op); // Filled blue box
+  if (glyphType === 'arrow') {
+    g += arrowGlyph(x, y, h * 0.4, glyphCol, sw * 0.8, op);
+  } else if (glyphType === 'dot') {
+    g += dot(x, y, h * 0.15, glyphCol, op);
+  } else if (glyphType === 'bar') {
+    g += rrect(x, y, w * 0.4, h * 0.1, 5, glyphCol, op);
+  }
+  g += '</g>';
+  return g;
+}
+
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): The Wait */
+function scene1(u) {
+  var s = '';
+  var sw = 10;
+  var playerArmAngle = lerp(Math.PI * 0.6, Math.PI * 0.65, smooth(u)); // Arms slightly relaxed
+  var playerHeadLookX = lerp(0, 0.1, smooth(u)); // Slight head tilt
+
+  s += gameScreen(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, BLUE, sw);
+  s += controller(CONTROLLER_X, CONTROLLER_Y, AMBER, sw);
+  s += stickFigure(PLAYER_X, PLAYER_Y, playerArmAngle, playerHeadLookX, AMBER, sw);
+
+  // Faint pulsing dot on screen to indicate "waiting"
+  var pulseOp = 0.3 + 0.7 * Math.sin(u * Math.PI * 4);
+  s += dot(SCREEN_X, SCREEN_Y, 20, WHITE, pulseOp);
+
+  return s;
+}
+
+/* SCENE 2 (10-20): Frustration */
+function scene2(u) {
+  var s = '';
+  var sw = 10;
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14); // Player fidgets
+  var playerArmAngle = lerp(Math.PI * 0.65, Math.PI * 0.75, smooth(u)); // Arms more tense
+  var playerHeadLookX = lerp(0.1, 0, smooth(u)); // Head back to straight
+
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+  s += gameScreen(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, BLUE, sw);
+
+  // Progress bar on screen
+  var progress = easeIn(clamp(u * 1.2, 0, 1));
+  s += progressBar(SCREEN_X, SCREEN_Y + SCREEN_H * 0.3, SCREEN_W * 0.8, 40, progress, CORAL, DIM, sw * 0.8);
+
+  // Frustration glyph on controller
+  var glyphScale = lerp(0.8, 1.2, Math.sin(u * Math.PI * 6) * 0.5 + 0.5);
+  s += xGlyph(CONTROLLER_X, CONTROLLER_Y - 20, 60 * glyphScale, CORAL, sw);
+
+  s += controller(CONTROLLER_X, CONTROLLER_Y, AMBER, sw);
+  s += stickFigure(PLAYER_X, PLAYER_Y, playerArmAngle, playerHeadLookX, AMBER, sw);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): The Idea - What if? */
+function scene3(u) {
+  var s = '';
+  var sw = 10;
+  var playerArmAngle = lerp(Math.PI * 0.75, Math.PI * 0.6, smooth(u)); // Arms relax, thinking pose
+  var playerHeadLookX = lerp(0, 0.3, smooth(u)); // Head tilts up, thinking
+
+  s += gameScreen(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, BLUE, sw);
+
+  // Question mark on screen
+  var qmScale = lerp(0.8, 1.0, easeOut(u));
+  s += questionMark(SCREEN_X, SCREEN_Y, 200 * qmScale, WHITE, sw);
+
+  // Thought bubble above player's head
+  var thoughtBubbleY = PLAYER_Y - 280;
+  var bubbleScale = smooth(ramp(u, 0.1, 0.4));
+  if (bubbleScale > 0.01) {
+    s += ring(PLAYER_X + 80, thoughtBubbleY, 60 * bubbleScale, WHITE, sw * 0.8, bubbleScale);
+    s += ring(PLAYER_X + 130, thoughtBubbleY - 40, 40 * bubbleScale, WHITE, sw * 0.8, bubbleScale);
+    s += ring(PLAYER_X + 160, thoughtBubbleY - 80, 25 * bubbleScale, WHITE, sw * 0.8, bubbleScale);
+  }
+
+  s += controller(CONTROLLER_X, CONTROLLER_Y, AMBER, sw);
+  s += stickFigure(PLAYER_X, PLAYER_Y, playerArmAngle, playerHeadLookX, AMBER, sw);
+  return s;
+}
+
+/* SCENE 4 (30-40): The Solution - Tips! */
+function scene4(u) {
+  var s = '';
+  var sw = 10;
+  var playerArmAngle = lerp(Math.PI * 0.6, Math.PI * 0.5, smooth(u)); // Arms ready, engaged
+  var playerHeadLookX = lerp(0.3, 0, smooth(u)); // Head straight, focused on screen
+
+  s += gameScreen(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, BLUE, sw);
+
+  // Tip box appearing on screen
+  var tipBoxW = SCREEN_W * 0.6;
+  var tipBoxH = SCREEN_H * 0.3;
+  var tipBoxY = SCREEN_Y - SCREEN_H * 0.2;
+  var tipBoxScale = smooth(ramp(u, 0.1, 0.4));
+  if (tipBoxScale > 0.01) {
+    s += tipBox(SCREEN_X, tipBoxY, tipBoxW * tipBoxScale, tipBoxH * tipBoxScale, BLUE, sw, tipBoxScale, 'arrow', WHITE);
+  }
+
+  // Smaller tip boxes fading in below
+  var smallTipFade = smooth(ramp(u, 0.5, 0.8));
+  if (smallTipFade > 0.01) {
+    s += tipBox(SCREEN_X - tipBoxW * 0.25, SCREEN_Y + SCREEN_H * 0.1, tipBoxW * 0.4, tipBoxH * 0.2, BLUE, sw, smallTipFade * 0.7, 'dot', DIM);
+    s += tipBox(SCREEN_X + tipBoxW * 0.25, SCREEN_Y + SCREEN_H * 0.1, tipBoxW * 0.4, tipBoxH * 0.2, BLUE, sw, smallTipFade * 0.7, 'bar', DIM);
+  }
+
+  s += controller(CONTROLLER_X, CONTROLLER_Y, AMBER, sw);
+  s += stickFigure(PLAYER_X, PLAYER_Y, playerArmAngle, playerHeadLookX, AMBER, sw);
+  return s;
+}
+
+/* SCENE 5 (40-50): Learning & Engagement */
+function scene5(u) {
+  var s = '';
+  var sw = 10;
+  var playerArmAngle = Math.PI * 0.5; // Engaged pose
+  var playerHeadLookX = 0; // Focused
+
+  s += gameScreen(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, BLUE, sw);
+
+  // Multiple tips cycling/appearing
+  var numTips = 3;
+  for (var i = 0; i < numTips; i++) {
+    var tipU = (u * 1.5 + i / numTips) % 1; // Cycle through tips
+    var tipFade = 1 - smooth(tipU);
+    if (tipFade > 0.05) {
+      var tipY = SCREEN_Y - SCREEN_H * 0.3 + i * (SCREEN_H * 0.25);
+      var glyphType = ['arrow', 'dot', 'bar'][i];
+      var glyphCol = [WHITE, DIM, WHITE][i];
+      s += tipBox(SCREEN_X, tipY, SCREEN_W * 0.6, SCREEN_H * 0.2, BLUE, sw, tipFade, glyphType, glyphCol);
+    }
+  }
+
+  // Player's head slightly bobs with engagement
+  var headBob = Math.sin(u * Math.PI * 6) * 5;
+  s += stickFigure(PLAYER_X, PLAYER_Y + headBob, playerArmAngle, 0, AMBER, sw);
+  s += controller(CONTROLLER_X, CONTROLLER_Y + headBob, AMBER, sw);
+  return s;
+}
+
+/* SCENE 6 (50-60): Seamless Transition */
+function scene6(u) {
+  var s = '';
+  var sw = 10;
+  var playerArmAngle = Math.PI * 0.5; // Ready to play
+  var playerHeadLookX = 0;
+
+  // Screen morphs from tip display to action prompt
+  var screenMorph = smooth(ramp(u, 0.2, 0.7));
+  var screenCol = lerpColor(BLUE, WHITE, screenMorph); // Screen background becomes white for action prompt
+  var screenBorderCol = lerpColor(BLUE, BLUE, screenMorph); // Border stays blue
+  var screenFillOp = lerp(0, 1, screenMorph);
+
+  // Game screen background (morphing)
+  s += rrect(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, 20, screenCol, screenFillOp);
+  s += gameScreen(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, screenBorderCol, sw);
+
+  // Action prompt on screen (arrow glyph)
+  var arrowScale = lerp(0.8, 1.2, smooth(ramp(u, 0.4, 0.8)));
+  s += arrowGlyph(SCREEN_X, SCREEN_Y, 200 * arrowScale, AMBER, sw * 1.2);
+
+  // Controller slightly vibrates with anticipation
+  var controllerShake = Math.sin(u * 30) * 2 * pulse(u, 0.6, 0.3);
+  s += controller(CONTROLLER_X + controllerShake, CONTROLLER_Y, AMBER, sw);
+  s += stickFigure(PLAYER_X, PLAYER_Y, playerArmAngle, 0, AMBER, sw);
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
