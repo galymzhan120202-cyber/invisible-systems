@@ -1,0 +1,490 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Software Updates Are So Huge</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> system / dependencies
+var AMBER = "#F2A93B";              // warm amber   -> YOU / active component
+var CORAL = "#FF5B5B";              // coral red    -> small change / update package
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* new custom shapes for this animation */
+
+// Stick figure: head, body, arms, legs
+function stickFigure(x, y, scale, col, op) {
+  op = (op == null ? 1 : op);
+  var s = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ') scale(' + scale + ')">';
+  s += dot(0, -60, 18, col); // Head
+  s += line(0, -42, 0, 20, col, 8); // Body
+  s += line(0, -20, -30, 0, col, 8); // Left arm
+  s += line(0, -20, 30, 0, col, 8); // Right arm
+  s += line(0, 20, -20, 60, col, 8); // Left leg
+  s += line(0, 20, 20, 60, col, 8); // Right leg
+  s += '</g>';
+  return s;
+}
+
+// App Block: the main container for components (hero element)
+function appBlock(x, y, w, h, rad, col, sw, op) {
+  return rrectStroke(x, y, w, h, rad, col, sw, op);
+}
+
+// Component Block: smaller blocks inside the app block
+function componentBlock(x, y, w, h, rad, fillCol, strokeCol, sw, op) {
+  op = (op == null ? 1 : op);
+  var s = '<g opacity="' + op + '">';
+  s += rrect(x, y, w, h, rad, fillCol, op);
+  if (strokeCol) s += rrectStroke(x, y, w, h, rad, strokeCol, sw, op);
+  s += '</g>';
+  return s;
+}
+
+// Helper to lerp between two colors. Assumes hex format like "#RRGGBB".
+function lerpColor(a, b, t) {
+  var ah = parseInt(a.replace(/#/g, ''), 16),
+      ar = ah >> 16, ag = (ah >> 8) & 0xff, ab = ah & 0xff,
+      bh = parseInt(b.replace(/#/g, ''), 16),
+      br = bh >> 16, bg = (bh >> 8) & 0xff, bb = bh & 0xff,
+      rr = ar + t * (br - ar),
+      rg = ag + t * (bg - ag),
+      rb = ab + t * (bb - ab);
+  return '#' + ((1 << 24) + (rr << 16) + (rg << 8) + rb | 0).toString(16).slice(1);
+}
+
+// Grid of component blocks for the app.
+// `activeIdx` is the 0-indexed component to highlight.
+// `changedIdx` is the 0-indexed component that is changed (coral).
+// `dependencyMap` is an array of indices that are dependent on `changedIdx`.
+// `updatePackageRect` is {x,y,w,h} for the coral update package (used for masking).
+function appWithComponents(appX, appY, appW, appH, appRad, numCols, numRows,
+                           activeIdx, changedIdx, dependencyMap, updatePackageRect,
+                           sceneIdx, u) {
+  var s = '';
+  var compW = (appW - 80) / numCols; // 40px padding on each side
+  var compH = (appH - 80) / numRows; // 40px padding on each side
+  var compRad = 12;
+  var compStroke = 6;
+  var compSpacingX = 20;
+  var compSpacingY = 20;
+
+  var startX = appX - appW / 2 + 40 + compW / 2;
+  var startY = appY - appH / 2 + 40 + compH / 2;
+
+  var componentCoords = []; // Store coordinates for dependency lines
+
+  for (var r = 0; r < numRows; r++) {
+    for (var c = 0; c < numCols; c++) {
+      var idx = r * numCols + c;
+      var x = startX + c * (compW + compSpacingX);
+      var y = startY + r * (compH + compSpacingY);
+      componentCoords.push({x: x, y: y});
+
+      var fillCol = DIM;
+      var strokeCol = WHITE;
+      var compOp = 0.9;
+
+      if (idx === activeIdx) {
+        fillCol = AMBER;
+        compOp = 1;
+      }
+      if (idx === changedIdx) {
+        fillCol = CORAL;
+        compOp = 1;
+      }
+
+      // Scene 4 & 5: Update package covers components
+      if (updatePackageRect) {
+        var rectX1 = updatePackageRect.x - updatePackageRect.w / 2;
+        var rectY1 = updatePackageRect.y - updatePackageRect.h / 2;
+        var rectX2 = updatePackageRect.x + updatePackageRect.w / 2;
+        var rectY2 = updatePackageRect.y + updatePackageRect.h / 2;
+
+        if (x > rectX1 && x < rectX2 && y > rectY1 && y < rectY2) {
+          fillCol = DIM; // Covered by the package, appears dimmed
+          strokeCol = DIM;
+          compOp = 0.3;
+        }
+      }
+
+      // Scene 3: Dependencies light up
+      if (sceneIdx === 2) {
+        var depFill = DIM;
+        var depDotOp = 0;
+
+        if (idx === changedIdx) { // The source of the change
+          depFill = CORAL;
+        } else if (dependencyMap && dependencyMap.includes(idx)) {
+          // Animate dependency connection
+          var depU = ramp(u, 0.2 + (idx * 0.03), 0.7 + (idx * 0.03));
+          depDotOp = depU;
+          if (depU > 0) depFill = lerpColor(DIM, BLUE, depU);
+        }
+        s += componentBlock(x, y, compW, compH, compRad, depFill, strokeCol, compStroke, compOp);
+        if (depDotOp > 0.05) {
+          s += dot(x, y, 12, BLUE, depDotOp);
+        }
+      } else {
+        s += componentBlock(x, y, compW, compH, compRad, fillCol, strokeCol, compStroke, compOp);
+      }
+    }
+  }
+
+  // Scene 3: Draw dependency lines
+  if (sceneIdx === 2 && changedIdx != null && dependencyMap && u > 0.1) {
+    var sourceComp = componentCoords[changedIdx];
+    for (var i = 0; i < dependencyMap.length; i++) {
+      var targetIdx = dependencyMap[i];
+      var targetComp = componentCoords[targetIdx];
+      var lineU = ramp(u, 0.3 + (i * 0.08), 0.8 + (i * 0.08));
+      if (lineU > 0) {
+        s += line(sourceComp.x, sourceComp.y, targetComp.x, targetComp.y, BLUE, 6, lineU * 0.8);
+      }
+    }
+  }
+
+  return { svg: s, coords: componentCoords };
+}
+
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+var APP_BLOCK_W = 780;
+var APP_BLOCK_H = 1200;
+var APP_BLOCK_RAD = 40;
+var APP_BLOCK_X = CX;
+var APP_BLOCK_Y = CY - 20; // Slightly higher to leave room at bottom
+var NUM_COLS = 3;
+var NUM_ROWS = 5;
+var TOTAL_COMPONENTS = NUM_COLS * NUM_ROWS;
+
+// Define a consistent layout of components for the app.
+// This will be populated once in scene 1 and reused.
+var COMPONENT_LAYOUT = [];
+
+/* SCENE 1 (0-10): Incremental code changes and dependency management */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.98, smooth(u));
+  var bob = Math.sin(u * Math.PI * 2) * 5;
+  s += '<g ' + camera(scale, 0, bob) + '>';
+
+  // App Block (Hero Element)
+  s += appBlock(APP_BLOCK_X, APP_BLOCK_Y, APP_BLOCK_W, APP_BLOCK_H, APP_BLOCK_RAD, WHITE, 10, 0.9);
+
+  // Components inside the App Block
+  var compData = appWithComponents(APP_BLOCK_X, APP_BLOCK_Y, APP_BLOCK_W, APP_BLOCK_H, APP_BLOCK_RAD, NUM_COLS, NUM_ROWS,
+                                   -1, -1, null, null, 0, u);
+  if (COMPONENT_LAYOUT.length === 0) COMPONENT_LAYOUT = compData.coords; // Store layout for later scenes
+  s += compData.svg;
+
+  // User stick figure
+  var userX = APP_BLOCK_X - APP_BLOCK_W / 2 - 120;
+  var userY = APP_BLOCK_Y + 100;
+  var userScale = 0.8;
+  var userOp = ramp(u, 0.0, 0.2);
+  s += stickFigure(userX, userY, userScale, WHITE, userOp);
+  // Arm pointing towards the app block
+  s += line(userX + 20, userY - 10, APP_BLOCK_X - APP_BLOCK_W / 2 + 10, APP_BLOCK_Y + 10, WHITE, 7, userOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): User interacts with one component, causing a small change. */
+function scene2(u) {
+  var s = '';
+  var scale = lerp(0.98, 1.0, smooth(u));
+  var bob = Math.sin(u * Math.PI * 2 + Math.PI) * 5; // offset bob from S1
+  s += '<g ' + camera(scale, 0, bob) + '>';
+
+  s += appBlock(APP_BLOCK_X, APP_BLOCK_Y, APP_BLOCK_W, APP_BLOCK_H, APP_BLOCK_RAD, WHITE, 10, 0.9);
+
+  var activeCompIdx = 7; // Example: the 8th component (0-indexed)
+  var changedCompIdx = -1;
+  var changeOp = 0;
+  var changeX = 0, changeY = 0;
+
+  // Animate the change appearing
+  if (u > 0.3) {
+    changedCompIdx = activeCompIdx;
+    changeOp = ramp(u, 0.3, 0.6);
+    if (COMPONENT_LAYOUT[changedCompIdx]) {
+      changeX = COMPONENT_LAYOUT[changedCompIdx].x;
+      changeY = COMPONENT_LAYOUT[changedCompIdx].y;
+    }
+  }
+
+  var compData = appWithComponents(APP_BLOCK_X, APP_BLOCK_Y, APP_BLOCK_W, APP_BLOCK_H, APP_BLOCK_RAD, NUM_COLS, NUM_ROWS,
+                                   activeCompIdx, changedCompIdx, null, null, 1, u);
+  s += compData.svg;
+
+  // Small coral change emanating from the component
+  if (changeOp > 0) {
+    s += dot(changeX, changeY, lerp(10, 20, easeOut(changeOp)), CORAL, changeOp);
+    s += ring(changeX, changeY, lerp(20, 35, easeOut(changeOp)), CORAL, 6, changeOp * 0.8);
+  }
+
+  // User stick figure interacting
+  var userX = APP_BLOCK_X - APP_BLOCK_W / 2 - 120;
+  var userY = APP_BLOCK_Y + 100;
+  var userScale = 0.8;
+  s += stickFigure(userX, userY, userScale, WHITE, 1);
+  var armReach = lerp(0, 1, ramp(u, 0.1, 0.4));
+  var targetComp = COMPONENT_LAYOUT[activeCompIdx];
+  s += line(userX + 20, userY - 10, lerp(userX + 20, targetComp.x - 40, armReach), lerp(userY - 10, targetComp.y + 10, armReach), WHITE, 7); // Arm pointing
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): The small change triggers a chain reaction of dependencies. */
+function scene3(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.95, smooth(u));
+  s += '<g ' + camera(scale, 0, 0) + '>';
+
+  s += appBlock(APP_BLOCK_X, APP_BLOCK_Y, APP_BLOCK_W, APP_BLOCK_H, APP_BLOCK_RAD, WHITE, 10, 0.9);
+
+  var changedCompIdx = 7;
+  // Define some dependent components (indices chosen to spread out)
+  var dependencyMap = [2, 6, 8, 12, 14];
+
+  var compData = appWithComponents(APP_BLOCK_X, APP_BLOCK_Y, APP_BLOCK_W, APP_BLOCK_H, APP_BLOCK_RAD, NUM_COLS, NUM_ROWS,
+                                   -1, changedCompIdx, dependencyMap, null, 2, u);
+  s += compData.svg;
+
+  // Small coral change (now a small block)
+  var changeX = COMPONENT_LAYOUT[changedCompIdx].x;
+  var changeY = COMPONENT_LAYOUT[changedCompIdx].y;
+  var compW = (APP_BLOCK_W - 80) / NUM_COLS;
+  var compH = (APP_BLOCK_H - 80) / NUM_ROWS;
+  s += componentBlock(changeX, changeY, compW, compH, 12, CORAL, WHITE, 6, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): Dependencies lead to a larger "update package". */
+function scene4(u) {
+  var s = '';
+  var scale = lerp(0.95, 1.0, smooth(u));
+  s += '<g ' + camera(scale, 0, 0) + '>';
+
+  s += appBlock(APP_BLOCK_X, APP_BLOCK_Y, APP_BLOCK_W, APP_BLOCK_H, APP_BLOCK_RAD, WHITE, 10, 0.9);
+
+  var changedCompIdx = 7;
+  var dependencyMap = [2, 6, 8, 12, 14]; // Dependencies from previous scene
+
+  // Animate the update package growing
+  var packageGrow = ramp(u, 0.2, 0.7);
+  var packageW = lerp(0, APP_BLOCK_W * 0.7, packageGrow);
+  var packageH = lerp(0, APP_BLOCK_H * 0.7, packageGrow);
+  var packageX = APP_BLOCK_X;
+  var packageY = APP_BLOCK_Y;
+
+  var updatePackageRect = {x: packageX, y: packageY, w: packageW, h: packageH};
+
+  var compData = appWithComponents(APP_BLOCK_X, APP_BLOCK_Y, APP_BLOCK_W, APP_BLOCK_H, APP_BLOCK_RAD, NUM_COLS, NUM_ROWS,
+                                   -1, changedCompIdx, dependencyMap, updatePackageRect, 3, u);
+  s += compData.svg;
+
+  // Draw the update package
+  if (packageGrow > 0) {
+    s += rrect(packageX, packageY, packageW, packageH, APP_BLOCK_RAD, CORAL, packageGrow * 0.8);
+    s += rrectStroke(packageX, packageY, packageW, packageH, APP_BLOCK_RAD, CORAL, 8, packageGrow);
+  }
+
+  // Small coral change (now a small block) - this will be covered by the package
+  var changeX = COMPONENT_LAYOUT[changedCompIdx].x;
+  var changeY = COMPONENT_LAYOUT[changedCompIdx].y;
+  var compW = (APP_BLOCK_W - 80) / NUM_COLS;
+  var compH = (APP_BLOCK_H - 80) / NUM_ROWS;
+  s += componentBlock(changeX, changeY, compW, compH, 12, CORAL, WHITE, 6, 1 * (1 - packageGrow * 0.6));
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): The "update package" is delivered. */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.85, smooth(u));
+  s += '<g ' + camera(scale, 0, 0) + '>';
+
+  // App Block (faded slightly as the package is delivered)
+  s += appBlock(APP_BLOCK_X, APP_BLOCK_Y, APP_BLOCK_W, APP_BLOCK_H, APP_BLOCK_RAD, WHITE, 10, 0.6);
+
+  // Components inside the App Block (dimmed)
+  var compData = appWithComponents(APP_BLOCK_X, APP_BLOCK_Y, APP_BLOCK_W, APP_BLOCK_H, APP_BLOCK_RAD, NUM_COLS, NUM_ROWS,
+                                   -1, -1, null, null, 4, u);
+  s += compData.svg;
+
+  // Update package moving towards the app block
+  var packageMove = ramp(u, 0.1, 0.7);
+  var packageW = APP_BLOCK_W * 0.7;
+  var packageH = APP_BLOCK_H * 0.7;
+  var packageX = lerp(CX + 300, APP_BLOCK_X, packageMove);
+  var packageY = lerp(CY - 200, APP_BLOCK_Y, packageMove);
+
+  s += rrect(packageX, packageY, packageW, packageH, APP_BLOCK_RAD, CORAL, 0.9);
+  s += rrectStroke(packageX, packageY, packageW, packageH, APP_BLOCK_RAD, CORAL, 8, 1);
+
+  // Progress bar
+  var barX = CX;
+  var barY = BOT - 100;
+  var barW = 600;
+  var barH = 30;
+  var progress = ramp(u, 0.2, 0.9);
+  s += rrectStroke(barX, barY, barW, barH, barH / 2, AMBER, 4, 0.6);
+  s += rrect(barX - barW / 2 + (barW * progress) / 2, barY, barW * progress, barH, barH / 2, AMBER, 0.9);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): The system "rebuilds" the app. */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.85, 1.0, smooth(u));
+  s += '<g ' + camera(scale, 0, 0) + '>';
+
+  var rebuildOp = ramp(u, 0.5, 0.9);
+  var finalChangedIdx = 7; // The component that was updated
+
+  // App Block (reforming)
+  s += appBlock(APP_BLOCK_X, APP_BLOCK_Y, APP_BLOCK_W, APP_BLOCK_H, APP_BLOCK_RAD, WHITE, 10, 0.9);
+
+  // Components inside the App Block
+  var compData = appWithComponents(APP_BLOCK_X, APP_BLOCK_Y, APP_BLOCK_W, APP_BLOCK_H, APP_BLOCK_RAD, NUM_COLS, NUM_ROWS,
+                                   -1, finalChangedIdx, null, null, 5, u);
+  s += compData.svg;
+
+  // The updated component is now AMBER
+  var updatedCompX = COMPONENT_LAYOUT[finalChangedIdx].x;
+  var updatedCompY = COMPONENT_LAYOUT[finalChangedIdx].y;
+  var compW = (APP_BLOCK_W - 80) / NUM_COLS;
+  var compH = (APP_BLOCK_H - 80) / NUM_ROWS;
+  s += componentBlock(updatedCompX, updatedCompY, compW, compH, 12, AMBER, WHITE, 6, rebuildOp);
+
+  // Fading out the coral update package (or dissolving)
+  var packageDissolve = 1 - ramp(u, 0.0, 0.4);
+  var packageW = APP_BLOCK_W * 0.7;
+  var packageH = APP_BLOCK_H * 0.7;
+  s += rrect(APP_BLOCK_X, APP_BLOCK_Y, packageW, packageH, APP_BLOCK_RAD, CORAL, packageDissolve * 0.9);
+  s += rrectStroke(APP_BLOCK_X, APP_BLOCK_Y, packageW, packageH, APP_BLOCK_RAD, CORAL, 8, packageDissolve);
+
+  // Blue lines representing the "system" or "new dependencies"
+  var depLineOp = ramp(u, 0.6, 0.9);
+  if (depLineOp > 0) {
+    for (var i = 0; i < TOTAL_COMPONENTS; i++) {
+      if (i !== finalChangedIdx) {
+        var startComp = COMPONENT_LAYOUT[finalChangedIdx];
+        var endComp = COMPONENT_LAYOUT[i];
+        if (rnd(i + 10) < 0.3) { // Randomly connect some components to the updated one
+          s += line(startComp.x, startComp.y, endComp.x, endComp.y, BLUE, 4, depLineOp * 0.6);
+        }
+      }
+    }
+  }
+
+  s += '</g>';
+  return s;
+}
+
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

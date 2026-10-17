@@ -1,0 +1,526 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Supermarket Music Is So Slow</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / the wave
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want
+var CORAL = "#FF5B5B";              // coral red    -> the naive model / false signal
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+function lerpColor(a, b, t) {
+  var ah = parseInt(a.replace(/#/, '0x'), 16),
+      ar = ah >> 16, ag = (ah >> 8) & 0xff, ab = ah & 0xff,
+      bh = parseInt(b.replace(/#/, '0x'), 16),
+      br = bh >> 16, bg = (bh >> 8) & 0xff, bb = bh & 0xff,
+      rr = ar + t * (br - ar),
+      rg = ag + t * (bg - ag),
+      rb = ab + t * (bb - ab);
+  return '#' + ((1 << 24) + (rr << 16) + (rg << 8) + rb | 0).toString(16).slice(1);
+}
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom scene elements ---------- */
+
+// Stick Figure
+function stickFigure(x, y, scale, pose, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ') scale(' + scale + ')">';
+  var headR = 25;
+  var bodyLen = 80;
+  var armLen = 50;
+  var legLen = 60;
+
+  // Head
+  g += dot(0, -bodyLen - headR, headR, col);
+
+  // Body
+  g += line(0, -bodyLen, 0, 0, col, 8);
+
+  // Arms & Legs based on pose
+  if (pose === 'pushing') {
+    // Arms forward
+    g += line(0, -bodyLen * 0.7, armLen * 0.8, -bodyLen * 0.7 + armLen * 0.3, col, 8);
+    g += line(0, -bodyLen * 0.7, -armLen * 0.8, -bodyLen * 0.7 + armLen * 0.3, col, 8);
+    // Legs in motion
+    g += line(0, 0, legLen * 0.5, legLen, col, 8);
+    g += line(0, 0, -legLen * 0.5, legLen, col, 8);
+  } else if (pose === 'confused') {
+    // One hand to head
+    g += line(0, -bodyLen * 0.7, armLen * 0.5, -bodyLen * 0.7 + armLen * 0.2, col, 8); // Right arm down
+    g += line(0, -bodyLen * 0.7, -armLen * 0.2, -bodyLen * 0.7 - armLen * 0.3, col, 8); // Left arm up
+    g += line(-armLen * 0.2, -bodyLen * 0.7 - armLen * 0.3, -headR * 0.6, -bodyLen - headR * 0.5, col, 8); // Hand to head
+    // Legs standing
+    g += line(0, 0, 0, legLen, col, 8);
+    g += line(0, 0, 0, legLen, col, 8);
+  } else if (pose === 'nodding') {
+    // Arms relaxed
+    g += line(0, -bodyLen * 0.7, armLen * 0.4, -bodyLen * 0.7 + armLen * 0.4, col, 8);
+    g += line(0, -bodyLen * 0.7, -armLen * 0.4, -bodyLen * 0.7 + armLen * 0.4, col, 8);
+    // Legs standing
+    g += line(0, 0, 0, legLen, col, 8);
+    g += line(0, 0, 0, legLen, col, 8);
+    // Head tilt
+    g += line(0, -bodyLen - headR, 0, -bodyLen - headR + 10, col, 8); // Neck
+  } else { // default standing
+    g += line(0, -bodyLen * 0.7, armLen * 0.4, -bodyLen * 0.7 + armLen * 0.4, col, 8);
+    g += line(0, -bodyLen * 0.7, -armLen * 0.4, -bodyLen * 0.7 + armLen * 0.4, col, 8);
+    g += line(0, 0, 0, legLen, col, 8);
+    g += line(0, 0, 0, legLen, col, 8);
+  }
+
+  g += '</g>';
+  return g;
+}
+
+// Shopping Cart
+function shoppingCart(x, y, scale, fillLevel, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ') scale(' + scale + ')">';
+  var bodyW = 100, bodyH = 80, handleL = 40, wheelR = 12;
+
+  // Body
+  g += rrect(-bodyW / 2, -bodyH / 2, bodyW, bodyH, 10, WHITE, 0.15); // Faint fill
+  g += rrectStroke(-bodyW / 2, -bodyH / 2, bodyW, bodyH, 10, col, 8);
+  g += line(-bodyW / 2 + 10, -bodyH / 2 + 10, bodyW / 2 - 10, -bodyH / 2 + 10, col, 6);
+  g += line(-bodyW / 2 + 10, bodyH / 2 - 10, bodyW / 2 - 10, bodyH / 2 - 10, col, 6);
+  g += line(-bodyW / 2 + 10, -bodyH / 2 + 10, -bodyW / 2 + 10, bodyH / 2 - 10, col, 6);
+  g += line(bodyW / 2 - 10, -bodyH / 2 + 10, bodyW / 2 - 10, bodyH / 2 - 10, col, 6);
+
+  // Handle
+  g += line(bodyW / 2, -bodyH / 2 + 10, bodyW / 2 + handleL, -bodyH / 2 + 10, col, 8);
+
+  // Wheels
+  g += dot(-bodyW / 2 + 15, bodyH / 2 + wheelR, wheelR, col);
+  g += dot(bodyW / 2 - 15, bodyH / 2 + wheelR, wheelR, col);
+
+  // Fill items (amber glowing items)
+  if (fillLevel > 0) {
+    var itemH = 20;
+    var maxItems = 4;
+    var itemsToShow = Math.ceil(fillLevel * maxItems);
+    for (var i = 0; i < itemsToShow; i++) {
+      var itemY = bodyH / 2 - 10 - (i * (itemH + 5));
+      g += rrect(0, itemY, bodyW * 0.7, itemH, 5, AMBER, 0.9);
+    }
+  }
+
+  g += '</g>';
+  return g;
+}
+
+// Abstract Music Note (simple circle for now)
+function musicNote(x, y, r, col, op) {
+  return dot(x, y, r, col, op);
+}
+
+// Abstract Music Wave (path)
+function musicWave(x, y, width, height, phase, col, sw, op) {
+  op = (op == null ? 1 : op);
+  sw = (sw == null ? 10 : sw);
+  var d = "M " + (x - width / 2) + " " + y;
+  var numSegments = 5;
+  for (var i = 0; i <= numSegments; i++) {
+    var segX = lerp(-width / 2, width / 2, i / numSegments);
+    var segY = y + Math.sin(segX / (width / numSegments) * Math.PI * 2 + phase * Math.PI * 2) * height / 2;
+    if (i === 0) {
+      d += " L " + (x + segX) + " " + segY;
+    } else {
+      d += " S " + (x + segX) + " " + segY; // Smooth curve
+    }
+  }
+  return pathTag(d, col, sw, op);
+}
+
+// Abstract Shelf
+function shelf(x, y, w, h, col, op) {
+  return rrect(x, y, w, h, 0, col, op);
+}
+
+// Question Mark glyph (no text)
+function questionMark(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var d = "M " + (x - size * 0.2) + " " + (y - size * 0.5) +
+          " A " + (size * 0.3) + " " + (size * 0.3) + " 0 1 1 " + (x + size * 0.2) + " " + (y - size * 0.1) +
+          " L " + (x + size * 0.05) + " " + (y + size * 0.1) +
+          " V " + (y + size * 0.2);
+  var dotY = y + size * 0.35;
+  return pathTag(d, col, 10, op) + dot(x, dotY, size * 0.08, col, op);
+}
+
+// Clock (circle with two hands)
+function clock(x, y, r, col, sw, op, timeU) {
+  op = (op == null ? 1 : op);
+  sw = (sw == null ? 7 : sw);
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, r, col, sw);
+
+  var hourHandLen = r * 0.5;
+  var minHandLen = r * 0.8;
+
+  // Rotate hands based on timeU (0 to 1 for one full rotation)
+  var hourAngle = (timeU * 30) % 360; // 12 hours * 30 deg/hour
+  var minAngle = (timeU * 360) % 360; // 60 minutes * 6 deg/minute
+
+  // Minute hand
+  g += line(x, y, x + minHandLen * Math.sin(minAngle * Math.PI / 180), y - minHandLen * Math.cos(minAngle * Math.PI / 180), col, sw * 0.8);
+  // Hour hand
+  g += line(x, y, x + hourHandLen * Math.sin(hourAngle * Math.PI / 180), y - hourHandLen * Math.cos(hourAngle * Math.PI / 180), col, sw * 1.2);
+
+  g += dot(x, y, sw * 0.5, col); // Center dot
+  g += '</g>';
+  return g;
+}
+
+// Supermarket Aisle background (abstract shelves)
+function aisleBackground(u, op) {
+  op = (op == null ? 0.1 : op);
+  var s = '';
+  var shelfW = 200, shelfH = 100;
+  var gap = 180;
+  var numShelves = Math.ceil((BOT - TOP) / gap) + 1;
+
+  for (var i = 0; i < numShelves; i++) {
+    var y = TOP + gap * i - (u * 50 % gap); // Gentle scroll
+    s += shelf(CX - 300, y, shelfW, shelfH, WHITE, op);
+    s += shelf(CX + 300, y, shelfW, shelfH, WHITE, op);
+  }
+  return s;
+}
+
+// The main character's position
+var SHOPPER_Y = CY + 300; // Adjusted to be more central vertically
+var SHOPPER_X = CX;
+var CART_OFFSET_X = 100; // Cart to the right of the stick figure
+var MUSIC_NOTE_RADIUS = 20;
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var speed = lerp(1, 1.2, easeOut(u)); // Speed up slightly
+  var camShake = Math.sin(u * 20) * 3 * smooth(u); // subtle shake for speed
+  s += '<g ' + camera(1.0, camShake, 0) + '>';
+
+  // Aisle background
+  s += aisleBackground(u * speed * 2, 0.1);
+
+  // Stick figure and cart
+  var sfX = SHOPPER_X - CART_OFFSET_X / 2;
+  var cartX = SHOPPER_X + CART_OFFSET_X / 2;
+  var legSwing = Math.sin(u * Math.PI * 6 * speed) * 10; // For leg animation
+  s += stickFigure(sfX, SHOPPER_Y + legSwing, 1, 'pushing', WHITE, 1);
+  s += shoppingCart(cartX, SHOPPER_Y + 20, 1, 0, WHITE, 1);
+
+  // "Whoosh" effect for speed
+  var whooshOp = ramp(u, 0.05, 0.3);
+  for (var i = 0; i < 5; i++) {
+    var y = BOT - 100 - i * 150 - (u * 150 * speed) % (BOT - TOP + 300);
+    if (y < TOP - 100) y += (BOT - TOP + 300);
+    s += line(sfX - 100, y, sfX - 20, y, WHITE, 5, whooshOp * 0.6);
+    s += line(cartX + 20, y, cartX + 100, y, WHITE, 5, whooshOp * 0.6);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var speed = lerp(1.2, 0.4, smooth(u)); // Slow down
+  var camShake = Math.sin(u * 20) * 3 * (1 - smooth(u)); // Shake fades
+  s += '<g ' + camera(1.0, camShake, 0) + '>';
+
+  // Aisle background
+  s += aisleBackground(u * speed * 2, 0.1);
+
+  // Stick figure and cart
+  var sfX = SHOPPER_X - CART_OFFSET_X / 2;
+  var cartX = SHOPPER_X + CART_OFFSET_X / 2;
+  var legSwing = Math.sin(u * Math.PI * 3 * speed) * 8;
+  s += stickFigure(sfX, SHOPPER_Y + legSwing, 1, 'pushing', WHITE, 1);
+  s += shoppingCart(cartX, SHOPPER_Y + 20, 1, 0, WHITE, 1);
+
+  // Music notes appear and pulsate
+  var notesOp = ramp(u, 0.1, 0.6);
+  var notePulse = Math.sin(u * Math.PI * 4) * 5;
+  for (var i = 0; i < 6; i++) {
+    var noteY = TOP + 200 + i * 200 + (u * 50);
+    var noteX = CX + Math.sin(noteY / 200 + u * Math.PI * 2) * 150;
+    s += musicNote(noteX, noteY, MUSIC_NOTE_RADIUS + notePulse, WHITE, notesOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Aisle background (fading)
+  s += aisleBackground(u * 0.2, lerp(0.1, 0.05, u));
+
+  // Stick figure and cart (slowed, confused)
+  var sfX = SHOPPER_X - CART_OFFSET_X / 2;
+  var cartX = SHOPPER_X + CART_OFFSET_X / 2;
+  s += stickFigure(sfX, SHOPPER_Y, 1, 'confused', WHITE, 1);
+  s += shoppingCart(cartX, SHOPPER_Y + 20, 1, 0, WHITE, 1);
+
+  // Coral red question mark
+  var qOp = ramp(u, 0.1, 0.4);
+  var qBob = Math.sin(u * Math.PI * 2) * 5;
+  s += questionMark(sfX + 50, SHOPPER_Y - 200 + qBob, 60, CORAL, qOp);
+
+  // Music notes, now coral red, continue slowly
+  var notePulse = Math.sin(u * Math.PI * 3) * 5;
+  for (var i = 0; i < 6; i++) {
+    var noteY = TOP + 200 + i * 200 + (u * 30);
+    var noteX = CX + Math.sin(noteY / 200 + u * Math.PI * 1.5) * 150;
+    s += musicNote(noteX, noteY, MUSIC_NOTE_RADIUS + notePulse, CORAL, 0.9);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Aisle background (fading out)
+  s += aisleBackground(u * 0.1, lerp(0.05, 0.0, u));
+
+  // Stick figure and cart (slowed, being influenced)
+  var sfX = SHOPPER_X - CART_OFFSET_X / 2;
+  var cartX = SHOPPER_X + CART_OFFSET_X / 2;
+  
+  // Coral notes transform to Signal Blue waves pushing the figure
+  var transform = smooth(ramp(u, 0.0, 0.4)); // Transformation phase
+  var waveOp = lerp(0.9, 1.0, transform);
+
+  for (var i = 0; i < 6; i++) {
+    var baseNoteY = TOP + 200 + i * 200 + (u * 30);
+    var baseNoteX = CX + Math.sin(baseNoteY / 200 + u * Math.PI * 1.5) * 150;
+
+    // Morph from coral note to blue wave
+    var currentCol = lerpColor(CORAL, BLUE, transform);
+    
+    // For the wave, use a fixed X and animate Y
+    var waveY = baseNoteY;
+    var waveX = CX;
+    var waveHeight = lerp(0, 40, transform);
+    var waveWidth = lerp(MUSIC_NOTE_RADIUS * 2, 400, transform);
+
+    if (transform < 0.99) { // Show morphing notes
+      s += musicNote(baseNoteX, baseNoteY, MUSIC_NOTE_RADIUS, currentCol, 0.9 * (1 - transform));
+    }
+    if (transform > 0.01) { // Show morphing waves
+      s += musicWave(waveX, waveY, waveWidth, waveHeight, u * Math.PI * 0.5, BLUE, 10, waveOp * transform);
+    }
+  }
+
+  // "Pushing" effect on the stick figure from the waves
+  var pushOffset = Math.sin(u * Math.PI * 4) * 5 * smooth(ramp(u, 0.5, 0.8));
+  s += '<g transform="translate(' + pushOffset + ' 0)">';
+  s += stickFigure(sfX, SHOPPER_Y, 1, 'pushing', WHITE, 1);
+  s += shoppingCart(cartX, SHOPPER_Y + 20, 1, 0, WHITE, 1);
+  s += '</g>';
+
+  // Warm amber glowing items on shelves
+  var itemGlow = smooth(ramp(u, 0.5, 0.9));
+  if (itemGlow > 0.01) {
+    var shelfW = 200, shelfH = 100;
+    var gap = 180;
+    var numShelves = Math.ceil((BOT - TOP) / gap) + 1;
+    for (var i = 0; i < numShelves; i++) {
+      var y = TOP + gap * i - (u * 10 % gap);
+      s += rrect(CX - 300, y, shelfW, shelfH, 0, WHITE, 0.1 * (1 - itemGlow)); // Faint shelf
+      s += rrect(CX + 300, y, shelfW, shelfH, 0, WHITE, 0.1 * (1 - itemGlow)); // Faint shelf
+      s += rrect(CX - 300 + 50, y + 20, 100, 60, 5, AMBER, itemGlow * 0.8); // Amber item
+      s += rrect(CX + 300 - 150, y + 20, 100, 60, 5, AMBER, itemGlow * 0.8); // Amber item
+    }
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var zoom = lerp(1.0, 1.1, smooth(ramp(u, 0.2, 0.6))); // Brief zoom on cart
+  var panY = lerp(0, -50, smooth(ramp(u, 0.2, 0.6)));
+  s += '<g ' + camera(zoom, 0, panY) + '>';
+
+  // Stick figure and cart (cart filling)
+  var sfX = SHOPPER_X - CART_OFFSET_X / 2;
+  var cartX = SHOPPER_X + CART_OFFSET_X / 2;
+  var fillLevel = smooth(ramp(u, 0.1, 0.7));
+  s += stickFigure(sfX, SHOPPER_Y, 1, 'pushing', WHITE, 1);
+  s += shoppingCart(cartX, SHOPPER_Y + 20, 1, fillLevel, WHITE, 1);
+
+  // Signal blue music waves
+  for (var i = 0; i < 6; i++) {
+    var waveY = TOP + 200 + i * 200 + (u * 20);
+    var waveX = CX;
+    s += musicWave(waveX, waveY, 400, 40, u * Math.PI * 0.5, BLUE, 10, 1.0);
+  }
+
+  // Warm amber glowing items on shelves (more pronounced)
+  var shelfW = 200, shelfH = 100;
+  var gap = 180;
+  var numShelves = Math.ceil((BOT - TOP) / gap) + 1;
+  for (var i = 0; i < numShelves; i++) {
+    var y = TOP + gap * i - (u * 10 % gap);
+    s += rrect(CX - 300, y, shelfW, shelfH, 0, WHITE, 0.05); // Faint shelf
+    s += rrect(CX + 300, y, shelfW, shelfH, 0, WHITE, 0.05); // Faint shelf
+    s += rrect(CX - 300 + 50, y + 20, 100, 60, 5, AMBER, 0.9); // Amber item
+    s += rrect(CX + 300 - 150, y + 20, 100, 60, 5, AMBER, 0.9); // Amber item
+  }
+
+  // Clock icon spinning rapidly
+  var clockOp = ramp(u, 0.0, 0.3);
+  var clockSpin = easeOut(ramp(u, 0.0, 0.9));
+  s += clock(CX + 400, TOP + 100, 50, WHITE, 7, clockOp, clockSpin * 10); // Spin 10 times
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var exitPan = lerp(0, -400, smooth(u)); // Pan up as figure exits
+  var fadeWaves = lerp(1.0, 0.5, smooth(u));
+  s += '<g ' + camera(1.0, 0, exitPan) + '>';
+
+  // Stick figure and full cart exiting
+  var sfX = SHOPPER_X - CART_OFFSET_X / 2;
+  var cartX = SHOPPER_X + CART_OFFSET_X / 2;
+  s += stickFigure(sfX, SHOPPER_Y, 1, 'nodding', WHITE, 1); // Nodding pose
+  s += shoppingCart(cartX, SHOPPER_Y + 20, 1, 1, WHITE, 1); // Full cart
+
+  // Signal blue music waves (fading slightly, but still present)
+  for (var i = 0; i < 6; i++) {
+    var waveY = TOP + 200 + i * 200 + (u * 20);
+    var waveX = CX;
+    s += musicWave(waveX, waveY, 400, 40, u * Math.PI * 0.5, BLUE, 10, fadeWaves);
+  }
+
+  // Supermarket exit: simple arch or doorway
+  var doorY = TOP + 200;
+  var doorW = 400, doorH = 600;
+  s += rrect(CX, doorY + doorH / 2, doorW, doorH, 20, WHITE, 0.1); // Doorway
+  s += rrectStroke(CX, doorY + doorH / 2, doorW, doorH, 20, WHITE, 10, 0.8);
+
+  // "Exit" arrow (simple glyph)
+  var arrowY = doorY + doorH - 80;
+  var arrowSize = 40;
+  var dArrow = "M " + (CX - arrowSize) + " " + (arrowY + arrowSize * 0.55) +
+               " L " + CX + " " + (arrowY - arrowSize * 0.55) +
+               " L " + (CX + arrowSize) + " " + (arrowY + arrowSize * 0.55);
+  s += pathTag(dArrow, WHITE, 14, 0.9);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
