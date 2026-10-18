@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Supermarket Aisles Are So Wide</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var AISLE_WIDTH_INITIAL = 500;      // Initial wide aisle width
+var AISLE_WIDTH_NARROW = 280;       // Narrow aisle width for thought bubble
+var AISLE_WIDTH_FLOW = 400;         // Aisle width when showing flow
+var AISLE_WIDTH_FINAL = 380;        // Final aisle width
+
+var SHELF_W = 120;                  // Shelf width
+
+var SHOPPER_Y = 1400;               // Shopper's resting height
+var CART_Y_OFFSET = 40;             // Cart's offset from shopper
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> system / flow
+var AMBER = "#F2A93B";              // warm amber   -> YOU / desire
+var CORAL = "#FF5B5B";              // coral red    -> naive / wrong ideas
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+// Stick figure shopper
+function shopper(x, y, col, headTilt, armReach, gazeX, gazeY, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  // Head
+  g += dot(x, y - 60, 18, col);
+  // Body
+  g += line(x, y - 40, x, y + 10, col, 8);
+  // Legs
+  var legOffset = 20;
+  var legBend = Math.sin(y / 20) * 5; // Subtle leg movement
+  g += line(x, y + 10, x - legOffset, y + 60 + legBend, col, 8);
+  g += line(x, y + 10, x + legOffset, y + 60 - legBend, col, 8);
+  // Arms
+  var armStartX = x + 10;
+  var armStartY = y - 30;
+  var armMidX = x + 30;
+  var armMidY = y - 10;
+  var handX = x + 50 + armReach * 20;
+  var handY = y - 10 + armReach * 30;
+  g += line(armStartX, armStartY, armMidX, armMidY, col, 8); // Upper arm
+  g += line(armMidX, armMidY, handX, handY, col, 8); // Lower arm + hand
+
+  // Head tilt / gaze / expression
+  if (headTilt !== 0) {
+    var tiltX = x + headTilt * 10;
+    var tiltY = y - 60 - Math.abs(headTilt) * 5;
+    // Simple "confused" or "thought" line near head
+    g += line(x + (headTilt > 0 ? 10 : -10), y - 70, x + (headTilt > 0 ? 20 : -20), y - 85, WHITE, 3);
+  }
+  if (gazeX != null && gazeY != null) {
+      g += line(x, y - 60, x + gazeX, y - 60 + gazeY, WHITE, 7); // Gaze line
+  }
+
+  g += '</g>';
+  return g;
+}
+
+// Shopping cart
+function shoppingCart(x, y, col, contentOp, shakeX, shakeY, items) {
+  shakeX = shakeX || 0;
+  shakeY = shakeY || 0;
+  var g = '<g transform="translate(' + shakeX + ' ' + shakeY + ')">';
+  // Basket
+  g += rrectStroke(x, y, 100, 80, 10, col, 8);
+  // Handle
+  g += line(x + 50, y - 40, x + 80, y - 50, col, 8);
+  // Wheels
+  g += dot(x - 30, y + 40, 10, col);
+  g += dot(x + 30, y + 40, 10, col);
+  // Items in cart
+  if (items && items.length > 0) {
+    items.forEach(item => {
+      g += rrect(x + item.x, y + item.y, item.w, item.h, 4, WHITE, contentOp);
+    });
+  }
+  g += '</g>';
+  return g;
+}
+
+// Aisle floor lines (hero element)
+function aisleFloor(width, col, sw, op, perspectiveFactor) {
+  perspectiveFactor = perspectiveFactor == null ? 0.05 : perspectiveFactor; // Default slight perspective
+  var s = '';
+  var halfW = width / 2;
+  var topX_L = CX - halfW * (1 - perspectiveFactor);
+  var topX_R = CX + halfW * (1 - perspectiveFactor);
+  var botX_L = CX - halfW;
+  var botX_R = CX + halfW;
+
+  s += line(botX_L, BOT, topX_L, TOP, col, sw, op);
+  s += line(botX_R, BOT, topX_R, TOP, col, sw, op);
+  return s;
+}
+
+// Simple shelf
+function shelf(x, y, w, h, col, op) {
+  return rrect(x, y, w, h, 8, col, op);
+}
+
+// Product on shelf (simple rectangle)
+function shelfProduct(x, y, w, h, col, op) {
+  return rrect(x, y, w, h, 4, col, op);
+}
+
+// Thought bubble
+function thoughtBubble(x, y, size, col, op) {
+  var d = "M " + x + " " + y +
+          " C " + (x + size * 0.8) + " " + (y - size * 0.4) +
+          " " + (x + size * 0.6) + " " + (y - size * 0.8) +
+          " " + x + " " + (y - size) +
+          " C " + (x - size * 0.6) + " " + (y - size * 0.8) +
+          " " + (x - size * 0.8) + " " + (y - size * 0.4) +
+          " " + x + " " + y + " Z";
+  return pathTag(d, col, 6, op);
+}
+
+// Arrow for flow
+function flowArrow(x, y, size, col, op, directionY) {
+  directionY = directionY == null ? 1 : directionY; // 1 for down, -1 for up
+  var d = "M " + (x - size / 2) + " " + (y - directionY * size * 0.4) +
+          " L " + x + " " + (y + directionY * size * 0.4) +
+          " L " + (x + size / 2) + " " + (y - directionY * size * 0.4);
+  return pathTag(d, col, 10, op);
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var aisleW = AISLE_WIDTH_INITIAL;
+  var shopperX = CX;
+
+  // Camera zoom and drift
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  // Aisle floor lines
+  s += aisleFloor(aisleW, WHITE, 10, 0.8);
+
+  // Shelves (static)
+  s += shelf(CX - aisleW / 2 - SHELF_W / 2, CY, SHELF_W, BOT - TOP, DIM, 0.15);
+  s += shelf(CX + aisleW / 2 + SHELF_W / 2, CY, SHELF_W, BOT - TOP, DIM, 0.15);
+
+  // Other shoppers (static, dim)
+  for (var i = 0; i < 4; i++) {
+    var otherShopperY = BOT - 200 - i * 300 - u * 50 + rnd(i) * 60;
+    while(otherShopperY < TOP) otherShopperY += (BOT - TOP);
+    s += dot(CX - aisleW / 4 + rnd(i+10) * 80 - 40, otherShopperY, 16, DIM, 0.6);
+  }
+
+  // Shopper and cart
+  var shopperBob = Math.sin(u * Math.PI * 3) * 5;
+  var headTilt = lerp(0, 0.3, smooth(ramp(u, 0.0, 0.4))); // Confused look
+  s += shopper(shopperX, SHOPPER_Y + shopperBob, AMBER, headTilt, 0);
+  s += shoppingCart(shopperX, SHOPPER_Y + CART_Y_OFFSET + shopperBob, WHITE, 0);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var aisleW = AISLE_WIDTH_INITIAL;
+  var shopperX = CX;
+
+  // Subtle camera shake for 'navigating'
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14);
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+
+  s += aisleFloor(aisleW, WHITE, 10, 0.8);
+
+  // Shelves (static)
+  s += shelf(CX - aisleW / 2 - SHELF_W / 2, CY, SHELF_W, BOT - TOP, DIM, 0.15);
+  s += shelf(CX + aisleW / 2 + SHELF_W / 2, CY, SHELF_W, BOT - TOP, DIM, 0.15);
+
+  // Other shoppers / displays
+  var staticObstacleY = lerp(BOT - 300, TOP + 300, easeOut(u * 0.8));
+  s += rrect(CX + aisleW / 4, staticObstacleY, 80, 120, 10, DIM, 0.7); // Display box
+  s += dot(CX - aisleW / 4, staticObstacleY + 100, 16, DIM, 0.6); // Another shopper head
+
+  // Shopper path
+  var pathOffset = Math.sin(u * Math.PI * 2) * 80; // Swerving motion
+  shopperX = CX + pathOffset;
+
+  s += shopper(shopperX, SHOPPER_Y, AMBER, 0, 0);
+  s += shoppingCart(shopperX, SHOPPER_Y + CART_Y_OFFSET, WHITE, 0);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var aisleW = AISLE_WIDTH_INITIAL;
+  var shopperX = CX;
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  s += aisleFloor(aisleW, WHITE, 10, 0.8);
+
+  // Shelves (static)
+  s += shelf(CX - aisleW / 2 - SHELF_W / 2, CY, SHELF_W, BOT - TOP, DIM, 0.15);
+  s += shelf(CX + aisleW / 2 + SHELF_W / 2, CY, SHELF_W, BOT - TOP, DIM, 0.15);
+
+  // Shopper thoughtful
+  var headTilt = lerp(0, -0.4, smooth(ramp(u, 0.0, 0.3)));
+  s += shopper(shopperX, SHOPPER_Y, AMBER, headTilt, 0);
+  s += shoppingCart(shopperX, SHOPPER_Y + CART_Y_OFFSET, WHITE, 0);
+
+  // Thought bubble sequence
+  var bubbleOp = ramp(u, 0.1, 0.4) * (1 - ramp(u, 0.7, 0.9));
+  if (bubbleOp > 0.01) {
+    var bubbleX = shopperX + 100;
+    var bubbleY = SHOPPER_Y - 180;
+    var bubbleSize = lerp(0, 80, easeOut(ramp(u, 0.1, 0.3)));
+    s += thoughtBubble(bubbleX, bubbleY, bubbleSize, CORAL, bubbleOp);
+
+    // Naive idea: cramped aisle inside bubble
+    if (u > 0.2 && u < 0.7) {
+      var innerAisleW = AISLE_WIDTH_NARROW;
+      var innerAisleOp = ramp(u, 0.3, 0.5);
+      s += '<g transform="translate(' + bubbleX + ' ' + (bubbleY - bubbleSize / 2) + ') scale(0.3)">';
+      s += aisleFloor(innerAisleW, CORAL, 10, innerAisleOp, 0.1);
+      s += dot(0, 0, 15, DIM, innerAisleOp * 0.5); // "congestion" dot
+      s += '</g>';
+    }
+
+    // Shattering effect
+    var shatterProg = ramp(u, 0.7, 0.9);
+    if (shatterProg > 0) {
+      var fragOp = 1 - shatterProg;
+      for (var i = 0; i < 8; i++) {
+        var fragX = bubbleX + Math.cos(i * Math.PI / 4) * shatterProg * 100 + rnd(i) * 20;
+        var fragY = bubbleY + Math.sin(i * Math.PI / 4) * shatterProg * 100 + rnd(i+1) * 20;
+        s += dot(fragX, fragY, lerp(8, 2, shatterProg), CORAL, fragOp);
+      }
+    }
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var aisleW = lerp(AISLE_WIDTH_INITIAL, AISLE_WIDTH_FLOW, smooth(ramp(u, 0.0, 0.3)));
+  var shopperX = CX;
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Aisle floor lines transforming to blue arrows
+  var blueLineOp = ramp(u, 0.1, 0.4);
+  var whiteLineOp = 1 - blueLineOp;
+  s += aisleFloor(aisleW, WHITE, 10, 0.8 * whiteLineOp); // Fading white lines
+
+  // Blue flow lines and arrows
+  if (blueLineOp > 0.01) {
+    s += aisleFloor(aisleW, BLUE, 10, 0.8 * blueLineOp);
+    var arrowCount = 4;
+    for (var i = 0; i < arrowCount; i++) {
+      var arrowY = lerp(BOT - 100, TOP + 100, (u * 0.8 + i / arrowCount) % 1);
+      s += flowArrow(CX - aisleW / 4, arrowY, 40, BLUE, blueLineOp);
+      s += flowArrow(CX + aisleW / 4, arrowY - 150, 40, BLUE, blueLineOp);
+    }
+  }
+
+  // Shelves lighting up blue
+  var shelfBlueOp = ramp(u, 0.2, 0.5);
+  s += shelf(CX - aisleW / 2 - SHELF_W / 2, CY, SHELF_W, BOT - TOP, BLUE, 0.15 * shelfBlueOp);
+  s += shelf(CX + aisleW / 2 + SHELF_W / 2, CY, SHELF_W, BOT - TOP, BLUE, 0.15 * shelfBlueOp);
+  s += shelf(CX - aisleW / 2 - SHELF_W / 2, CY, SHELF_W, BOT - TOP, DIM, 0.15 * (1 - shelfBlueOp));
+  s += shelf(CX + aisleW / 2 + SHELF_W / 2, CY, SHELF_W, BOT - TOP, DIM, 0.15 * (1 - shelfBlueOp));
+
+  // Shopper moves with purpose
+  var shopperSpeed = lerp(0, 100, easeIn(ramp(u, 0.5, 0.9)));
+  var shopperYOffset = u * shopperSpeed * 2; // Move down the aisle
+  s += shopper(shopperX, SHOPPER_Y - shopperYOffset, AMBER, 0, 0);
+  s += shoppingCart(shopperX, SHOPPER_Y + CART_Y_OFFSET - shopperYOffset, WHITE, 0);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var aisleW = AISLE_WIDTH_FLOW;
+  var shopperX = CX;
+
+  // Camera slightly closer
+  var scale = lerp(1.0, 0.95, smooth(u));
+  var driftY = lerp(0, 50, smooth(u));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  // Aisle floor lines (blue flow)
+  s += aisleFloor(aisleW, BLUE, 10, 0.8);
+
+  // Shelves (blue highlight)
+  s += shelf(CX - aisleW / 2 - SHELF_W / 2, CY, SHELF_W, BOT - TOP, BLUE, 0.18);
+  s += shelf(CX + aisleW / 2 + SHELF_W / 2, CY, SHELF_W, BOT - TOP, BLUE, 0.18);
+
+  // Shopper moving and reaching
+  var shopperY = SHOPPER_Y - u * 100;
+  var armReach = ramp(u, 0.3, 0.5) * (1 - ramp(u, 0.6, 0.8)); // Reach out, then retract
+  var itemDropProg = ramp(u, 0.4, 0.6);
+
+  s += shopper(shopperX, shopperY, AMBER, 0, armReach);
+  var cartShakeX = Math.sin(u * 30) * 5 * pulse(u, 0.6, 0.1);
+  var cartShakeY = Math.cos(u * 30) * 5 * pulse(u, 0.6, 0.1);
+
+  // Items in cart
+  var cartItems = [];
+  var currentItems = Math.floor(ramp(u, 0.1, 0.7) * 4);
+  for (var i = 0; i < currentItems; i++) {
+    cartItems.push({ x: rnd(i) * 60 - 30, y: 20 - i * 10, w: 30 + rnd(i+10) * 20, h: 20 + rnd(i+20) * 10 });
+  }
+
+  // New item dropping
+  if (itemDropProg > 0 && itemDropProg < 1) {
+    var itemX = lerp(CX + aisleW / 2 - SHELF_W / 2, shopperX, easeIn(itemDropProg));
+    var itemY = lerp(shopperY - 100, SHOPPER_Y + CART_Y_OFFSET + 10, easeIn(itemDropProg));
+    s += rrect(itemX, itemY, 40, 30, 4, WHITE, 0.9);
+  } else if (itemDropProg >= 1) {
+    cartItems.push({ x: rnd(100) * 60 - 30, y: 20 - currentItems * 10, w: 40, h: 30 }); // Add the dropped item
+  }
+
+  s += shoppingCart(shopperX, SHOPPER_Y + CART_Y_OFFSET - u * 100, WHITE, 0.9, cartShakeX, cartShakeY, cartItems);
+
+  // Products on shelves
+  for (var i = 0; i < 6; i++) {
+    var prodY = TOP + 100 + i * 200;
+    s += shelfProduct(CX - aisleW / 2 - SHELF_W / 2, prodY, SHELF_W * 0.8, 60, DIM, 0.4);
+    s += shelfProduct(CX + aisleW / 2 + SHELF_W / 2, prodY + 50, SHELF_W * 0.8, 60, DIM, 0.4);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var reform = smooth(ramp(u, 0.58, 0.86)); // Transition back to white lines
+  var aisleW = lerp(AISLE_WIDTH_FLOW, AISLE_WIDTH_FINAL, reform);
+  var shopperX = CX;
+
+  // Camera pull back slightly, stabilize
+  var scale = lerp(0.95, 1.0, smooth(clamp(u / 0.7, 0, 1)));
+  var driftY = lerp(50, 0, smooth(u));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  // Aisle lines transitioning
+  var blueLineOp = 1 - reform;
+  var whiteLineOp = reform;
+
+  s += aisleFloor(aisleW, BLUE, 10, 0.8 * blueLineOp); // Fading blue lines
+  s += aisleFloor(aisleW, WHITE, 10, 0.8 * whiteLineOp); // Appearing white lines
+
+  // Blue flow arrows fading
+  if (blueLineOp > 0.01) {
+    var arrowCount = 4;
+    for (var i = 0; i < arrowCount; i++) {
+      var arrowY = lerp(BOT - 100, TOP + 100, (u * 0.8 + i / arrowCount) % 1);
+      s += flowArrow(CX - aisleW / 4, arrowY, 40, BLUE, blueLineOp);
+      s += flowArrow(CX + aisleW / 4, arrowY - 150, 40, BLUE, blueLineOp);
+    }
+  }
+
+  // Shelves (transitioning from blue to white/dim)
+  s += shelf(CX - aisleW / 2 - SHELF_W / 2, CY, SHELF_W, BOT - TOP, BLUE, 0.18 * blueLineOp);
+  s += shelf(CX + aisleW / 2 + SHELF_W / 2, CY, SHELF_W, BOT - TOP, BLUE, 0.18 * blueLineOp);
+  s += shelf(CX - aisleW / 2 - SHELF_W / 2, CY, SHELF_W, BOT - TOP, DIM, 0.15 * whiteLineOp);
+  s += shelf(CX + aisleW / 2 + SHELF_W / 2, CY, SHELF_W, BOT - TOP, DIM, 0.15 * whiteLineOp);
+
+  // Shopper continues, cart is fuller
+  var shopperY = SHOPPER_Y; // Shopper back to neutral
+  var cartItems = [];
+  var finalItemCount = 6;
+  for (var i = 0; i < finalItemCount; i++) {
+    cartItems.push({ x: rnd(i) * 60 - 30, y: 20 - i * 10, w: 30 + rnd(i+10) * 20, h: 20 + rnd(i+20) * 10 });
+  }
+  s += shopper(shopperX, shopperY, AMBER, 0, 0); // Shopper back to neutral
+  s += shoppingCart(shopperX, shopperY + CART_Y_OFFSET, WHITE, 0.9, 0, 0, cartItems);
+
+  // Final "conscious choice" indicator (simple box)
+  var finalIndOp = ramp(u, 0.8, 0.95);
+  if (finalIndOp > 0.01) {
+    s += rrect(CX, SHOPPER_Y - 120, 40, 40, 6, AMBER, finalIndOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
