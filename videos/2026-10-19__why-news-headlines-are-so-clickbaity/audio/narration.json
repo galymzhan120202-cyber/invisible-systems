@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "Every day, you scroll through a river of news, hoping to catch the important bits. You just want clear, objective facts to understand what's happening in the world.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "But instead, you're constantly bombarded by headlines screaming about shocking secrets, unbelievable events, and things that will absolutely astound you.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "Your first thought might be that journalists have just gotten lazy or that news sites only care about sensationalism. It feels like they're just trying to trick you.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "The truth is, they're trapped in an attention economy. News platforms use algorithms that learn what gets clicks, and emotional, vague headlines are engagement gold.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "So, the incentive system rewards the most click-worthy, not necessarily the most informative. The cost is a constant stream of low-quality, misleading information.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "You'll still see those headlines tomorrow. But now, you understand the invisible forces at play, and you can choose how you engage with the information flow.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

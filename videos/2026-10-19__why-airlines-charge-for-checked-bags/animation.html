@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Airlines Charge for Checked Bags</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue  -> the system / structure
+var AMBER = "#F2A93B";              // warm amber   -> YOU / your desires / your bag
+var CORAL = "#FF5B5B";              // coral red    -> frustration / naive assumptions
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom elements ---------- */
+
+// Stick figure: head, body, arms, legs. Pose variations.
+function stickFigure(x, y, scale, pose, col, op) {
+  scale = scale == null ? 1 : scale;
+  col = col == null ? WHITE : col;
+  op = op == null ? 1 : op;
+  var sw = 8 * scale;
+  var headR = 24 * scale;
+  var bodyH = 80 * scale;
+  var armL = 50 * scale;
+  var legL = 60 * scale;
+
+  var s = '<g opacity="' + op + '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round">';
+  // Head
+  s += dot(x, y - bodyH / 2 - headR, headR, col);
+
+  // Body
+  s += line(x, y - bodyH / 2, x, y + bodyH / 2, col, sw);
+
+  // Arms
+  if (pose === 'happy') {
+    s += line(x - 10 * scale, y - 30 * scale, x - armL, y - 10 * scale, col, sw); // Left arm up
+    s += line(x + 10 * scale, y - 30 * scale, x + armL, y - 10 * scale, col, sw); // Right arm up
+  } else if (pose === 'frustrated') {
+    s += line(x - 10 * scale, y + 10 * scale, x - armL, y + 10 * scale, col, sw); // Left arm on hip
+    s += line(x + 10 * scale, y + 10 * scale, x + armL, y + 10 * scale, col, sw); // Right arm on hip
+  } else if (pose === 'nodding') {
+    s += line(x - 10 * scale, y - 30 * scale, x - armL * 0.7, y - 20 * scale, col, sw);
+    s += line(x + 10 * scale, y - 30 * scale, x + armL * 0.7, y - 20 * scale, col, sw);
+    s += line(x, y - bodyH / 2 - headR, x + 10 * scale, y - bodyH / 2 - headR + 20 * scale, col, sw * 0.8, op * 0.6); // slight head tilt line
+  } else { // neutral/surprised
+    s += line(x - 10 * scale, y - 30 * scale, x - armL * 0.8, y + 10 * scale, col, sw);
+    s += line(x + 10 * scale, y - 30 * scale, x + armL * 0.8, y + 10 * scale, col, sw);
+  }
+
+  // Legs
+  s += line(x - 15 * scale, y + bodyH / 2, x - 25 * scale, y + bodyH / 2 + legL, col, sw);
+  s += line(x + 15 * scale, y + bodyH / 2, x + 25 * scale, y + bodyH / 2 + legL, col, sw);
+  s += '</g>';
+  return s;
+}
+
+// Amber Travel Bag (hero element)
+function travelBag(x, y, w, h, rad, col, handleCol, wheels, op) {
+  col = col == null ? AMBER : col;
+  handleCol = handleCol == null ? WHITE : handleCol;
+  op = op == null ? 1 : op;
+  var sw = 8;
+  var s = '<g opacity="' + op + '">';
+  s += rrectStroke(x, y, w, h, rad, col, sw); // Bag body
+  s += line(x, y - h / 2 - 10, x, y - h / 2 + 10, handleCol, sw); // Handle base
+  s += line(x - w / 4, y - h / 2 - 10, x + w / 4, y - h / 2 - 10, handleCol, sw); // Handle top
+  if (wheels) {
+    s += dot(x - w / 3, y + h / 2 - 4, 10, handleCol); // Left wheel
+    s += dot(x + w / 3, y + h / 2 - 4, 10, handleCol); // Right wheel
+  }
+  s += '</g>';
+  return s;
+}
+
+// Simple airplane icon
+function airplaneIcon(x, y, size, col, op) {
+  col = col == null ? WHITE : col;
+  op = op == null ? 1 : op;
+  var sw = 7;
+  var s = '<g opacity="' + op + '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round">';
+  s += line(x - size * 0.8, y, x + size * 0.8, y, col, sw); // Body
+  s += line(x - size * 0.4, y - size * 0.5, x + size * 0.2, y, col, sw); // Left wing
+  s += line(x - size * 0.4, y + size * 0.5, x + size * 0.2, y, col, sw); // Right wing
+  s += line(x + size * 0.6, y - size * 0.2, x + size * 0.8, y, col, sw); // Tail fin top
+  s += line(x + size * 0.6, y + size * 0.2, x + size * 0.8, y, col, sw); // Tail fin bottom
+  s += '</g>';
+  return s;
+}
+
+// Dollar sign glyph
+function dollarSign(x, y, size, col, sw, op) {
+  sw = sw == null ? 10 : sw;
+  col = col == null ? WHITE : col;
+  op = op == null ? 1 : op;
+  var s = '<g opacity="' + op + '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round">';
+  s += line(x, y - size, x, y + size, col, sw * 0.8); // Vertical bar
+  s += pathTag("M " + (x - size * 0.4) + " " + (y - size * 0.5) + " A " + (size * 0.4) + " " + (size * 0.3) + " 0 0 1 " + (x + size * 0.4) + " " + (y - size * 0.1), col, sw);
+  s += pathTag("M " + (x + size * 0.4) + " " + (y + size * 0.5) + " A " + (size * 0.4) + " " + (size * 0.3) + " 0 0 1 " + (x - size * 0.4) + " " + (y + size * 0.1), col, sw);
+  s += '</g>';
+  return s;
+}
+
+// Cross mark glyph (X)
+function crossMark(x, y, size, col, sw, op) {
+  sw = sw == null ? 10 : sw;
+  col = col == null ? WHITE : col;
+  op = op == null ? 1 : op;
+  var s = '<g opacity="' + op + '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round">';
+  s += line(x - size / 2, y - size / 2, x + size / 2, y + size / 2, col, sw);
+  s += line(x - size / 2, y + size / 2, x + size / 2, y - size / 2, col, sw);
+  s += '</g>';
+  return s;
+}
+
+// Plus sign glyph
+function plusSign(x, y, size, col, sw, op) {
+  sw = sw == null ? 10 : sw;
+  col = col == null ? WHITE : col;
+  op = op == null ? 1 : op;
+  var s = '<g opacity="' + op + '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round">';
+  s += line(x - size / 2, y, x + size / 2, y, col, sw);
+  s += line(x, y - size / 2, x, y + size / 2, col, sw);
+  s += '</g>';
+  return s;
+}
+
+// Simple low fare glyph (a simple dot)
+function lowFareGlyph(x, y, r, col, op) {
+  return dot(x, y, r, col, op);
+}
+
+// Simple checked bag icon (outline of a larger bag)
+function checkedBagGlyph(x, y, w, h, rad, col, sw, op) {
+  return rrectStroke(x, y, w, h, rad, col, sw, op);
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.0, 1.05, smooth(u * 0.8)); // Subtle zoom in
+  var sway = Math.sin(u * Math.PI * 2) * 8; // Figure sway
+  var bagY = lerp(BOT - 400, BOT - 420, smooth(u * 0.8)); // Bag subtle float
+
+  s += '<g ' + camera(scale, 0, 0) + '>';
+
+  // Ground line
+  s += line(CX - 400, BOT - 100, CX + 400, BOT - 100, WHITE, 8, 0.8);
+
+  // Airplane icon in background
+  s += airplaneIcon(CX, TOP + 180, 120, DIM, 0.3 + 0.1 * Math.sin(u * Math.PI * 4));
+
+  // Happy stick figure
+  s += stickFigure(CX + 180 + sway, BOT - 280, 1, 'happy', WHITE, 1);
+
+  // Amber carry-on bag (hero element)
+  s += travelBag(CX - 120, bagY, 160, 260, 20, AMBER, WHITE, true, 1);
+
+  // Packing click animation (small ring pulse)
+  var clickPulse = pulse(u, 0.25, 0.05); // Around 2.5s mark (u=0.25)
+  if (clickPulse > 0) {
+    s += ring(CX - 120, bagY - 100, 40 + clickPulse * 20, WHITE, 6, clickPulse * 0.8);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var wipeX = lerp(-W, 0, easeOut(ramp(u, 0.0, 0.15))); // Wipe from left
+  var zoom = lerp(1.0, 1.1, easeOut(ramp(u, 0.4, 0.6))); // Zoom on bag mark
+  var bagY = BOT - 420;
+  var bagX = lerp(CX - 120, CX + 100, smooth(u * 0.3)); // Bag moves to counter
+
+  s += '<g transform="translate(' + wipeX + ' 0)">';
+  s += '<g ' + camera(zoom, 0, 0) + '>';
+
+  // Ground line
+  s += line(CX - 400, BOT - 100, CX + 400, BOT - 100, WHITE, 8, 0.8);
+
+  // Stylized airport counter
+  s += rrect(CX - 200, BOT - 250, 400, 300, 20, WHITE, 0.15);
+  s += line(CX - 400, BOT - 100, CX - 200, BOT - 100, WHITE, 8, 0.8);
+  s += line(CX + 400, BOT - 100, CX + 200, BOT - 100, WHITE, 8, 0.8);
+
+  // Stick figure at counter
+  s += stickFigure(CX - 250, BOT - 280, 1, 'neutral', WHITE, 1);
+
+  // Amber bag at counter
+  s += travelBag(bagX, bagY, 160, 260, 20, AMBER, WHITE, true, 1);
+
+  // Coral red 'X' or oversized outline on bag
+  var markOp = ramp(u, 0.3, 0.5); // Appears around 13s (u=0.3)
+  var markSize = lerp(0, 80, easeOut(ramp(u, 0.3, 0.4)));
+  var markRingPulse = pulse(u, 0.4, 0.05);
+  if (markOp > 0) {
+    s += crossMark(bagX, bagY - 30, markSize, CORAL, 12, markOp);
+    if (markRingPulse > 0) {
+      s += ring(bagX, bagY - 30, markSize * 0.8 + markRingPulse * 15, CORAL, 8, markRingPulse * 0.6);
+    }
+  }
+
+  // Small bag fee icon (dollar sign) appears
+  var feeOp = ramp(u, 0.45, 0.65); // Appears around 14.5s (u=0.45)
+  var feeY = lerp(bagY - 100, bagY - 180, easeOut(ramp(u, 0.45, 0.55)));
+  var feeSize = lerp(0, 50, easeOut(ramp(u, 0.45, 0.55)));
+  if (feeOp > 0) {
+    s += dollarSign(bagX + 100, feeY, feeSize, CORAL, 8, feeOp);
+  }
+
+  s += '</g>';
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var shakeX = Math.sin(u * 42) * 5 * pulse(u, 0.4, 0.2); // Subtle shake for frustration
+  var thoughtBubbleY = lerp(CY - 400, CY - 420, easeOut(ramp(u, 0.0, 0.2)));
+  var dollarPulse = pulse(u, 0.5, 0.1); // Dollar sign pulses
+  var lineShake = Math.sin(u * 30 + 1) * 3 * pulse(u, 0.6, 0.2); // Line of figures shakes
+
+  s += '<g ' + camera(1.0, shakeX, 0) + '>';
+
+  // Ground line
+  s += line(CX - 400, BOT - 100, CX + 400, BOT - 100, WHITE, 8, 0.8);
+
+  // Frustrated stick figure
+  s += stickFigure(CX, BOT - 280, 1, 'frustrated', WHITE, 1);
+
+  // Coral red thought bubble
+  var bubbleOp = ramp(u, 0.0, 0.2);
+  if (bubbleOp > 0) {
+    s += ring(CX, thoughtBubbleY, 100, CORAL, 10, bubbleOp);
+    s += ring(CX + 80, thoughtBubbleY + 80, 40, CORAL, 8, bubbleOp);
+    s += ring(CX + 140, thoughtBubbleY + 120, 20, CORAL, 6, bubbleOp);
+    // Angry dollar sign inside thought bubble
+    s += dollarSign(CX, thoughtBubbleY, 60 + dollarPulse * 10, CORAL, 10, bubbleOp * (0.6 + 0.4 * dollarPulse));
+  }
+
+  // Other stick figures in a line behind, showing frustration
+  for (var i = 0; i < 3; i++) {
+    var figX = CX - 200 + i * 200 + lineShake;
+    var figY = BOT - 280;
+    var figOp = lerp(0.4, 0.8, rnd(i));
+    s += stickFigure(figX, figY, 0.7, 'frustrated', DIM, figOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var splitProgress = smooth(ramp(u, 0.0, 0.2)); // Horizontal split reveal
+  var leftPanelX = lerp(CX, CX - W / 4, splitProgress);
+  var rightPanelX = lerp(CX, CX + W / 4, splitProgress);
+
+  // Base fare panel
+  s += rrect(leftPanelX, CY, W / 2 - 50, BOT - TOP - 100, 30, BLUE, 0.3);
+  s += rrectStroke(leftPanelX, CY, W / 2 - 50, BOT - TOP - 100, 30, BLUE, 10, 0.8);
+  s += lowFareGlyph(leftPanelX, CY, 40, WHITE, 0.8); // Simple dot for low fare
+
+  // "BAGS +" panel
+  s += rrect(rightPanelX, CY, W / 2 - 50, BOT - TOP - 100, 30, BLUE, 0.3);
+  s += rrectStroke(rightPanelX, CY, W / 2 - 50, BOT - TOP - 100, 30, BLUE, 10, 0.8);
+  s += plusSign(rightPanelX + 100, CY - 100, 60, WHITE, 10, 0.8);
+  s += checkedBagGlyph(rightPanelX - 80, CY - 100, 120, 180, 15, WHITE, 8, 0.8);
+
+  // Amber bag slides into "BAGS +" section
+  var bagSlideX = lerp(CX, rightPanelX, easeOut(ramp(u, 0.3, 0.6)));
+  var bagSlideY = CY + 100;
+  var bagOp = ramp(u, 0.2, 0.4);
+  s += travelBag(bagSlideX, bagSlideY, 140, 220, 18, AMBER, WHITE, true, bagOp);
+
+  // Signal blue glow from "BASE FARE"
+  var glowPulse = pulse(u, 0.2, 0.1); // Around 32s (u=0.2)
+  if (glowPulse > 0) {
+    s += ring(leftPanelX, CY, 200 + glowPulse * 50, BLUE, 15, glowPulse * 0.6);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var fadeOp = ramp(u, 0.0, 0.2); // Fade in
+  var fig1X = CX - 250, fig2X = CX + 250;
+  var figY = BOT - 280;
+
+  s += '<g opacity="' + fadeOp + '">';
+
+  // Ground line
+  s += line(CX - 400, BOT - 100, CX + 400, BOT - 100, WHITE, 8, 0.8);
+
+  // Amber figure (budget traveler) with small amber carry-on
+  s += stickFigure(fig1X, figY, 0.9, 'neutral', AMBER, 1);
+  s += travelBag(fig1X + 80, figY - 100, 100, 160, 15, AMBER, WHITE, false, 1);
+  // Arrow to low base fare
+  s += line(fig1X + 150, figY - 180, fig1X + 250, figY - 250, BLUE, 8, 0.8);
+  s += line(fig1X + 250, figY - 250, fig1X + 230, figY - 240, BLUE, 8, 0.8);
+  s += line(fig1X + 250, figY - 250, fig1X + 240, figY - 230, BLUE, 8, 0.8);
+  s += lowFareGlyph(fig1X + 280, figY - 280, 30, BLUE, 0.8);
+
+  // Second figure (convenience traveler) with signal blue checked bag icon
+  s += stickFigure(fig2X, figY, 1.1, 'neutral', WHITE, 1);
+  s += checkedBagGlyph(fig2X - 80, figY - 100, 140, 200, 18, BLUE, 8, 1);
+  // Arrow to checked bag option
+  s += line(fig2X - 150, figY - 180, fig2X - 250, figY - 250, BLUE, 8, 0.8);
+  s += line(fig2X - 250, figY - 250, fig2X - 230, figY - 240, BLUE, 8, 0.8);
+  s += line(fig2X - 250, figY - 250, fig2X - 240, figY - 230, BLUE, 8, 0.8);
+  s += checkedBagGlyph(fig2X - 280, figY - 280, 80, 120, 10, BLUE, 6, 0.8);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var zoom = lerp(1.0, 0.9, smooth(ramp(u, 0.0, 0.2))); // Zoom out
+  var menuBoardY = lerp(CY + 100, CY, smooth(ramp(u, 0.0, 0.3)));
+  var bagHighlightPulse = pulse(u, 0.7, 0.1); // Bag highlight pulse at end
+
+  s += '<g ' + camera(zoom, 0, 0) + '>';
+
+  // Ground line
+  s += line(CX - 400, BOT - 100, CX + 400, BOT - 100, WHITE, 8, 0.8);
+
+  // Stick figure nodding knowingly
+  s += stickFigure(CX, BOT - 280, 1, 'nodding', WHITE, 1);
+
+  // Clear, signal blue "menu" board
+  s += rrect(CX, menuBoardY, 700, 800, 40, BLUE, 0.3);
+  s += rrectStroke(CX, menuBoardY, 700, 800, 40, BLUE, 12, 0.8);
+
+  // Menu items: "BASE FARE" and "BAGS"
+  var itemY1 = menuBoardY - 200;
+  var itemY2 = menuBoardY + 100;
+
+  // BASE FARE option
+  s += rrect(CX, itemY1, 600, 180, 20, BLUE, 0.2);
+  s += rrectStroke(CX, itemY1, 600, 180, 20, WHITE, 8, 0.8);
+  s += lowFareGlyph(CX - 150, itemY1, 40, WHITE, 0.8);
+  s += line(CX + 50, itemY1, CX + 150, itemY1, WHITE, 8, 0.8); // Simple bar for "fare"
+
+  // BAGS option
+  s += rrect(CX, itemY2, 600, 180, 20, BLUE, 0.2);
+  s += rrectStroke(CX, itemY2, 600, 180, 20, WHITE, 8, 0.8);
+  s += checkedBagGlyph(CX - 150, itemY2, 100, 150, 15, WHITE, 8, 0.8);
+  s += plusSign(CX + 50, itemY2, 60, WHITE, 10, 0.8);
+
+  // Amber bag highlighted as selected option
+  var bagHighlightOp = ramp(u, 0.6, 0.8) * (0.5 + 0.5 * bagHighlightPulse);
+  s += travelBag(CX - 150, itemY2, 100, 150, 15, AMBER, WHITE, true, 1);
+  if (bagHighlightOp > 0) {
+    s += rrectStroke(CX, itemY2, 600, 180, 20, AMBER, 12, bagHighlightOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
