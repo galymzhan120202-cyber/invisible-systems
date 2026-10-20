@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why We Pick the Second Cheapest Option</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> system / anchor
+var AMBER = "#F2A93B";              // warm amber   -> YOU / chosen option
+var CORAL = "#FF5B5B";              // coral red    -> naive model / dismissed option
+
+var DUR = 60;
+window.__duration = DUR;
+
+// Product option positions and dimensions
+var OPT_L_X = CX - 300;
+var OPT_M_X = CX;
+var OPT_R_X = CX + 300;
+var OPT_CY = CY - 100; // Center Y for options, slightly above true center
+var OPT_W = 100;
+var OPT_H_SHORT = 300;
+var OPT_H_MEDIUM = 600;
+var OPT_H_TALL = 900;
+
+// Stick figure position
+var FIG_X = CX;
+var FIG_Y = BOT - 100; // Base of feet
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom shape builders ---------- */
+
+// Base stick figure dimensions (relative to y=0, x=0)
+var SF_HEAD_R = 20;
+var SF_BODY_TOP = -140;
+var SF_BODY_BOT = -60;
+var SF_ARM_Y = -120;
+var SF_LEG_DX = 30;
+var SF_LEG_DY = 0; // relative to SF_BODY_BOT
+var SF_ARM_DX = 40;
+var SF_ARM_DY = 40; // relative to SF_ARM_Y
+
+function drawStickFigure(x, y, col, scale, head_dx, head_dy, armL_dx, armL_dy, armR_dx, armR_dy, op) {
+  scale = scale || 1;
+  op = (op == null ? 1 : op);
+  var sw = 8 * scale;
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ')">';
+  // Head
+  g += dot(0, (SF_HEAD_R + SF_BODY_TOP) * scale, SF_HEAD_R * scale, col);
+  // Body
+  g += line(0, SF_BODY_TOP * scale, 0, SF_BODY_BOT * scale, col, sw);
+  // Legs
+  g += line(0, SF_BODY_BOT * scale, -SF_LEG_DX * scale, SF_LEG_DY * scale, col, sw);
+  g += line(0, SF_BODY_BOT * scale, SF_LEG_DX * scale, SF_LEG_DY * scale, col, sw);
+  // Arms
+  g += line(0, SF_ARM_Y * scale, (-SF_ARM_DX + armL_dx) * scale, (SF_ARM_Y + SF_ARM_DY + armL_dy) * scale, col, sw);
+  g += line(0, SF_ARM_Y * scale, (SF_ARM_DX + armR_dx) * scale, (SF_ARM_Y + SF_ARM_DY + armR_dy) * scale, col, sw);
+  // Gaze line (from head center)
+  g += line(0, (SF_HEAD_R + SF_BODY_TOP) * scale, head_dx * scale, (SF_HEAD_R + SF_BODY_TOP + head_dy) * scale, WHITE, sw * 0.7, 0.7);
+  g += '</g>';
+  return g;
+}
+
+// Predefined poses for convenience
+function sf_thoughtful(x, y, col, scale, op) { return drawStickFigure(x, y, col, scale, -10, -30, 10, -20, 0, 0, op); }
+function sf_neutral(x, y, col, scale, op) { return drawStickFigure(x, y, col, scale, 0, -30, 0, 0, 0, 0, op); }
+function sf_dismissLeft(x, y, col, scale, op) { return drawStickFigure(x, y, col, scale, -30, -10, -20, -20, 0, 0, op); }
+function sf_dismissRight(x, y, col, scale, op) { return drawStickFigure(x, y, col, scale, 30, -10, 0, 0, 20, -20, op); }
+function sf_focusMid(x, y, col, scale, op) { return drawStickFigure(x, y, col, scale, 0, -30, 0, 0, 0, 0, op); }
+function sf_observing(x, y, col, scale, op) { return drawStickFigure(x, y, col, scale, 0, -40, 0, 0, 0, 0, op); }
+function sf_reaching(x, y, col, scale, armL_dx, armL_dy, op) { return drawStickFigure(x, y, col, scale, 0, -30, armL_dx, armL_dy, 0, 0, op); }
+function sf_nodding(x, y, col, scale, nodPhase, op) {
+  var head_dy = -30 + Math.sin(nodPhase * Math.PI * 2) * 10;
+  return drawStickFigure(x, y, col, scale, 0, head_dy, 0, 0, 0, 0, op);
+}
+
+function productBar(x, h, fillCol, strokeCol, sw, op) {
+  var y = OPT_CY; // Center Y for all bars
+  var w = OPT_W;
+  var rad = 12;
+  var s = '';
+  if (fillCol) s += rrect(x, y, w, h, rad, fillCol, op);
+  if (strokeCol) s += rrectStroke(x, y, w, h, rad, strokeCol, sw, op);
+  return s;
+}
+
+function anchorIcon(x, y, w, h, col, sw, op) {
+  op = (op == null ? 1 : op);
+  sw = sw || 10;
+  var rad = 12;
+  var s = '<g opacity="' + op + '">';
+  // Main block
+  s += rrect(x, y, w, h, rad, col, op);
+  // Handle
+  s += rrect(x, y - h/2 - 20, w/3, 20, 6, col, op);
+  s += '</g>';
+  return s;
+}
+
+// Helper for color lerp (simple hex string interpolation)
+function lerpColor(a, b, t) {
+  var ah = parseInt(a.replace(/#/g, '0x'), 16),
+      ar = ah >> 16, ag = (ah >> 8) & 0xff, ab = ah & 0xff;
+  var bh = parseInt(b.replace(/#/g, '0x'), 16),
+      br = bh >> 16, bg = (bh >> 8) & 0xff, bb = bh & 0xff;
+  var rr = Math.round(ar + t * (br - ar)).toString(16);
+  var rg = Math.round(ag + t * (bg - ag)).toString(16);
+  var rb = Math.round(ab + t * (bb - ab)).toString(16);
+  return '#' + ('00' + rr).slice(-2) + ('00' + rg).slice(-2) + ('00' + rb).slice(-2);
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.95, smooth(u));
+  var tx = lerp(0, -50, smooth(u));
+  var ty = lerp(0, -50, smooth(u));
+  s += '<g ' + camera(scale, tx, ty) + '>';
+
+  // Stick figure appears
+  var sf_op = ramp(u, 0.0, 0.2);
+  s += sf_thoughtful(FIG_X, FIG_Y, AMBER, 1, sf_op);
+
+  // Three empty vertical outlines appear
+  var outline_op = ramp(u, 0.2, 0.5);
+  s += productBar(OPT_L_X, OPT_H_SHORT, null, WHITE, 8, outline_op);
+  s += productBar(OPT_M_X, OPT_H_MEDIUM, null, WHITE, 8, outline_op);
+  s += productBar(OPT_R_X, OPT_H_TALL, null, WHITE, 8, outline_op);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var scale = lerp(0.95, 1.0, smooth(u));
+  var tx = lerp(-50, 0, smooth(u));
+  var ty = lerp(-50, 0, smooth(u));
+  s += '<g ' + camera(scale, tx, ty) + '>';
+
+  s += sf_neutral(FIG_X, FIG_Y, AMBER, 1, 1);
+
+  // Outlines fill and grow
+  var fill_op = ramp(u, 0.0, 0.3);
+  var h_short = lerp(0, OPT_H_SHORT, easeOut(ramp(u, 0.0, 0.4)));
+  var h_medium = lerp(0, OPT_H_MEDIUM, easeOut(ramp(u, 0.1, 0.5)));
+  var h_tall = lerp(0, OPT_H_TALL, easeOut(ramp(u, 0.2, 0.6)));
+
+  s += productBar(OPT_L_X, h_short, WHITE, WHITE, 8, fill_op);
+  s += productBar(OPT_M_X, h_medium, WHITE, WHITE, 8, fill_op);
+  s += productBar(OPT_R_X, h_tall, WHITE, WHITE, 8, fill_op);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var zoom = lerp(1.0, 1.05, smooth(ramp(u, 0.6, 0.9)));
+  s += '<g ' + camera(zoom, 0, 0) + '>';
+
+  // Stick figure dismisses left, then right, then focuses on middle
+  var sf_pose;
+  if (u < 0.3) sf_pose = sf_dismissLeft(FIG_X, FIG_Y, AMBER, 1, 1);
+  else if (u < 0.6) sf_pose = sf_dismissRight(FIG_X, FIG_Y, AMBER, 1, 1);
+  else sf_pose = sf_focusMid(FIG_X, FIG_Y, AMBER, 1, 1);
+  s += sf_pose;
+
+  // Shortest bar (cheap) shrinks, turns coral, fades
+  var shrink_l = ramp(u, 0.0, 0.2);
+  var h_l = lerp(OPT_H_SHORT, 0, easeIn(shrink_l));
+  s += productBar(OPT_L_X, h_l, CORAL, CORAL, 8, 1 - shrink_l);
+
+  // Tallest bar (premium) flashes coral, slides off
+  var flash_r_op = pulse(u, 0.4, 0.1);
+  var slide_r = ramp(u, 0.5, 0.8);
+  var r_x = lerp(OPT_R_X, OPT_R_X + 200, easeIn(slide_r));
+  s += productBar(r_x, OPT_H_TALL, WHITE, WHITE, 8, 1 - slide_r);
+  if (flash_r_op > 0.05) {
+    s += productBar(OPT_R_X, OPT_H_TALL, CORAL, CORAL, 8, flash_r_op * 0.8);
+  }
+
+  // Medium bar remains white, highlighted amber
+  s += productBar(OPT_M_X, OPT_H_MEDIUM, WHITE, WHITE, 8, 1);
+  var highlight_op = pulse(u, 0.75, 0.2) * 0.8;
+  s += ring(OPT_M_X, OPT_CY, OPT_W / 2 + 10, AMBER, 10, highlight_op);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  s += sf_observing(FIG_X, FIG_Y, AMBER, 1, 1);
+
+  // Medium bar (white)
+  s += productBar(OPT_M_X, OPT_H_MEDIUM, WHITE, WHITE, 8, 1);
+
+  // Tallest bar reappears as blue anchor
+  var anchor_y_start = TOP - 100; // Start off screen
+  var anchor_y_end = OPT_CY; // Align with other bars
+  var anchor_h_start = OPT_H_TALL;
+  var anchor_h_end = OPT_H_MEDIUM * 0.7; // Smaller block for anchor
+  var anchor_w_end = OPT_W * 1.2;
+
+  var transform_u = ramp(u, 0.0, 0.3); // Transform phase
+  var anchor_y = lerp(anchor_y_start, anchor_y_end, easeOut(transform_u));
+  var anchor_h = lerp(anchor_h_start, anchor_h_end, smooth(transform_u));
+  var anchor_w = lerp(OPT_W, anchor_w_end, smooth(transform_u));
+  var anchor_col = WHITE; // Initially white
+  if (transform_u > 0.5) anchor_col = lerpColor(WHITE, BLUE, (transform_u - 0.5) * 2);
+
+  if (transform_u < 1.0) { // Show transforming bar
+    s += productBar(OPT_R_X, anchor_h, anchor_col, anchor_col, 8, 1);
+  } else { // Show final anchor
+    s += anchorIcon(OPT_R_X, OPT_CY, anchor_w_end, anchor_h_end, BLUE, 10, 1);
+  }
+
+  // Blue dotted line connects anchor to medium bar
+  var line_op = ramp(u, 0.5, 0.8);
+  var dash_len = lerp(0, 30, smooth(ramp(u, 0.6, 0.9)));
+  var line_x1 = OPT_R_X - anchor_w_end / 2;
+  var line_x2 = OPT_M_X + OPT_W / 2;
+  // Draw solid line first, then dashed on top for effect
+  s += line(line_x1, OPT_CY, line_x2, OPT_CY, BLUE, 6, line_op);
+  if (dash_len > 0) {
+    s += '<line x1="' + line_x1 + '" y1="' + OPT_CY + '" x2="' + line_x2 + '" y2="' + OPT_CY +
+         '" stroke="' + BLUE + '" stroke-width="6" stroke-linecap="round" opacity="' + line_op +
+         '" stroke-dasharray="' + dash_len + ' ' + dash_len + '"/>';
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Medium bar (white)
+  s += productBar(OPT_M_X, OPT_H_MEDIUM, WHITE, WHITE, 8, 1);
+  // Anchor (blue)
+  s += anchorIcon(OPT_R_X, OPT_CY, OPT_W * 1.2, OPT_H_MEDIUM * 0.7, BLUE, 10, 1);
+
+  // Blue dotted line from anchor to medium bar
+  var line_x1 = OPT_R_X - OPT_W * 1.2 / 2;
+  var line_x2 = OPT_M_X + OPT_W / 2;
+  s += line(line_x1, OPT_CY, line_x2, OPT_CY, BLUE, 6, 1);
+
+  // Stick figure reaches out, arm guided by dotted line
+  var reach_u = ramp(u, 0.0, 0.6);
+  var arm_dx = lerp(0, -50, easeOut(reach_u));
+  var arm_dy = lerp(0, -20, easeOut(reach_u));
+  s += sf_reaching(FIG_X, FIG_Y, AMBER, 1, arm_dx, arm_dy, 1);
+
+  // Extend line to stick figure's hand
+  // Calculate hand position relative to FIG_X, FIG_Y
+  var hand_x = FIG_X + (-SF_ARM_DX + arm_dx) * 1;
+  var hand_y = FIG_Y + (SF_ARM_Y + SF_ARM_DY + arm_dy) * 1;
+  var line_extend_op = ramp(u, 0.2, 0.8);
+  var line_extend_x = lerp(line_x2, hand_x, easeOut(ramp(u, 0.4, 1.0)));
+  var line_extend_y = lerp(OPT_CY, hand_y, easeOut(ramp(u, 0.4, 1.0)));
+
+  if (line_extend_op > 0.05) {
+    s += '<line x1="' + line_x2 + '" y1="' + OPT_CY + '" x2="' + line_extend_x + '" y2="' + line_extend_y +
+         '" stroke="' + BLUE + '" stroke-width="6" stroke-linecap="round" opacity="' + line_extend_op +
+         '" stroke-dasharray="30 30"/>';
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.95, smooth(u));
+  s += '<g ' + camera(scale, 0, 0) + '>';
+
+  // All three options present
+  // Shortest bar (coral, small)
+  var h_l_final = OPT_H_SHORT * 0.7;
+  s += productBar(OPT_L_X, h_l_final, CORAL, CORAL, 8, 1);
+  // Medium bar (white)
+  s += productBar(OPT_M_X, OPT_H_MEDIUM, WHITE, WHITE, 8, 1);
+  // Anchor (blue) next to medium bar
+  s += anchorIcon(OPT_R_X, OPT_CY, OPT_W * 1.2, OPT_H_MEDIUM * 0.7, BLUE, 10, 1);
+
+  // Blue dotted line from anchor to medium bar
+  var line_x1 = OPT_R_X - OPT_W * 1.2 / 2;
+  var line_x2 = OPT_M_X + OPT_W / 2;
+  s += line(line_x1, OPT_CY, line_x2, OPT_CY, BLUE, 6, 1);
+
+  // Stick figure looks at anchor, then nods knowingly
+  var gaze_anchor_u = ramp(u, 0.0, 0.3);
+  var nod_u = ramp(u, 0.6, 0.9);
+  var sf_pose;
+  if (gaze_anchor_u < 1.0) {
+    // Gaze towards anchor (right)
+    sf_pose = drawStickFigure(FIG_X, FIG_Y, AMBER, 1, lerp(0, 30, smooth(gaze_anchor_u)), -30, 0, 0, 0, 0, 1);
+  } else {
+    // Nodding
+    sf_pose = sf_nodding(FIG_X, FIG_Y, AMBER, 1, nod_u, 1);
+  }
+  s += sf_pose;
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

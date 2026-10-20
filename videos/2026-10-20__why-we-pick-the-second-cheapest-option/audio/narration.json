@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You often feel like a savvy shopper, always finding the best value. You're looking for that perfect item, balancing budget and needs.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "You see options: a cheap one, a mid-range choice, and something clearly premium. Your brain immediately starts comparing, aiming to optimize.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "You quickly dismiss the cheapest as poor quality. The most expensive is too much. The middle choice then seems like the obvious winner.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "Here's the invisible system: that expensive option often isn't for sale to *you*. It's an 'anchor' – a decoy making the middle choice look incredibly reasonable.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "Anchored by the high price, your brain sees the middle option as a steal. You feel smart, but your decision was subtly guided.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "Next time you face three choices, remember the decoy. You'll still pick what you want, but now you understand the hidden game of perceived value.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]
