@@ -1,0 +1,15 @@
+{
+  "id": "why-your-tv-recommends-what-to-watch",
+  "slug": "2026-10-21__why-your-tv-recommends-what-to-watch",
+  "title_working": "Why Your TV Recommends What to Watch",
+  "system": "algorithmic content curation based on viewing history",
+  "cluster": "platforms-and-algorithms",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-10-21T11:38:53+00:00",
+  "produced_at": "2026-10-21T11:42:19+00:00",
+  "verify": "PASS",
+  "takeaway": "You now understand that TV recommendations are based on your past viewing data, creating a personalized but potentially limiting content bubble.",
+  "animation_source": "llm"
+}

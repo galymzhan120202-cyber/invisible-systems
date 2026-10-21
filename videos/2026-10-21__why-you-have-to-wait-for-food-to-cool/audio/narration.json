@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You've been waiting for this delicious meal. The aroma fills the air, and hunger is a powerful force. You just want to dive in and satisfy that craving now.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "But an eager bite turns into a searing shock. Your mouth instantly burns, tastebuds screaming, as that first mouthful feels like liquid fire. You regret your impatience.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "Why does it do that? The food doesn't even look *that* hot, yet your tongue violently disagrees. Is the food cursed, or your mouth just too sensitive?",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "The secret lies in the food's heat capacity and conductivity. Dense items store and transfer heat efficiently. Your mouth, full of nerve endings, detects it keenly.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "While cooling, food sheds heat into the air slowly. High water content means it holds thermal energy longer than expected, acting like a tiny, hot reservoir.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "So, that painful wait isn't just about temperature, but how that heat moves. Now you know why patience is a scientific necessity for enjoyable eating.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

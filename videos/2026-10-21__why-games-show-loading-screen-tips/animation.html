@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Games Show Loading Screen Tips</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / the wave
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want
+var CORAL = "#FF5B5B";              // coral red    -> frustration / naive model
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* Helper to interpolate colors */
+function lerpColor(c1, c2, t) {
+  var r1 = parseInt(c1.substring(1, 3), 16);
+  var g1 = parseInt(c1.substring(3, 5), 16);
+  var b1 = parseInt(c1.substring(5, 7), 16);
+  var r2 = parseInt(c2.substring(1, 3), 16);
+  var g2 = parseInt(c2.substring(3, 5), 16);
+  var b2 = parseInt(c2.substring(5, 7), 16);
+
+  var r = Math.round(lerp(r1, r2, t));
+  var g = Math.round(lerp(g1, g2, t));
+  var b = Math.round(lerp(b1, b2, t));
+
+  return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
+}
+
+/* Stick figure builder */
+function stickFigure(x, y, scale, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ') scale(' + scale + ')">';
+  // Head
+  g += dot(0, -60, 20, col);
+  // Body
+  g += line(0, -40, 0, 20, col, 8);
+  // Arms & Legs based on pose
+  switch (pose) {
+    case 'eager': // Arms up, slightly open
+      g += line(0, -20, -40, -60, col, 8); // Left arm
+      g += line(0, -20, 40, -60, col, 8);  // Right arm
+      g += line(0, 20, -20, 80, col, 8);   // Left leg
+      g += line(0, 20, 20, 80, col, 8);    // Right leg
+      break;
+    case 'frustrated': // Arms crossed, head down
+      g += line(0, -20, -30, 0, col, 8);
+      g += line(0, -20, 30, 0, col, 8);
+      g += line(0, 20, -20, 80, col, 8);
+      g += line(0, 20, 20, 80, col, 8);
+      g += line(0, -50, -15, -40, WHITE, 7); // Head tilt/gaze down
+      break;
+    case 'annoyed': // Hands up in exasperation
+      g += line(0, -20, -50, -60, col, 8);
+      g += line(0, -20, 50, -60, col, 8);
+      g += line(0, 20, -20, 80, col, 8);
+      g += line(0, 20, 20, 80, col, 8);
+      break;
+    case 'thoughtful': // Hand on chin, head tilted
+      g += line(0, -20, -30, 0, col, 8);
+      g += line(0, -20, 20, -10, col, 8);
+      g += line(20, -10, 20, -30, col, 8); // Hand to chin
+      g += line(0, 20, -20, 80, col, 8);
+      g += line(0, 20, 20, 80, col, 8);
+      g += line(0, -60, -10, -70, WHITE, 7); // Head tilt
+      break;
+    case 'engaged': // Looking forward, slightly leaning
+      g += line(0, -20, -30, 0, col, 8);
+      g += line(0, -20, 30, 0, col, 8);
+      g += line(0, 20, -20, 80, col, 8);
+      g += line(0, 20, 20, 80, col, 8);
+      break;
+    case 'confident': // Arms open, standing tall
+      g += line(0, -20, -40, 0, col, 8);
+      g += line(0, -20, 40, 0, col, 8);
+      g += line(0, 20, -20, 80, col, 8);
+      g += line(0, 20, 20, 80, col, 8);
+      break;
+    default: // Default pose: standing
+      g += line(0, -20, -30, 0, col, 8);
+      g += line(0, -20, 30, 0, col, 8);
+      g += line(0, 20, -20, 80, col, 8);
+      g += line(0, 20, 20, 80, col, 8);
+  }
+  g += '</g>';
+  return g;
+}
+
+/* Progress bar builder */
+function progressBar(x, y, w, h, rad, progress, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, rad, col, 6, op);
+  g += '<rect x="' + (x - w / 2 + 3) + '" y="' + (y - h / 2 + 3) + '" width="' + (w - 6) * progress + '" height="' + (h - 6) + '" rx="' + (rad - 3) + '" fill="' + col + '"/>';
+  g += '</g>';
+  return g;
+}
+
+/* Tip icon builder */
+function tipIcon(x, y, size, col, type, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, size, size, size / 4, col, op);
+  switch (type) {
+    case 'play': // Triangle
+      var triSize = size * 0.4;
+      g += pathTag("M " + (x - triSize * 0.4) + " " + (y - triSize * 0.5) + " L " + (x + triSize * 0.6) + " " + y + " L " + (x - triSize * 0.4) + " " + (y + triSize * 0.5) + " Z", WHITE, 0, op);
+      g += pathTag("M " + (x - triSize * 0.4) + " " + (y - triSize * 0.5) + " L " + (x + triSize * 0.6) + " " + y + " L " + (x - triSize * 0.4) + " " + (y + triSize * 0.5) + " Z", WHITE, 4, op);
+      break;
+    case 'question': // Dot with arc
+      g += dot(x, y - size * 0.2, size * 0.08, WHITE, op);
+      g += pathTag("M " + (x - size * 0.15) + " " + (y - size * 0.05) + " A " + (size * 0.15) + " " + (size * 0.15) + " 0 0 1 " + (x + size * 0.15) + " " + (y - size * 0.05) + " L " + (x + size * 0.1) + " " + (y + size * 0.2), WHITE, 6, op);
+      break;
+    case 'info': // Vertical bar with dot
+      g += dot(x, y - size * 0.2, size * 0.08, WHITE, op);
+      g += line(x, y - size * 0.05, x, y + size * 0.2, WHITE, 6, op);
+      break;
+    case 'checkmark': // V shape
+      var checkSize = size * 0.4;
+      g += pathTag("M " + (x - checkSize * 0.5) + " " + (y + checkSize * 0.1) + " L " + (x - checkSize * 0.1) + " " + (y + checkSize * 0.5) + " L " + (x + checkSize * 0.5) + " " + (y - checkSize * 0.3), WHITE, 8, op);
+      break;
+    case 'star': // 5-pointed star
+      var starPath = "M " + x + " " + (y - size * 0.35);
+      for (var i = 0; i < 5; i++) {
+        var angle = Math.PI / 2 + i * 2 * Math.PI / 5;
+        var xOuter = x + size * 0.35 * Math.sin(angle);
+        var yOuter = y - size * 0.35 * Math.cos(angle);
+        starPath += " L " + xOuter + " " + yOuter;
+        angle += Math.PI / 5;
+        var xInner = x + size * 0.15 * Math.sin(angle);
+        var yInner = y - size * 0.15 * Math.cos(angle);
+        starPath += " L " + xInner + " " + yInner;
+      }
+      starPath += " Z";
+      g += pathTag(starPath, WHITE, 0, op); // Fill
+      g += pathTag(starPath, WHITE, 4, op); // Stroke
+      break;
+    case 'dot': // Simple dot
+      g += dot(x, y, size * 0.2, WHITE, op);
+      break;
+    default: // Empty rectangle
+      break;
+  }
+  g += '</g>';
+  return g;
+}
+
+/* Helper for "frustration cloud" or "aha starburst" */
+function glyphBurst(x, y, size, col, u, op) {
+  var s = '';
+  var count = 5;
+  for (var i = 0; i < count; i++) {
+    var angle = i * Math.PI * 2 / count;
+    var offset = lerp(0, size * 0.8, easeOut(u));
+    var x1 = x + Math.cos(angle) * offset;
+    var y1 = y + Math.sin(angle) * offset;
+    var x2 = x + Math.cos(angle) * (offset + size * 0.2);
+    var y2 = y + Math.sin(angle) * (offset + size * 0.2);
+    s += line(x1, y1, x2, y2, col, 6, op * (1 - u));
+  }
+  return s;
+}
+
+/* Helper for "time stretching" lines */
+function wavyLines(x, y, w, h, phase, col, op) {
+  var s = '';
+  var numLines = 8;
+  var amplitude = 30;
+  var freq = 0.5;
+  for (var i = 0; i < numLines; i++) {
+    var ly = lerp(y - h / 2, y + h / 2, i / (numLines - 1));
+    var startX = x - w / 2;
+    var endX = x + w / 2;
+    var path = "M " + startX + " " + ly;
+    for (var px = startX; px <= endX; px += 10) {
+      var waveY = ly + Math.sin((px / 50 + phase + i * 0.5) * freq * Math.PI) * amplitude;
+      path += " L " + px + " " + waveY;
+    }
+    s += pathTag(path, col, 4, op);
+  }
+  return s;
+}
+
+/* Main elements positions */
+var PLAYER_Y = 1400;
+var UI_Y = 600;
+var UI_W = 600, UI_H = 80;
+var TIP_SIZE = 100;
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): Player's eagerness */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  // Background grid/lines
+  s += line(CX, TOP, CX, BOT, WHITE, 2, 0.1);
+  s += line(CX - 200, TOP, CX - 200, BOT, WHITE, 2, 0.05);
+  s += line(CX + 200, TOP, CX + 200, BOT, WHITE, 2, 0.05);
+  for (var i = 0; i < 5; i++) {
+    var y = lerp(TOP, BOT, i / 4) + Math.sin(u * Math.PI * 2 + i) * 5;
+    s += line(100, y, W - 100, y, WHITE, 2, 0.08);
+  }
+
+  // "Play" button
+  var playBtnScale = lerp(0.8, 1.0, easeOut(u * 2));
+  var playBtnOp = lerp(0, 1, ramp(u, 0.0, 0.3));
+  var playBtnGlow = Math.sin(u * Math.PI * 4) * 0.2 + 0.8;
+  s += tipIcon(CX, UI_Y, 200 * playBtnScale, AMBER, 'play', playBtnOp * playBtnGlow);
+  s += ring(CX, UI_Y, 100 * playBtnScale, AMBER, 10, playBtnOp * playBtnGlow * 0.5);
+
+  // Player stick figure
+  var playerBob = Math.sin(u * Math.PI * 3) * 5;
+  s += stickFigure(CX, PLAYER_Y + playerBob, 1, AMBER, 'eager', 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): The dreaded loading screen */
+function scene2(u) {
+  var s = '';
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14);
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+
+  // Background: Darker, oppressive. Faint grid lines.
+  s += line(CX, TOP, CX, BOT, WHITE, 2, 0.05);
+  s += line(CX - 200, TOP, CX - 200, BOT, WHITE, 2, 0.02);
+  s += line(CX + 200, TOP, CX + 200, BOT, WHITE, 2, 0.02);
+  for (var i = 0; i < 5; i++) {
+    var y = lerp(TOP, BOT, i / 4);
+    s += line(100, y, W - 100, y, WHITE, 2, 0.04);
+  }
+
+  // Loading bar appears and crawls
+  var barAppear = ramp(u, 0.0, 0.2);
+  var barProgress = lerp(0, 0.3, easeIn(ramp(u, 0.1, 0.9))); // Progresses from 0 to 30%
+  var barColor = CORAL;
+  s += progressBar(CX, UI_Y, UI_W, UI_H, UI_H / 2, barProgress, barColor, barAppear);
+
+  // Player stick figure: frustrated
+  var playerSlump = smooth(ramp(u, 0.1, 0.4));
+  var playerY = lerp(PLAYER_Y, PLAYER_Y + 50, playerSlump);
+  var headShake = Math.sin(u * Math.PI * 8) * 5 * (1 - playerSlump);
+  s += stickFigure(CX + headShake, playerY, 1, AMBER, 'frustrated', 1);
+
+  // Frustration cloud
+  var cloudOp = ramp(u, 0.4, 0.8) * (1 - ramp(u, 0.9, 1.0));
+  s += glyphBurst(CX, playerY - 180, 60, CORAL, u * 2 % 1, cloudOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): The annoying tip */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Background: Faint grid lines, slightly more defined
+  s += line(CX, TOP, CX, BOT, WHITE, 2, 0.08);
+  s += line(CX - 200, TOP, CX - 200, BOT, WHITE, 2, 0.04);
+  s += line(CX + 200, TOP, CX + 200, BOT, WHITE, 2, 0.04);
+  for (var i = 0; i < 5; i++) {
+    var y = lerp(TOP, BOT, i / 4);
+    s += line(100, y, W - 100, y, WHITE, 2, 0.06);
+  }
+
+  // Loading bar continues, tip appears
+  var barProgress = lerp(0.3, 0.6, easeIn(u)); // Progresses from 30% to 60%
+  var barColor = CORAL;
+  s += progressBar(CX, UI_Y, UI_W, UI_H, UI_H / 2, barProgress, barColor, 1);
+
+  // Tip icon appears
+  var tipAppear = ramp(u, 0.1, 0.3);
+  var tipBob = Math.sin(u * Math.PI * 6) * 5;
+  s += tipIcon(CX + UI_W / 2 + TIP_SIZE / 2 + 60, UI_Y + tipBob, TIP_SIZE, CORAL, 'question', tipAppear);
+
+  // Player stick figure: annoyed
+  var playerShake = Math.sin(u * Math.PI * 10) * 8 * ramp(u, 0.4, 0.6);
+  s += stickFigure(CX + playerShake, PLAYER_Y, 1, AMBER, 'annoyed', 1);
+
+  // Annoyance/mockery lines around tip
+  var annoyanceOp = ramp(u, 0.3, 0.7) * (1 - ramp(u, 0.8, 1.0));
+  for (var i = 0; i < 4; i++) {
+    var angle = i * Math.PI / 2 + u * Math.PI;
+    var x1 = CX + UI_W / 2 + TIP_SIZE / 2 + 60 + Math.cos(angle) * 60;
+    var y1 = UI_Y + Math.sin(angle) * 60;
+    var x2 = CX + UI_W / 2 + TIP_SIZE / 2 + 60 + Math.cos(angle) * 90;
+    var y2 = UI_Y + Math.sin(angle) * 90;
+    s += line(x1, y1, x2, y2, CORAL, 4, annoyanceOp * (0.5 + 0.5 * Math.sin(u * Math.PI * 12 + i)));
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): System's perspective - psychological */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Background: Wavy lines representing stretched time
+  var wavyOp = ramp(u, 0.0, 0.3) * (1 - ramp(u, 0.8, 1.0));
+  s += wavyLines(CX, CY, W * 0.8, H * 0.8, u * 2, DIM, wavyOp * 0.4);
+
+  // Loading bar morphs from coral to blue
+  var barProgress = lerp(0.6, 0.85, easeIn(u)); // Progresses from 60% to 85%
+  var colorMix = smooth(ramp(u, 0.2, 0.7));
+  var barColor = lerpColor(CORAL, BLUE, colorMix);
+  s += progressBar(CX, UI_Y, UI_W, UI_H, UI_H / 2, barProgress, barColor, 1);
+
+  // Tip icon morphs to neutral/informative
+  var tipMorph = smooth(ramp(u, 0.3, 0.8));
+  var tipColor = lerpColor(CORAL, BLUE, tipMorph);
+  var tipType = (tipMorph < 0.5) ? 'question' : 'info'; // Switch type mid-morph
+  var tipOp = 1;
+  s += tipIcon(CX + UI_W / 2 + TIP_SIZE / 2 + 60, UI_Y, TIP_SIZE, tipColor, tipType, tipOp);
+
+  // Player stick figure: thoughtful
+  var playerY = PLAYER_Y;
+  s += stickFigure(CX, playerY, 1, AMBER, 'thoughtful', 1);
+
+  // Abstract clock/time perception
+  var clockOp = ramp(u, 0.1, 0.4) * (1 - ramp(u, 0.7, 1.0));
+  s += ring(CX, TOP + 180, 80, DIM, 4, clockOp * 0.6);
+  var handAngle1 = u * Math.PI * 2 * 0.3; // Slow hand
+  var handAngle2 = u * Math.PI * 2 * 2;   // Fast hand
+  s += line(CX, TOP + 180, CX + Math.sin(handAngle1) * 50, TOP + 180 - Math.cos(handAngle1) * 50, WHITE, 6, clockOp);
+  s += line(CX, TOP + 180, CX + Math.sin(handAngle2) * 30, TOP + 180 - Math.cos(handAngle2) * 30, WHITE, 4, clockOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): Distraction and learning */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.8, smooth(u));
+  s += '<g ' + camera(scale, 0, lerp(0, 90, smooth(u))) + '>';
+
+  // Background: Faint blue lines, representing system efficiency
+  s += line(CX, TOP, CX, BOT, BLUE, 2, 0.1);
+  s += line(CX - 200, TOP, CX - 200, BOT, BLUE, 2, 0.05);
+  s += line(CX + 200, TOP, CX + 200, BOT, BLUE, 2, 0.05);
+  for (var i = 0; i < 5; i++) {
+    var y = lerp(TOP, BOT, i / 4);
+    s += line(100, y, W - 100, y, BLUE, 2, 0.08);
+  }
+
+  // Loading bar is mostly blue, filling smoothly
+  var barProgress = lerp(0.85, 0.98, easeOut(u)); // Progresses from 85% to 98%
+  var barColor = BLUE;
+  s += progressBar(CX, UI_Y, UI_W, UI_H, UI_H / 2, barProgress, barColor, 1);
+
+  // Tip icon is blue, informative, with "distraction" elements
+  var tipColor = BLUE;
+  s += tipIcon(CX + UI_W / 2 + TIP_SIZE / 2 + 60, UI_Y, TIP_SIZE, tipColor, 'info', 1);
+
+  // Distraction/information absorption elements
+  var absorbOp = ramp(u, 0.0, 0.5) * (1 - ramp(u, 0.8, 1.0));
+  for (var i = 0; i < 5; i++) {
+    var p = (u * 0.8 + rnd(i)) % 1;
+    var startX = CX + UI_W / 2 + TIP_SIZE / 2 + 60;
+    var startY = UI_Y;
+    var endX = CX;
+    var endY = PLAYER_Y - 100;
+    var currentX = lerp(startX, endX, easeOut(p));
+    var currentY = lerp(startY, endY, easeOut(p));
+    s += dot(currentX, currentY, 8, AMBER, absorbOp * (1 - p));
+  }
+
+  // Player stick figure: engaged, "AHA!" moment
+  var playerY = PLAYER_Y;
+  s += stickFigure(CX, playerY, 1, AMBER, 'engaged', 1);
+  var ahaOp = ramp(u, 0.4, 0.8);
+  s += glyphBurst(CX, playerY - 180, 80, AMBER, u * 1.5 % 1, ahaOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): Understanding and positive experience */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.8, 0.92, smooth(clamp(u / 0.7, 0, 1)));
+  s += '<g ' + camera(scale, 0, lerp(90, 0, smooth(u))) + '>';
+
+  // Background: Brightens, blue "system" lines radiating out
+  var reform = smooth(ramp(u, 0.58, 0.86));
+  s += line(CX, TOP, CX, BOT, BLUE, 2, 0.1 + 0.1 * reform);
+  s += line(CX - 200, TOP, CX - 200, BOT, BLUE, 2, 0.05 + 0.05 * reform);
+  s += line(CX + 200, TOP, CX + 200, BOT, BLUE, 2, 0.05 + 0.05 * reform);
+  for (var i = 0; i < 5; i++) {
+    var y = lerp(TOP, BOT, i / 4);
+    s += line(100, y, W - 100, y, BLUE, 2, 0.08 + 0.08 * reform);
+  }
+
+  // Loading bar completes and transforms
+  var barTransform = smooth(ramp(u, 0.0, 0.3));
+  var finalUISize = lerp(UI_W, 200, barTransform);
+  var finalUIY = lerp(UI_Y, CY - 200, barTransform);
+  s += ring(CX, finalUIY, finalUISize / 2, BLUE, 10, 1);
+  s += dot(CX, finalUIY, finalUISize / 2 - 10, BLUE, 1);
+
+  // Tip icon transforms into a positive checkmark/star
+  var tipTransform = smooth(ramp(u, 0.2, 0.5));
+  var tipColor = BLUE;
+  var tipType = (tipTransform < 0.5) ? 'info' : 'checkmark';
+  var tipX = lerp(CX + UI_W / 2 + TIP_SIZE / 2 + 60, CX, tipTransform);
+  var tipY = lerp(UI_Y, finalUIY, tipTransform);
+  var tipSize = lerp(TIP_SIZE, 80, tipTransform);
+  s += tipIcon(tipX, tipY, tipSize, tipColor, tipType, 1);
+
+  // Player stick figure: confident and happy
+  var playerY = PLAYER_Y;
+  s += stickFigure(CX, playerY, 1, AMBER, 'confident', 1);
+
+  // Radiating lines from the completed UI
+  var radiateOp = ramp(u, 0.4, 0.8);
+  for (var i = 0; i < 8; i++) {
+    var angle = i * Math.PI / 4 + u * Math.PI * 0.5;
+    var x1 = CX + Math.cos(angle) * (finalUISize / 2 + 20);
+    var y1 = finalUIY + Math.sin(angle) * (finalUISize / 2 + 20);
+    var x2 = CX + Math.cos(angle) * (finalUISize / 2 + 100);
+    var y2 = finalUIY + Math.sin(angle) * (finalUISize / 2 + 100);
+    s += line(x1, y1, x2, y2, BLUE, 6, radiateOp * (0.5 + 0.5 * Math.sin(u * Math.PI * 8 + i)));
+  }
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

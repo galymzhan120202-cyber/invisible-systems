@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Your TV Recommends What to Watch</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / the wave
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want
+var CORAL = "#FF5B5B";              // coral red    -> the naive model / false signal
+
+var DUR = 60;
+window.__duration = DUR;
+
+// Scene specific constants for layout
+var FIG_X = CX;
+var FIG_Y = BOT - 200; // Bottom center of stick figure when seated
+
+var COUCH_X = CX;
+var COUCH_Y = FIG_Y + 60; // Center Y of couch
+var COUCH_W = 500;
+var COUCH_H = 120;
+
+var TV_X = CX;
+var TV_Y = CY - 300; // Center Y of TV screen
+var TV_W = 600;
+var TV_H = 340;
+
+var THINK_X = FIG_X + 80; // Position for thought bubble/eye icon
+var THINK_Y = FIG_Y - 260;
+
+var BRAIN_X = TV_X; // Position for brain icon
+var BRAIN_Y = TV_Y - TV_H/2 - 100;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function chevron(x, y, size, col, op) {
+  var d = "M " + (x - size) + " " + (y + size * 0.55) + " L " + x + " " + (y - size * 0.55) + " L " + (x + size) + " " + (y + size * 0.55);
+  return pathTag(d, col, 14, op);
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom shape builders for this animation ---------- */
+
+function stickFigure(x, y, col, expression, remote, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var sw = 8;
+  var headR = 28;
+  var bodyLen = 80;
+
+  // Head
+  var hx = x;
+  var hy = y - headR - 100; // Adjust y to place figure seated
+  g += dot(hx, hy, headR, col);
+
+  // Body
+  var neckY = hy + headR;
+  var bodyBotY = neckY + bodyLen;
+  g += line(hx, neckY, hx, bodyBotY, col, sw);
+
+  // Arms
+  var shoulderY = neckY + 10;
+  var elbowY = shoulderY + 30;
+  var handY = elbowY + 30;
+
+  if (remote) { // Holding remote
+    g += line(hx - 28, shoulderY, hx - 40, elbowY + 10, col, sw); // Left arm
+    g += line(hx + 28, shoulderY, hx + 40, elbowY + 10, col, sw); // Right arm
+    g += line(hx - 40, elbowY + 10, hx - 10, handY + 10, col, sw); // Left forearm
+    g += line(hx + 40, elbowY + 10, hx + 10, handY + 10, col, sw); // Right forearm
+    g += rrect(hx, handY + 20, 50, 20, 5, WHITE); // Remote
+  } else { // Resting arms
+    g += line(hx - 28, shoulderY, hx - 40, shoulderY + 50, col, sw);
+    g += line(hx + 28, shoulderY, hx + 40, shoulderY + 50, col, sw);
+  }
+
+  // Legs (seated)
+  var hipY = bodyBotY - 10;
+  var kneeY = hipY + 40;
+  var footY = kneeY + 40;
+  g += line(hx - 20, hipY, hx - 40, kneeY, col, sw); // Left thigh
+  g += line(hx + 20, hipY, hx + 40, kneeY, col, sw); // Right thigh
+  g += line(hx - 40, kneeY, hx - 20, footY, col, sw); // Left shin
+  g += line(hx + 40, kneeY, hx + 20, footY, col, sw); // Right shin
+
+  // Expression
+  if (expression === 'smile') {
+    g += pathTag('M ' + (hx - 10) + ' ' + (hy + 10) + ' Q ' + hx + ' ' + (hy + 18) + ' ' + (hx + 10) + ' ' + (hy + 10), WHITE, sw * 0.7);
+  } else if (expression === 'puzzled') {
+    g += line(hx - 12, hy - 8, hx - 2, hy - 18, WHITE, sw * 0.7); // Left brow
+    g += line(hx + 2, hy - 18, hx + 12, hy - 8, WHITE, sw * 0.7); // Right brow
+    g += line(hx - 8, hy + 10, hx + 8, hy + 10, WHITE, sw * 0.7); // Straight mouth
+    g += line(hx + 18, hy - 10, hx + 24, hy - 10, WHITE, sw * 0.7); // Tilt head cue
+    g += line(hx + 18, hy - 10, hx + 18, hy - 4, WHITE, sw * 0.7);
+  } else if (expression === 'constrained') {
+    g += line(hx - 10, hy + 10, hx + 10, hy + 10, WHITE, sw * 0.7); // Straight mouth
+    g += line(hx - 12, hy - 10, hx - 2, hy - 10, WHITE, sw * 0.7); // Left brow
+    g += line(hx + 2, hy - 10, hx + 12, hy - 10, WHITE, sw * 0.7); // Right brow
+  } else if (expression === 'aware') {
+    g += pathTag('M ' + (hx - 10) + ' ' + (hy + 10) + ' Q ' + hx + ' ' + (hy + 18) + ' ' + (hx + 10) + ' ' + (hy + 10), WHITE, sw * 0.7); // Smile
+  } else { // neutral
+    g += line(hx - 8, hy + 10, hx + 8, hy + 10, WHITE, sw * 0.7); // Straight mouth
+  }
+
+  g += '</g>';
+  return g;
+}
+
+function couch(x, y, w, h, col, op) {
+  return rrect(x, y, w, h, 20, col, op);
+}
+
+function tvScreen(x, y, w, h, content, u, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, 20, WHITE, 10, 0.9); // TV frame
+
+  // Inner screen background
+  g += rrect(x, y, w - 20, h - 20, 10, '#000000', 1);
+
+  if (content === 'generic') {
+    var shapeW = lerp(w * 0.3, w * 0.4, Math.sin(u * Math.PI * 2) * 0.5 + 0.5);
+    var shapeH = lerp(h * 0.2, h * 0.3, Math.cos(u * Math.PI * 2) * 0.5 + 0.5);
+    g += rrect(x, y, shapeW, shapeH, 10, DIM, 0.6); // Indistinct white shape
+  } else if (content === 'recs') {
+    var recH = (h - 20) / 3 - 20; // Height for each rec, with spacing
+    var recW = w - 60;
+    var startY = y - (h - 20) / 2 + 10 + recH / 2;
+    for (var i = 0; i < 3; i++) {
+      var slide = easeOut(clamp(u * 2 - i * 0.3, 0, 1)); // Staggered slide in
+      var currentY = lerp(y - h / 2 - recH, startY + i * (recH + 10), slide);
+      g += rrect(x, currentY, recW, recH, 10, AMBER, 0.9);
+    }
+  } else if (content === 'bubble') {
+    var recH = (h - 20) / 3 - 20;
+    var recW = w - 60;
+    var startY = y - (h - 20) / 2 + 10 + recH / 2;
+    for (var i = 0; i < 3; i++) {
+      g += rrect(x, startY + i * (recH + 10), recW, recH, 10, AMBER, 0.9); // Homogenous recs
+      // Add a simple glyph to show homogeneity, e.g., a dot
+      g += dot(x, startY + i * (recH + 10), 10, WHITE, 0.7);
+    }
+  } else if (content === 'paths') {
+    var recH = (h - 20) / 3 - 20;
+    var recW = w - 60;
+    var startY = y - (h - 20) / 2 + 10 + recH / 2;
+    for (var i = 0; i < 3; i++) {
+      g += rrect(x, startY + i * (recH + 10), recW, recH, 10, AMBER, 0.9); // Amber recs
+      // Faint blue 'new path' options - small chevrons
+      var pathOp = lerp(0, 0.6, smooth(u));
+      g += chevron(x - recW / 2 - 30, startY + i * (recH + 10), 16, BLUE, pathOp);
+      g += chevron(x + recW / 2 + 30, startY + i * (recH + 10), 16, BLUE, pathOp);
+    }
+  }
+  g += '</g>';
+  return g;
+}
+
+// A simple abstract brain shape (no text allowed)
+function brainIcon(x, y, size, col, op) {
+  var d = 'M ' + (x - size * 0.8) + ' ' + (y + size * 0.2) +
+          ' Q ' + (x - size * 1.2) + ' ' + (y - size * 0.5) + ' ' + x + ' ' + (y - size * 0.8) +
+          ' Q ' + (x + size * 1.2) + ' ' + (y - size * 0.5) + ' ' + (x + size * 0.8) + ' ' + (y + size * 0.2) +
+          ' Q ' + (x + size * 0.4) + ' ' + (y + size * 0.8) + ' ' + x + ' ' + (y + size * 0.5) +
+          ' Q ' + (x - size * 0.4) + ' ' + (y + size * 0.8) + ' ' + (x - size * 0.8) + ' ' + (y + size * 0.2) + ' Z';
+  return pathTag(d, col, 12, op);
+}
+
+// Network node and line generation
+function network(centerX, centerY, radius, numNodes, u, op) {
+  var g = '';
+  var sw = 4;
+  var nodeR = 10;
+  var nodes = [];
+
+  // Generate nodes in a circle
+  for (var i = 0; i < numNodes; i++) {
+    var angle = (i / numNodes) * Math.PI * 2 + u * Math.PI * 0.2;
+    var x = centerX + Math.cos(angle) * radius * (0.8 + 0.2 * Math.sin(u * Math.PI * 0.5 + i));
+    var y = centerY + Math.sin(angle) * radius * (0.8 + 0.2 * Math.cos(u * Math.PI * 0.5 + i));
+    nodes.push({x: x, y: y});
+    g += dot(x, y, nodeR, BLUE, op);
+  }
+
+  // Connect nodes with lines
+  for (var i = 0; i < numNodes; i++) {
+    for (var j = i + 1; j < numNodes; j++) {
+      if (rnd(i * 10 + j) < 0.3) { // Random connections
+        g += line(nodes[i].x, nodes[i].y, nodes[j].x, nodes[j].y, BLUE, sw, op * 0.5);
+      }
+    }
+  }
+  return g;
+}
+
+// Eye icon (no text)
+function eyeIcon(x, y, size, col, op) {
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, size * 1.6, size * 0.8, size * 0.4, col, op * 0.3); // Eyelid shape
+  g += dot(x, y, size * 0.3, col, op * 0.8); // Pupil
+  g += '</g>';
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>'; // Camera holds on the scene
+
+  s += couch(COUCH_X, COUCH_Y, COUCH_W, COUCH_H, DIM, 0.8);
+  s += stickFigure(FIG_X, FIG_Y, AMBER, 'neutral', true, 1);
+  s += tvScreen(TV_X, TV_Y, TV_W, TV_H, 'generic', u, 1);
+
+  // Thought bubble with question mark
+  var bubbleOp = ramp(u, 0.2, 0.6);
+  if (bubbleOp > 0.01) {
+    var bubbleScale = lerp(0.8, 1.0, easeOut(ramp(u, 0.2, 0.4)));
+    var bubbleX = THINK_X, bubbleY = THINK_Y;
+    s += ring(bubbleX, bubbleY, 30 * bubbleScale, WHITE, 5, bubbleOp);
+    s += dot(bubbleX, bubbleY + 15 * bubbleScale, 8 * bubbleScale, WHITE, bubbleOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var scale = lerp(1.0, 1.1, smooth(u));
+  var ty = lerp(0, -50, smooth(u)); // Zoom in on TV
+  s += '<g ' + camera(scale, 0, ty) + '>';
+
+  s += couch(COUCH_X, COUCH_Y, COUCH_W, COUCH_H, DIM, 0.8);
+  s += stickFigure(FIG_X, FIG_Y, AMBER, 'smile', true, 1);
+  s += tvScreen(TV_X, TV_Y, TV_W, TV_H, 'recs', u, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14); // Wobble effect
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+
+  s += couch(COUCH_X, COUCH_Y, COUCH_W, COUCH_H, DIM, 0.8);
+  s += stickFigure(FIG_X, FIG_Y, AMBER, 'puzzled', false, 1); // Remote fades, expression changes
+  s += tvScreen(TV_X, TV_Y, TV_W, TV_H, 'network', u, 1); // Screen is just a background
+
+  // Coral red brain icon
+  var brainOp = ramp(u, 0.1, 0.5);
+  var brainSize = lerp(0, 80, easeOut(ramp(u, 0.1, 0.4)));
+  var brainWobble = Math.sin(u * Math.PI * 6) * 5;
+  if (brainOp > 0.01) {
+    s += brainIcon(BRAIN_X, BRAIN_Y + brainWobble, brainSize, CORAL, brainOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  s += couch(COUCH_X, COUCH_Y, COUCH_W, COUCH_H, DIM, 0.8);
+  s += stickFigure(FIG_X, FIG_Y, AMBER, 'neutral', false, 1);
+  s += tvScreen(TV_X, TV_Y, TV_W, TV_H, 'network', u, 1);
+
+  // Coral red brain shattering
+  var brainFade = 1 - ramp(u, 0.0, 0.2);
+  var brainExplode = ramp(u, 0.0, 0.3);
+  if (brainFade > 0.01) {
+    s += brainIcon(BRAIN_X, BRAIN_Y, 80, CORAL, brainFade);
+    for (var i = 0; i < 10; i++) {
+      var angle = rnd(i) * Math.PI * 2;
+      var dist = lerp(0, 100, easeOut(brainExplode));
+      s += dot(BRAIN_X + Math.cos(angle) * dist, BRAIN_Y + Math.sin(angle) * dist, 6, CORAL, brainFade * (1 - brainExplode));
+    }
+  }
+
+  // Signal blue network emerges
+  var networkOp = ramp(u, 0.2, 0.6);
+  if (networkOp > 0.01) {
+    var netRadius = lerp(0, 200, easeOut(ramp(u, 0.2, 0.5)));
+    s += network(TV_X, TV_Y - 100, netRadius, 8, u, networkOp);
+
+    // Lines connecting figure to network, network to TV
+    var figToNetX = lerp(FIG_X, TV_X - 150, networkOp);
+    var figToNetY = lerp(FIG_Y - 100, TV_Y - 100, networkOp);
+    s += line(FIG_X, FIG_Y - 100, figToNetX, figToNetY, BLUE, 6, networkOp);
+    s += line(TV_X + 150, TV_Y - 100, TV_X, TV_Y, BLUE, 6, networkOp); // Network to TV
+
+    // Data packets flow
+    var packetOp = ramp(u, 0.4, 0.8);
+    for (var i = 0; i < 5; i++) {
+      var p = (u * 1.5 + rnd(i * 3)) % 1;
+      var packetX = lerp(FIG_X - 100, TV_X + 100, easeIn(p));
+      var packetY = lerp(FIG_Y - 100, TV_Y, easeIn(p));
+      s += rrect(packetX, packetY, 12, 12, 3, WHITE, packetOp * (1 - p));
+    }
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.9, smooth(u)); // Slight zoom out
+  var ty = lerp(0, 30, smooth(u));
+  s += '<g ' + camera(scale, 0, ty) + '>';
+
+  s += couch(COUCH_X, COUCH_Y, COUCH_W, COUCH_H, DIM, 0.8);
+  s += stickFigure(FIG_X, FIG_Y, AMBER, 'constrained', false, 1);
+  s += tvScreen(TV_X, TV_Y, TV_W, TV_H, 'bubble', u, 1); // Homogenous recs
+
+  // Signal blue network expands to form a bubble
+  var bubbleOp = ramp(u, 0.0, 0.4);
+  var bubbleRadius = lerp(0, 450, easeOut(ramp(u, 0.0, 0.3)));
+  var bubbleY = CY - 100; // Center of the bubble
+  if (bubbleOp > 0.01) {
+    s += ring(CX, bubbleY, bubbleRadius, BLUE, 10, bubbleOp * 0.8);
+    // Fill the bubble with a faint blue tint
+    s += dot(CX, bubbleY, bubbleRadius - 5, BLUE, bubbleOp * 0.08);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.9, 1.0, smooth(u)); // Zoom back to normal
+  var ty = lerp(30, 0, smooth(u));
+  s += '<g ' + camera(scale, 0, ty) + '>';
+
+  s += couch(COUCH_X, COUCH_Y, COUCH_W, COUCH_H, DIM, 0.8);
+  s += stickFigure(FIG_X, FIG_Y, AMBER, 'aware', true, 1); // Back to neutral, remote in hand
+  s += tvScreen(TV_X, TV_Y, TV_W, TV_H, 'paths', u, 1); // Recs + new paths
+
+  // Signal blue bubble recedes and fades
+  var bubbleFade = 1 - ramp(u, 0.0, 0.4);
+  var bubbleRadius = lerp(450, 0, easeIn(ramp(u, 0.0, 0.3)));
+  var bubbleY = CY - 100;
+  if (bubbleFade > 0.01) {
+    s += ring(CX, bubbleY, bubbleRadius, BLUE, 10, bubbleFade * 0.8);
+    s += dot(CX, bubbleY, bubbleRadius - 5, BLUE, bubbleFade * 0.08);
+  }
+
+  // Signal blue 'eye' icon appears above stick figure
+  var eyeOp = ramp(u, 0.4, 0.8);
+  var eyeSize = lerp(0, 30, easeOut(ramp(u, 0.4, 0.6)));
+  if (eyeOp > 0.01) {
+    s += eyeIcon(THINK_X, THINK_Y, eyeSize, BLUE, eyeOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
