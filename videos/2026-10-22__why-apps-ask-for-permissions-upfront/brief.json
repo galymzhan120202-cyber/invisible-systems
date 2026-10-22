@@ -1,0 +1,15 @@
+{
+  "id": "why-apps-ask-for-permissions-upfront",
+  "slug": "2026-10-22__why-apps-ask-for-permissions-upfront",
+  "title_working": "Why Apps Ask for All Permissions at Once",
+  "system": "user interface design / habituation to permission requests",
+  "cluster": "platforms-and-algorithms",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-10-22T11:47:31+00:00",
+  "produced_at": "2026-10-22T11:54:18+00:00",
+  "verify": "PASS",
+  "takeaway": "You now understand why apps request all permissions upfront, even if they don't need them immediately.",
+  "animation_source": "fallback"
+}

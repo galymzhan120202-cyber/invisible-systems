@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "Supermarket checkout. Cart full, you want to leave. Eye the lines, craving speed.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "\"10 items or less!\" The express lane. You slide in, confident you've outsmarted the system, for a quick escape.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "But familiar dread. Your express lane isn't moving. It feels slower than others. Did you pick the worst one, again?",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "The invisible truth: fewer items seems faster, but each transaction has fixed overhead – scanning, payment, bagging. More people choose this lane, because everyone thinks like you.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "This lane often processes more *transactions* per hour. Your memory, biased by frustration, reinforces the feeling you pick the slow line.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "Tomorrow, you’ll return. Now, you know the hidden rule. You see the total flow, not just item count. The express lane won't fool you again.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

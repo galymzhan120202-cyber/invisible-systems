@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You find a cool new app, promising to simplify your day. All you want is to download it and start using it immediately.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "Before you dive in, a huge wall appears: 'This app needs access to contacts, camera, location, photos.' A long list of demands, all at once.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "Why does a simple game need your calendar? Your gut says this feels wrong, but you just want the app to work.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "Here’s the invisible system. Developers know asking later interrupts your flow, making you more likely to say no. Asking once upfront creates less friction.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "You've been conditioned to just hit 'Accept.' This means you grant access to things the app might not even need, risking privacy for convenience.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "The app works, but you've given up a tiny piece of privacy. Now you see the design pattern exploiting your desire for instant gratification.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

@@ -1,0 +1,15 @@
+{
+  "id": "why-the-quick-checkout-lane-is-slow",
+  "slug": "2026-10-22__why-the-quick-checkout-lane-is-slow",
+  "title_working": "Why the '10 Items or Less' Lane is Always Slow",
+  "system": "queueing theory / psychological anchoring of expectations",
+  "cluster": "queues-and-waiting",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-10-22T11:38:46+00:00",
+  "produced_at": "2026-10-22T11:41:13+00:00",
+  "verify": "PASS",
+  "takeaway": "You now understand that the express lane's fixed transaction overhead and its popularity often make it slower than it appears.",
+  "animation_source": "llm"
+}

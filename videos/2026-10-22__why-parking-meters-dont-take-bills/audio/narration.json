@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You’ve found the perfect parking spot, but you’re in a rush. Every second counts when you’re trying to make it on time.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "You grab your wallet, pull out a nice crisp bill, and approach the meter. But wait… it only wants coins or plastic.",
+    "rate": "+5%",
+    "start": 10.5
+  },
+  {
+    "id": "scene-03",
+    "text": "Why can’t this simple machine just take your money? You just want to park and get on with your day, but the meter refuses to cooperate.",
+    "rate": "+5%",
+    "start": 20.7
+  },
+  {
+    "id": "scene-04",
+    "text": "It feels like a conspiracy, but the reason is simpler: bills are expensive for machines. Verifying authenticity, dispensing change, preventing jams – it all requires complex machinery.",
+    "rate": "+5%",
+    "start": 31.0
+  },
+  {
+    "id": "scene-05",
+    "text": "Coins are simple: they just need to be counted. Cards? They offload all the complex money handling, like verification and change, to banks.",
+    "rate": "+5%",
+    "start": 41.2
+  },
+  {
+    "id": "scene-06",
+    "text": "So the next time you’re fumbling for change, remember: it’s not to annoy you. It’s an invisible system of efficiency, making sure your parking meter stays simple and functional.",
+    "rate": "+5%",
+    "start": 51.5
+  }
+]

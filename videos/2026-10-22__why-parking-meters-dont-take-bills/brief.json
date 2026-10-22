@@ -1,0 +1,15 @@
+{
+  "id": "why-parking-meters-dont-take-bills",
+  "slug": "2026-10-22__why-parking-meters-dont-take-bills",
+  "title_working": "Why Parking Meters Hate Your Bills",
+  "system": "transaction costs / incentive alignment for coin-operated machines",
+  "cluster": "pricing-and-incentives",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-10-22T11:41:16+00:00",
+  "produced_at": "2026-10-22T11:47:29+00:00",
+  "verify": "PASS",
+  "takeaway": "You now understand why parking meters are designed to prefer coins and cards over bills, due to the unseen costs of handling cash.",
+  "animation_source": "fallback"
+}
