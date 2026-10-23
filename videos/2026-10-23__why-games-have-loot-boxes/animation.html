@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Games Have Loot Boxes</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / mechanism
+var AMBER = "#F2A93B";              // warm amber   -> YOU / desire / reward
+var CORAL = "#FF5B5B";              // coral red    -> frustration / near-misses
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function chevron(x, y, size, col, op) { // Kept from reference, not used in this specific story
+  var d = "M " + (x - size) + " " + (y + size * 0.55) + " L " + x + " " + (y - size * 0.55) + " L " + (x + size) + " " + (y + size * 0.55);
+  return pathTag(d, col, 14, op);
+}
+
+/* the player stick figure */
+function player(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" stroke="' + col + '" stroke-width="8" stroke-linecap="round">';
+  // Head
+  g += dot(x, y - 100, 20, col);
+  // Body
+  g += line(x, y - 80, x, y + 20);
+  // Arms
+  if (pose === 'idle') {
+    g += line(x, y - 60, x - 40, y - 20);
+    g += line(x, y - 60, x + 40, y - 20);
+  } else if (pose === 'reach') {
+    g += line(x, y - 60, x - 40, y - 10);
+    g += line(x, y - 60, x + 50, y - 50); // Reaching forward
+  } else if (pose === 'sad') {
+    g += line(x, y - 60, x - 30, y + 10);
+    g += line(x, y - 60, x + 30, y + 10);
+    g += line(x - 10, y - 105, x + 10, y - 105, col, 4); // Sad mouth
+  } else if (pose === 'happy') {
+    g += line(x, y - 60, x - 40, y - 20);
+    g += line(x, y - 60, x + 40, y - 20);
+    g += line(x - 10, y - 98, x + 10, y - 98, col, 4); // Happy mouth
+    g += line(x - 10, y - 108, x - 2, y - 102, col, 4); // Eye
+    g += line(x + 10, y - 108, x + 2, y - 102, col, 4); // Eye
+  } else if (pose === 'pull') {
+    g += line(x, y - 60, x - 40, y - 20);
+    g += line(x, y - 60, x + 60, y + 20); // Pulling arm
+  } else if (pose === 'celebrate') {
+    g += line(x, y - 60, x - 50, y - 80);
+    g += line(x, y - 60, x + 50, y - 80);
+    g += line(x - 10, y - 98, x + 10, y - 98, col, 4); // Happy mouth
+    g += line(x - 10, y - 108, x - 2, y - 102, col, 4); // Eye
+    g += line(x + 10, y - 108, x + 2, y - 102, col, 4); // Eye
+  }
+  // Legs
+  g += line(x, y + 20, x - 30, y + 80);
+  g += line(x, y + 20, x + 30, y + 80);
+  g += '</g>';
+  return g;
+}
+
+/* the loot box / item hero element */
+function lootBox(x, y, type, u, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  if (type === 'item') {
+    // Glowing rare item (amber)
+    var r = lerp(30, 34, Math.sin(u * Math.PI * 2) * 0.5 + 0.5);
+    g += ring(x, y, r + 10, col, 4, 0.4);
+    g += dot(x, y, r, col);
+    g += pathTag("M " + x + " " + (y - r + 10) + " L " + (x + r / 2) + " " + (y + r / 2) + " L " + (x - r / 2) + " " + (y + r / 2) + " Z", WHITE, 0, 0.8); // Simple star shape
+  } else if (type === 'box') {
+    // A closed loot box
+    var boxW = 120, boxH = 120;
+    g += rrect(x, y, boxW, boxH, 10, col, 0.9);
+    g += line(x - boxW / 2, y - boxH / 4, x + boxW / 2, y - boxH / 4, WHITE, 6); // Lid line
+    g += dot(x, y - boxH / 2 + 15, 12, WHITE); // Question mark dot
+    g += pathTag("M " + x + " " + (y - boxH / 2 + 30) + " V " + (y + boxH / 4) + " M " + (x - 15) + " " + (y + boxH / 4) + " H " + (x + 15), WHITE, 6); // Question mark curve
+  } else if (type === 'openBox') {
+    // An open loot box revealing contents
+    var boxW = 140, boxH = 140;
+    var lidRot = lerp(0, -45, easeOut(u));
+    var lidY = y - boxH / 2;
+    var lidX = x;
+    g += '<g transform="translate(' + lidX + ' ' + lidY + ') rotate(' + lidRot + ') translate(' + (-lidX) + ' ' + (-lidY) + ')">';
+    g += rrect(x, y - boxH / 2 - 10, boxW, boxH / 2, 10, col, 0.9); // Lid
+    g += '</g>';
+    g += rrect(x, y + 20, boxW, boxH - 40, 10, col, 0.9); // Base
+    // Contents are added by the scene function
+  } else if (type === 'machine') {
+    // Slot machine like mechanism
+    var machineW = 300, machineH = 400;
+    g += rrect(x, y, machineW, machineH, 20, col, 0.8);
+    g += rrectStroke(x, y, machineW, machineH, 20, WHITE, 8);
+    // Display area
+    g += rrect(x, y - 100, machineW * 0.8, machineH * 0.4, 10, "#111111", 1);
+    g += rrectStroke(x, y - 100, machineW * 0.8, machineH * 0.4, 10, DIM, 4);
+    // Lever
+    var leverX = x + machineW / 2 + 40;
+    var leverY = y + 50;
+    var leverRot = lerp(0, 45, easeOut(u)); // Lever pull animation
+    g += '<g transform="translate(' + leverX + ' ' + leverY + ') rotate(' + leverRot + ') translate(' + (-leverX) + ' ' + (-leverY) + ')">';
+    g += line(leverX, leverY, leverX, leverY - 150, DIM, 12);
+    g += dot(leverX, leverY - 150, 20, DIM);
+    g += '</g>';
+  } else if (type === 'result') {
+    // Machine showing a result
+    var machineW = 300, machineH = 400;
+    g += rrect(x, y, machineW, machineH, 20, col, 0.8);
+    g += rrectStroke(x, y, machineW, machineH, 20, WHITE, 8);
+    // Display area
+    g += rrect(x, y - 100, machineW * 0.8, machineH * 0.4, 10, "#111111", 1);
+    g += rrectStroke(x, y - 100, machineW * 0.8, machineH * 0.4, 10, DIM, 4);
+    // Lever (reset position)
+    var leverX = x + machineW / 2 + 40;
+    var leverY = y + 50;
+    g += line(leverX, leverY, leverX, leverY - 150, DIM, 12);
+    g += dot(leverX, leverY - 150, 20, DIM);
+    // Result item
+    var itemScale = lerp(0.5, 1.0, easeOut(u));
+    var itemY = y - 100;
+    g += '<g transform="translate(' + x + ' ' + itemY + ') scale(' + itemScale + ') translate(' + (-x) + ' ' + (-itemY) + ')">';
+    g += ring(x, y - 100, 40, AMBER, 8, 0.6);
+    g += dot(x, y - 100, 36, AMBER);
+    g += pathTag("M " + x + " " + (y - 100 - 30) + " L " + (x + 30 / 2) + " " + (y - 100 + 30 / 2) + " L " + (x - 30 / 2) + " " + (y - 100 + 30 / 2) + " Z", WHITE, 0, 0.8); // Simple star shape
+    g += '</g>';
+  }
+  g += '</g>';
+  return g;
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var playerX = CX - 200;
+  var playerY = CY + 300;
+  var itemX = CX + 200;
+  var itemY = CY - 100;
+
+  var camTx = lerp(0, -100, smooth(u)); // Pan right towards item
+  var camTy = lerp(0, -150, smooth(u)); // Pan up towards item
+  var camScale = lerp(1.0, 1.1, smooth(u));
+
+  s += '<g ' + camera(camScale, camTx, camTy) + '>';
+  // Background game elements
+  s += rrect(CX, CY, W * 0.8, BOT - TOP, 40, DIM, 0.1);
+  s += line(CX - 300, TOP + 100, CX + 300, TOP + 100, WHITE, 6, 0.2);
+  s += line(CX - 300, BOT - 100, CX + 300, BOT - 100, WHITE, 6, 0.2);
+  for (var i = 0; i < 5; i++) {
+    var dy = (i * 200 + u * 50) % (BOT - TOP);
+    s += dot(CX - 350, TOP + dy, 10, DIM, 0.3);
+    s += dot(CX + 350, TOP + dy, 10, DIM, 0.3);
+  }
+
+  s += player(playerX, playerY, AMBER, 'idle', 1);
+  s += lootBox(itemX, itemY, 'item', u, AMBER, 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var playerX_start = CX - 200;
+  var playerY_start = CY + 300;
+  var itemX_start = CX + 200;
+  var itemY_start = CY - 100;
+
+  var playerX_end = CX;
+  var playerY_end = CY + 300;
+  var itemX_end = CX;
+  var itemY_end = CY - 100;
+
+  var playerX = lerp(playerX_start, playerX_end, easeOut(u));
+  var playerY = lerp(playerY_start, playerY_end, easeOut(u));
+  var itemX = lerp(itemX_start, itemX_end, easeOut(u));
+  var itemY = lerp(itemY_start, itemY_end, easeOut(u));
+
+  var camTx = lerp(-100, 0, smooth(u));
+  var camTy = lerp(-150, 0, smooth(u));
+  var camScale = lerp(1.1, 1.0, smooth(u));
+
+  s += '<g ' + camera(camScale, camTx, camTy) + '>';
+  // Background game elements (fading out)
+  s += rrect(CX, CY, W * 0.8, BOT - TOP, 40, DIM, lerp(0.1, 0.05, u));
+  s += line(CX - 300, TOP + 100, CX + 300, TOP + 100, WHITE, 6, lerp(0.2, 0.1, u));
+  s += line(CX - 300, BOT - 100, CX + 300, BOT - 100, WHITE, 6, lerp(0.2, 0.1, u));
+
+  s += player(playerX, playerY, AMBER, 'reach', 1); // Player reaching
+  s += lootBox(itemX, itemY, 'box', u, BLUE, 1); // Item transforms to box
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): TRY */
+function scene3(u) {
+  var s = '';
+  var playerX = CX - 200;
+  var playerY = CY + 300;
+  var boxX = CX + 200;
+  var boxY = CY - 100;
+
+  var playerPose = 'idle';
+  var boxType = 'box';
+  var boxContents = '';
+
+  if (u < 0.3) { // Player approaches
+    playerX = lerp(CX, CX - 200, easeOut(u * 3));
+    playerY = CY + 300;
+    boxX = lerp(CX, CX + 200, easeOut(u * 3));
+    boxY = CY - 100;
+    playerPose = 'reach';
+  } else if (u < 0.6) { // Player pulls lever, box opens
+    playerPose = 'pull';
+    boxType = 'openBox';
+    boxContents += dot(boxX, boxY + 20, 20, DIM); // Common item
+    boxContents += line(boxX - 40, boxY + 20, boxX + 40, boxY + 20, CORAL, 6); // Near miss bar
+    boxContents += dot(boxX, boxY + 50, 15, DIM);
+  } else { // Player disappointed
+    playerPose = 'sad';
+    boxType = 'openBox';
+    boxContents += dot(boxX, boxY + 20, 20, DIM);
+    boxContents += line(boxX - 40, boxY + 20, boxX + 40, boxY + 20, CORAL, 6);
+    boxContents += dot(boxX, boxY + 50, 15, DIM);
+  }
+
+  s += player(playerX, playerY, AMBER, playerPose, 1);
+  s += lootBox(boxX, boxY, boxType, ramp(u, 0.3, 0.6), BLUE, 1); // Pass u for lid opening
+  if (boxContents) {
+    var itemScale = lerp(0.5, 1.0, easeOut(ramp(u, 0.4, 0.7)));
+    var itemY_base = boxY + 20;
+    s += '<g transform="translate(' + boxX + ' ' + itemY_base + ') scale(' + itemScale + ') translate(' + (-boxX) + ' ' + (-itemY_base) + ')">';
+    s += boxContents;
+    s += '</g>';
+  }
+  return s;
+}
+
+/* SCENE 4 (30-40): REPEAT */
+function scene4(u) {
+  var s = '';
+  var playerX = CX - 200;
+  var playerY = CY + 300;
+  var boxX = CX + 200;
+  var boxY = CY - 100;
+
+  var playerPose = 'pull';
+  var boxType = 'openBox';
+  var boxContents = '';
+
+  var cycle = u * 3; // Three cycles of opening/closing
+  var cycleU = cycle % 1;
+  var cycleIdx = Math.floor(cycle);
+
+  var openPhase = ramp(cycleU, 0.2, 0.5); // Box opens
+  var contentPhase = ramp(cycleU, 0.5, 0.8); // Content appears
+
+  // Player's emotion changes over time
+  if (u < 0.3) playerPose = 'pull';
+  else if (u < 0.6) playerPose = 'sad';
+  else playerPose = 'reach'; // Renewed hope
+
+  s += player(playerX, playerY, AMBER, playerPose, 1);
+  s += lootBox(boxX, boxY, 'openBox', openPhase, BLUE, 1); // Box opening/closing
+
+  // Contents flash based on cycle
+  var itemScale = lerp(0.5, 1.0, easeOut(contentPhase));
+  var itemY_base = boxY + 20;
+  s += '<g transform="translate(' + boxX + ' ' + itemY_base + ') scale(' + itemScale + ') translate(' + (-boxX) + ' ' + (-itemY_base) + ')">';
+  if (contentPhase > 0) {
+    if (cycleIdx % 3 === 0) { // Mostly common/near miss
+      boxContents += dot(boxX, boxY + 20, 20, DIM);
+      boxContents += line(boxX - 40, boxY + 20, boxX + 40, boxY + 20, CORAL, 6);
+    } else if (cycleIdx % 3 === 1) { // Another near miss
+      boxContents += dot(boxX, boxY + 20, 20, CORAL);
+      boxContents += dot(boxX, boxY + 50, 15, DIM);
+    } else { // Small reward, but not the big one
+      boxContents += dot(boxX, boxY + 20, 20, AMBER, 0.5); // Faint amber
+      boxContents += dot(boxX, boxY + 50, 15, DIM);
+    }
+  }
+  s += boxContents;
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): SYSTEM */
+function scene5(u) {
+  var s = '';
+  var playerX_start = CX - 200;
+  var playerY_start = CY + 300;
+  var machineX_start = CX + 200;
+  var machineY_start = CY - 100;
+
+  var zoom = lerp(1.0, 0.6, smooth(u));
+  var camX = lerp(0, 0, smooth(u));
+  var camY = lerp(0, 100, smooth(u)); // Shift down to show more of the machine
+
+  var playerX = lerp(playerX_start, CX - 300, smooth(u));
+  var playerY = lerp(playerY_start, CY + 400, smooth(u));
+  var machineX = lerp(machineX_start, CX, smooth(u));
+  var machineY = lerp(machineY_start, CY, smooth(u));
+
+  s += '<g ' + camera(zoom, camX, camY) + '>';
+  s += player(playerX, playerY, AMBER, 'reach', 1); // Player reaching, now smaller
+
+  // Box transforms to machine
+  s += lootBox(machineX, machineY, 'machine', u, BLUE, 1);
+
+  // Internal gears/lines of the system
+  var gearRot = u * 360 * 2; // Gears spinning
+  var gearSize = 60;
+  s += '<g transform="rotate(' + gearRot + ' ' + (machineX - 80) + ' ' + (machineY + 100) + ')">';
+  s += ring(machineX - 80, machineY + 100, gearSize, DIM, 6, 0.5);
+  s += line(machineX - 80 - gearSize, machineY + 100, machineX - 80 + gearSize, machineY + 100, DIM, 6, 0.5);
+  s += line(machineX - 80, machineY + 100 - gearSize, machineX - 80, machineY + 100 + gearSize, DIM, 6, 0.5);
+  s += '</g>';
+  s += '<g transform="rotate(' + (-gearRot) + ' ' + (machineX + 80) + ' ' + (machineY + 150) + ')">';
+  s += ring(machineX + 80, machineY + 150, gearSize * 0.7, DIM, 5, 0.5);
+  s += line(machineX + 80 - gearSize * 0.7, machineY + 150, machineX + 80 + gearSize * 0.7, machineY + 150, DIM, 5, 0.5);
+  s += line(machineX + 80, machineY + 150 - gearSize * 0.7, machineX + 80, machineY + 150 + gearSize * 0.7, DIM, 5, 0.5);
+  s += '</g>';
+
+  // Data flow lines
+  s += line(machineX - 150, machineY - 200, machineX - 250, machineY - 300, BLUE, 4, 0.3 + Math.sin(u * Math.PI * 4) * 0.2);
+  s += line(machineX + 150, machineY - 200, machineX + 250, machineY - 300, BLUE, 4, 0.3 + Math.cos(u * Math.PI * 4) * 0.2);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): REWARD */
+function scene6(u) {
+  var s = '';
+  var playerX_end = CX - 300;
+  var playerY_end = CY + 400;
+  var machineX_end = CX;
+  var machineY_end = CY;
+
+  var zoom = lerp(0.6, 1.0, smooth(u));
+  var camX = lerp(0, 0, smooth(u));
+  var camY = lerp(100, 0, smooth(u));
+
+  var playerX = lerp(playerX_end, CX - 200, smooth(u));
+  var playerY = lerp(playerY_end, CY + 300, smooth(u));
+  var machineX = lerp(machineX_end, CX + 200, smooth(u));
+  var machineY = lerp(machineY_end, CY - 100, smooth(u));
+
+  s += '<g ' + camera(zoom, camX, camY) + '>';
+  s += player(playerX, playerY, AMBER, 'celebrate', 1); // Player celebrating
+
+  // Machine delivers result
+  s += lootBox(machineX, machineY, 'result', ramp(u, 0.1, 0.5), BLUE, 1);
+
+  // System stabilizes
+  var gearRot = lerp(u * 360 * 2, 0, smooth(ramp(u, 0.5, 0.8)));
+  var gearSize = 60;
+  s += '<g transform="rotate(' + gearRot + ' ' + (machineX - 80) + ' ' + (machineY + 100) + ')">';
+  s += ring(machineX - 80, machineY + 100, gearSize, DIM, 6, 0.5);
+  s += line(machineX - 80 - gearSize, machineY + 100, machineX - 80 + gearSize, machineY + 100, DIM, 6, 0.5);
+  s += line(machineX - 80, machineY + 100 - gearSize, machineX - 80, machineY + 100 + gearSize, DIM, 6, 0.5);
+  s += '</g>';
+  s += '<g transform="rotate(' + (-gearRot) + ' ' + (machineX + 80) + ' ' + (machineY + 150) + ')">';
+  s += ring(machineX + 80, machineY + 150, gearSize * 0.7, DIM, 5, 0.5);
+  s += line(machineX + 80 - gearSize * 0.7, machineY + 150, machineX + 80 + gearSize * 0.7, machineY + 150, DIM, 5, 0.5);
+  s += line(machineX + 80, machineY + 150 - gearSize * 0.7, machineX + 80, machineY + 150 + gearSize * 0.7, DIM, 5, 0.5);
+  s += '</g>';
+
+  // Data flow lines fade out
+  s += line(machineX - 150, machineY - 200, machineX - 250, machineY - 300, BLUE, 4, lerp(0.5, 0, smooth(u)));
+  s += line(machineX + 150, machineY - 200, machineX + 250, machineY - 300, BLUE, 4, lerp(0.5, 0, smooth(u)));
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

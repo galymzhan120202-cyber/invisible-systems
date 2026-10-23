@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Hold Music is Always Terrible</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / the rule
+var AMBER = "#F2A93B";              // warm amber   -> YOU / desire / solution
+var CORAL = "#FF5B5B";              // coral red    -> frustration / naive model
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function chevron(x, y, size, col, op) {
+  // Points up: M (left-bottom) L (top-center) L (right-bottom)
+  var d = "M " + (x - size) + " " + (y + size * 0.55) + " L " + x + " " + (y - size * 0.55) + " L " + (x + size) + " " + (y + size * 0.55);
+  return pathTag(d, col, 14, op);
+}
+
+// Phone element
+function phone(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var w = size * 0.6, h = size;
+  var rad = size * 0.1;
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, rad, col, op); // Filled body
+  g += dot(x, y - h * 0.35, size * 0.08, WHITE); // Speaker dot
+  g += dot(x, y + h * 0.35, size * 0.08, WHITE); // Mic dot
+  g += '</g>';
+  return g;
+}
+
+// Stick figure element
+function stickFigure(x, yFeet, phoneState, armsUp, headTilt, op, col = WHITE) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = 30;
+  var bodyH = 100;
+  var legL = 80;
+  var armL = 70;
+  var sw = 8;
+
+  var headY = yFeet - legL - bodyH - headR;
+  var bodyTopY = yFeet - legL - bodyH;
+  var bodyMidY = yFeet - legL - bodyH * 0.7; // Where arms attach
+  var bodyBottomY = yFeet - legL;
+
+  // Head
+  g += dot(x, headY, headR, col);
+
+  // Body
+  g += line(x, bodyTopY, x, bodyBottomY, col, sw);
+
+  // Legs
+  g += line(x, bodyBottomY, x - 20, yFeet, col, sw);
+  g += line(x, bodyBottomY, x + 20, yFeet, col, sw);
+
+  // Arms
+  if (armsUp) {
+    g += line(x, bodyMidY, x - 50, bodyMidY - armL, col, sw); // Left arm up
+    g += line(x, bodyMidY, x + 50, bodyMidY - armL, col, sw); // Right arm up
+  } else if (phoneState === 1) { // Holding phone to ear
+    g += line(x, bodyMidY, x - 40, bodyMidY + 20, col, sw); // Left arm down slightly
+    g += line(x, bodyMidY, x + 40, bodyMidY - 30, col, sw); // Right arm up to ear
+    g += phone(x + 60, bodyMidY - 40, 40, AMBER, op); // Phone near ear
+  } else if (phoneState === 2) { // Holding phone out
+    g += line(x, bodyMidY, x - 50, bodyMidY + 20, col, sw); // Left arm down
+    g += line(x, bodyMidY, x + 50, bodyMidY + 20, col, sw); // Right arm down
+    g += phone(x, bodyMidY + 50, 40, AMBER, op); // Phone in front
+  } else { // Arms down
+    g += line(x, bodyMidY, x - 40, bodyMidY + 40, col, sw);
+    g += line(x, bodyMidY, x + 40, bodyMidY + 40, col, sw);
+  }
+
+  // Gaze / expression (simple dot for eye)
+  var eyeR = sw * 0.3;
+  var eyeOffsetX = 0;
+  if (headTilt === 'left') eyeOffsetX = -10;
+  if (headTilt === 'right') eyeOffsetX = 10;
+  g += dot(x + eyeOffsetX, headY - headR * 0.3, eyeR, col);
+
+  g += '</g>';
+  return g;
+}
+
+// AI Brain icon
+function aiBrain(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, size, col, 8);
+  g += line(x - size * 0.4, y, x + size * 0.4, y, col, 4);
+  g += line(x, y - size * 0.4, x, y + size * 0.4, col, 4);
+  g += dot(x - size * 0.2, y - size * 0.2, size * 0.1, col);
+  g += dot(x + size * 0.2, y - size * 0.2, size * 0.1, col);
+  g += dot(x - size * 0.2, y + size * 0.2, size * 0.1, col);
+  g += dot(x + size * 0.2, y + size * 0.2, size * 0.1, col);
+  g += '</g>';
+  return g;
+}
+
+// Thought bubble with chevron pointing up
+function thoughtBubble(x, y, r, col, sw, op) {
+  var g = '';
+  g += ring(x, y, r, col, sw, op);
+  // Chevron pointing up from the bottom of the bubble to the stick figure's head
+  // The 'y' for chevron is its center. Its top point is y_chevron - size * 0.55.
+  // We want the top point to be at y + r (bottom of the bubble).
+  // So, y_chevron = y + r + size * 0.55.
+  var chevronSize = 20;
+  var chevronY = y + r + chevronSize * 0.55;
+  g += chevron(x, chevronY, chevronSize, col, op);
+  return g;
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- scene constants ---------- */
+var FIG_BASE_X = CX;
+var FIG_BASE_Y = BOT - 80;
+var CALL_LINE_X_S1 = CX - 200;
+var CALL_LINE_Y1_S1 = TOP + 100;
+var CALL_LINE_Y2_S1 = BOT - 100;
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + THE CALL */
+function scene1(u) {
+  var s = '';
+  var bob = Math.sin(u * Math.PI * 2) * 8; // Gentle bobbing
+  var linePulse = 0.8 + 0.2 * Math.sin(u * Math.PI * 4); // Line subtle pulse
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Faint background network (dots and lines)
+  var netOp = lerp(0.0, 0.15, smooth(u));
+  for (var i = 0; i < 10; i++) {
+    var rx1 = CX + (rnd(i) - 0.5) * W * 0.8;
+    var ry1 = TOP + rnd(i + 1) * (BOT - TOP);
+    var rx2 = CX + (rnd(i + 2) - 0.5) * W * 0.8;
+    var ry2 = TOP + rnd(i + 3) * (BOT - TOP);
+    s += line(rx1, ry1, rx2, ry2, DIM, 2, netOp * 0.6);
+    s += dot(rx1, ry1, 6, DIM, netOp);
+  }
+
+  // Call line (simple vertical line)
+  s += line(CALL_LINE_X_S1, CALL_LINE_Y1_S1, CALL_LINE_X_S1, CALL_LINE_Y2_S1, BLUE, 10, linePulse);
+
+  // Stick figure with phone to ear
+  s += stickFigure(FIG_BASE_X, FIG_BASE_Y + bob, 1, false, 'none', 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): THE QUEUE */
+function scene2(u) {
+  var s = '';
+  var bob = Math.sin(u * Math.PI * 2) * 5;
+  var headTilt = 'right';
+  var armsUp = false;
+
+  // Morph the call line into a queue belt
+  var lineToQueueMorph = smooth(ramp(u, 0.0, 0.3));
+  var beltW = lerp(10, 600, lineToQueueMorph); // Morph line width
+  var beltH = lerp(CALL_LINE_Y2_S1 - CALL_LINE_Y1_S1, 60, lineToQueueMorph); // Morph line height
+  var beltX = lerp(CALL_LINE_X_S1, CX, lineToQueueMorph); // Morph line X
+  var beltY = lerp((CALL_LINE_Y1_S1 + CALL_LINE_Y2_S1) / 2, CY, lineToQueueMorph); // Morph line Y
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Faint background network (persists)
+  for (var i = 0; i < 10; i++) {
+    var rx1 = CX + (rnd(i) - 0.5) * W * 0.8;
+    var ry1 = TOP + rnd(i + 1) * (BOT - TOP);
+    var rx2 = CX + (rnd(i + 2) - 0.5) * W * 0.8;
+    var ry2 = TOP + rnd(i + 3) * (BOT - TOP);
+    s += line(rx1, ry1, rx2, ry2, DIM, 2, 0.15);
+    s += dot(rx1, ry1, 6, DIM, 0.15);
+  }
+
+  // Blue belt (call line morph)
+  s += rrect(beltX, beltY, beltW, beltH, beltH / 2, BLUE, 0.8);
+
+  // Queue dots moving along the belt
+  var numDots = 10;
+  var dotSpacing = beltW / numDots;
+  var queueSpeed = u * 100; // Speed of dots
+  for (var i = 0; i < numDots; i++) {
+    var dotX = beltX - beltW / 2 + ((i * dotSpacing + queueSpeed) % beltW);
+    s += dot(dotX, beltY, 12, WHITE, 1);
+  }
+
+  // Stick figure with phone held out, looking at the queue
+  s += stickFigure(FIG_BASE_X, FIG_BASE_Y + bob, 2, armsUp, headTilt, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): THE SYSTEM */
+function scene3(u) {
+  var s = '';
+  var bob = Math.sin(u * Math.PI * 2) * 3;
+  var headTilt = 'none';
+  var armsUp = false;
+
+  var networkExpand = smooth(ramp(u, 0.0, 0.4));
+  var networkOpacity = lerp(0.8, 1, networkExpand);
+
+  // Camera scale and translation to make figure appear smaller and move it
+  var camScale = lerp(1.0, 0.7, smooth(u));
+  var camTX = lerp(0, -200, smooth(u)); // Move left
+  var camTY = lerp(0, 100, smooth(u)); // Move down
+
+  s += '<g ' + camera(camScale, camTX, camTY) + '>';
+
+  // Complex network of blue lines and nodes
+  var numNodes = 20;
+  var nodes = [];
+  for (var i = 0; i < numNodes; i++) {
+    var nodeX = CX + (rnd(i) - 0.5) * W * 0.9;
+    var nodeY = TOP + rnd(i + 1) * (BOT - TOP);
+    nodes.push({ x: nodeX, y: nodeY });
+    s += dot(nodeX, nodeY, 10, BLUE, networkOpacity);
+  }
+
+  // Connect nodes with lines
+  for (var i = 0; i < numNodes; i++) {
+    for (var j = i + 1; j < numNodes; j++) {
+      if (rnd(i * j) < 0.25) { // Random connections
+        s += line(nodes[i].x, nodes[i].y, nodes[j].x, nodes[j].y, BLUE, 4, networkOpacity * 0.6);
+      }
+    }
+  }
+
+  // The "you" signal (coral dot)
+  // The phone is at FIG_BASE_X, FIG_BASE_Y - 100 (approx)
+  var phonePos = { x: FIG_BASE_X, y: FIG_BASE_Y - 100 };
+  var signalSourceX = lerp(phonePos.x, nodes[0].x, networkExpand);
+  var signalSourceY = lerp(phonePos.y, nodes[0].y, networkExpand);
+
+  var signalPathProgress = u * 0.6 % 1;
+  var targetNode = nodes[Math.floor(rnd(100) * numNodes)];
+  var signalX = lerp(signalSourceX, targetNode.x, signalPathProgress);
+  var signalY = lerp(signalSourceY, targetNode.y, signalPathProgress);
+  s += dot(signalX, signalY, 15, CORAL, 1);
+
+  // Stick figure with phone held out, looking at the network
+  s += stickFigure(FIG_BASE_X, FIG_BASE_Y + bob, 2, armsUp, headTilt, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): THE COST */
+function scene4(u) {
+  var s = '';
+  var bob = Math.sin(u * Math.PI * 2) * 5;
+  var headShake = Math.sin(u * Math.PI * 10) * 8 * pulse(u, 0.5, 0.4);
+  var armsUp = true; // Frustrated
+  var headTilt = 'none';
+
+  // Network collapse into jagged coral line
+  var collapse = smooth(ramp(u, 0.0, 0.4));
+  var lineOpacity = lerp(1, 0.8, collapse);
+
+  var jaggedPath = "M " + (CX - 400) + " " + (CY - 200);
+  var numSegments = 10;
+  for (var i = 0; i <= numSegments; i++) {
+    var p = i / numSegments;
+    var x = lerp(CX - 400, CX + 400, p);
+    var y = lerp(CY - 200, CY + 200, p) + Math.sin(p * Math.PI * 6 + u * Math.PI * 2) * 40 * (1 - collapse);
+    if (i % 2 === 0) {
+      y += 50 * collapse; // Make it more jagged as it collapses
+    } else {
+      y -= 50 * collapse;
+    }
+    jaggedPath += " L " + x + " " + y;
+  }
+
+  s += '<g ' + camera(1.0, headShake, 0) + '>';
+
+  // Jagged coral line (wasted time)
+  s += pathTag(jaggedPath, CORAL, 12, lineOpacity);
+
+  // Clock
+  var clockR = 100;
+  var clockX = CX + 300;
+  var clockY = TOP + 200;
+  s += ring(clockX, clockY, clockR, DIM, 8); // Clock face
+  var hourAngle = (u * 360 * 0.1) % 360; // Slow hour hand
+  var minuteAngle = (u * 360 * 1.2) % 360; // Faster minute hand
+  var hrX = clockX + Math.sin(hourAngle * Math.PI / 180) * clockR * 0.5;
+  var hrY = clockY - Math.cos(hourAngle * Math.PI / 180) * clockR * 0.5;
+  var mnX = clockX + Math.sin(minuteAngle * Math.PI / 180) * clockR * 0.8;
+  var mnY = clockY - Math.cos(minuteAngle * Math.PI / 180) * clockR * 0.8;
+  s += line(clockX, clockY, hrX, hrY, WHITE, 6); // Hour hand
+  s += line(clockX, clockY, mnX, mnY, WHITE, 6); // Minute hand
+  s += dot(clockX, clockY, 10, WHITE); // Center dot
+
+  // Stick figure with phone, frustrated
+  s += stickFigure(FIG_BASE_X, FIG_BASE_Y + bob, 2, armsUp, headTilt, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): THE SOLUTION */
+function scene5(u) {
+  var s = '';
+  var bob = Math.sin(u * Math.PI * 2) * 5;
+  var headTilt = 'right'; // Looking at the direct line
+  var armsUp = false;
+
+  // Jagged line smooths to direct amber line
+  var smoothTransition = smooth(ramp(u, 0.0, 0.4));
+  var lineStartX = lerp(CX - 400, CX - 200, smoothTransition);
+  var lineStartY = lerp(CY - 200, FIG_BASE_Y - 100, smoothTransition); // From phone (approx)
+  var lineEndX = lerp(CX + 400, CX + 200, smoothTransition);
+  var lineEndY = lerp(CY + 200, CY - 200, smoothTransition); // To AI brain
+
+  var lineProgress = easeOut(ramp(u, 0.3, 0.8)); // Line draws itself
+  var currentLineX = lerp(lineStartX, lineEndX, lineProgress);
+  var currentLineY = lerp(lineStartY, lineEndY, lineProgress);
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Direct amber line
+  s += line(lineStartX, lineStartY, currentLineX, currentLineY, AMBER, 12, 1);
+
+  // AI Brain
+  var brainX = CX + 200;
+  var brainY = CY - 200;
+  var brainPulse = 0.8 + 0.2 * Math.sin(u * Math.PI * 4);
+  s += aiBrain(brainX, brainY, 80, BLUE, brainPulse);
+
+  // Stick figure with phone to ear, hopeful
+  s += stickFigure(CX - 200, FIG_BASE_Y + bob, 1, armsUp, headTilt, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): THE OUTCOME */
+function scene6(u) {
+  var s = '';
+  var bob = Math.sin(u * Math.PI * 2) * 5;
+  var headNod = Math.sin(u * Math.PI * 4) * 5; // Gentle nod
+  var armsUp = false;
+  var headTilt = 'none';
+
+  // Stable direct amber line
+  var lineStartX = CX - 200;
+  var lineStartY = FIG_BASE_Y - 100; // From phone
+  var lineEndX = CX + 200;
+  var lineEndY = CY - 200; // To a generic "system" point
+
+  var linePulse = 0.8 + 0.2 * Math.sin(u * Math.PI * 4);
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Simple, clean, organized blue background elements
+  var bgOpacity = lerp(0.1, 0.2, smooth(u));
+  s += rrect(CX, CY, W * 0.8, BOT - TOP, 50, BLUE, bgOpacity);
+  s += line(CX - 300, TOP + 50, CX + 300, TOP + 50, WHITE, 2, bgOpacity * 0.8);
+  s += line(CX - 300, BOT - 50, CX + 300, BOT - 50, WHITE, 2, bgOpacity * 0.8);
+
+  // Direct amber line
+  s += line(lineStartX, lineStartY, lineEndX, lineEndY, AMBER, 12, linePulse);
+
+  // Stick figure, happy
+  s += stickFigure(CX - 200, FIG_BASE_Y + bob + headNod, 1, armsUp, headTilt, 1);
+
+  // Thought bubble
+  var bubbleX = CX - 200;
+  var bubbleY = FIG_BASE_Y - 250;
+  s += thoughtBubble(bubbleX, bubbleY, 40, AMBER, 6, 1);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

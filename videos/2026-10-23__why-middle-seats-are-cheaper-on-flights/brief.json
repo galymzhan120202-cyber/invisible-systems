@@ -1,0 +1,15 @@
+{
+  "id": "why-middle-seats-are-cheaper-on-flights",
+  "slug": "2026-10-23__why-middle-seats-are-cheaper-on-flights",
+  "title_working": "Why the Middle Seat is Cheaper",
+  "system": "price discrimination / perceived disutility of an option",
+  "cluster": "pricing-and-incentives",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-10-23T11:32:40+00:00",
+  "produced_at": "2026-10-23T11:38:41+00:00",
+  "verify": "PASS",
+  "takeaway": "Airlines use middle seats to sort passengers by their willingness to pay, maximizing revenue.",
+  "animation_source": "fallback"
+}
