@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why So Many Online Reviews Feel Fake</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = W / 2, CY = H / 2;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> system/filter
+var AMBER = "#F2A93B";              // warm amber   -> YOU/positive review
+var CORAL = "#FF5B5B";              // coral red    -> fake/negative review/suspicion
+
+var DUR = 60;
+window.__duration = DUR;
+
+// Hero element dimensions
+var PROD_W = 480;
+var PROD_H = 600;
+var PROD_X = CX + 180; // Default X for product box on screen
+var PROD_Y = CY + 100; // Default Y for product box on screen
+var STAR_R = 30;
+var STAR_SPACING = 50;
+var STAR_OFFSET_Y = PROD_Y + PROD_H / 2 + STAR_R + 40; // Below the product box
+
+// Stick figure dimensions
+var FIG_H = 240;
+var FIG_HEAD_R = 30;
+var FIG_BODY_LEN = 100;
+var FIG_ARM_LEN = 80;
+var FIG_LEG_LEN = 100;
+var FIG_STROKE = 10;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+// Custom shapes
+function stickFigure(x, y, height, pose, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headY = y - height / 2 + FIG_HEAD_R;
+  var bodyY = headY + FIG_HEAD_R + FIG_BODY_LEN / 2;
+  var legY = bodyY + FIG_BODY_LEN / 2;
+
+  // Head
+  g += dot(x, headY, FIG_HEAD_R, col);
+
+  // Body
+  g += line(x, headY + FIG_HEAD_R, x, headY + FIG_HEAD_R + FIG_BODY_LEN, col, FIG_STROKE);
+
+  // Arms and Legs based on pose
+  switch (pose) {
+    case 'overwhelmed':
+      g += line(x, bodyY, x - FIG_ARM_LEN * 0.8, bodyY - FIG_ARM_LEN * 0.6, col, FIG_STROKE); // Arms up
+      g += line(x, bodyY, x + FIG_ARM_LEN * 0.8, bodyY - FIG_ARM_LEN * 0.6, col, FIG_STROKE);
+      g += line(x, legY, x - FIG_LEG_LEN * 0.3, legY + FIG_LEG_LEN, col, FIG_STROKE); // Legs slightly apart
+      g += line(x, legY, x + FIG_LEG_LEN * 0.3, legY + FIG_LEG_LEN, col, FIG_STROKE);
+      break;
+    case 'suspicious':
+      g += line(x, headY + FIG_HEAD_R, x - FIG_ARM_LEN * 0.7, headY + FIG_HEAD_R + FIG_ARM_LEN * 0.3, col, FIG_STROKE); // Arm to chin
+      g += line(x - FIG_ARM_LEN * 0.7, headY + FIG_HEAD_R + FIG_ARM_LEN * 0.3, x - FIG_ARM_LEN * 0.5, headY + FIG_HEAD_R + FIG_ARM_LEN * 0.7, col, FIG_STROKE);
+      g += line(x, headY + FIG_HEAD_R, x + FIG_ARM_LEN * 0.6, headY + FIG_HEAD_R + FIG_ARM_LEN * 0.2, col, FIG_STROKE); // Other arm down
+      g += line(x, legY, x, legY + FIG_LEG_LEN, col, FIG_STROKE); // Legs together
+      break;
+    case 'frustrated':
+      g += line(x, headY + FIG_HEAD_R + FIG_BODY_LEN * 0.4, x - FIG_ARM_LEN * 0.6, headY + FIG_HEAD_R + FIG_BODY_LEN * 0.4, col, FIG_STROKE); // Arms crossed
+      g += line(x - FIG_ARM_LEN * 0.6, headY + FIG_HEAD_R + FIG_BODY_LEN * 0.4, x + FIG_ARM_LEN * 0.6, headY + FIG_HEAD_R + FIG_BODY_LEN * 0.4, col, FIG_STROKE);
+      g += line(x, legY, x, legY + FIG_LEG_LEN, col, FIG_STROKE); // Legs together
+      break;
+    case 'thoughtful':
+      g += line(x, headY + FIG_HEAD_R, x - FIG_ARM_LEN * 0.3, headY + FIG_HEAD_R + FIG_ARM_LEN * 0.7, col, FIG_STROKE); // Arm bent, hand near chin
+      g += line(x - FIG_ARM_LEN * 0.3, headY + FIG_HEAD_R + FIG_ARM_LEN * 0.7, x - FIG_ARM_LEN * 0.1, headY + FIG_HEAD_R + FIG_ARM_LEN * 0.9, col, FIG_STROKE);
+      g += line(x, headY + FIG_HEAD_R, x + FIG_ARM_LEN * 0.6, headY + FIG_HEAD_R + FIG_ARM_LEN * 0.2, col, FIG_STROKE); // Other arm down
+      g += line(x, legY, x, legY + FIG_LEG_LEN, col, FIG_STROKE); // Legs together
+      break;
+    default: // 'neutral' or 'empowered' (similar to neutral but more upright)
+      g += line(x, headY + FIG_HEAD_R, x - FIG_ARM_LEN * 0.6, headY + FIG_HEAD_R + FIG_ARM_LEN * 0.2, col, FIG_STROKE); // Arms relaxed
+      g += line(x, headY + FIG_HEAD_R, x + FIG_ARM_LEN * 0.6, headY + FIG_HEAD_R + FIG_ARM_LEN * 0.2, col, FIG_STROKE);
+      g += line(x, legY, x, legY + FIG_LEG_LEN, col, FIG_STROKE); // Legs together
+      break;
+  }
+  g += '</g>';
+  return g;
+}
+
+function productBox(x, y, w, h, rad, col, sw, op, cracksOp) {
+  var s = rrectStroke(x, y, w, h, rad, col, sw, op);
+  if (cracksOp > 0.01) {
+    // Simple cracks
+    s += line(x - w * 0.3, y - h * 0.2, x - w * 0.1, y + h * 0.1, DIM, sw * 0.8, cracksOp);
+    s += line(x + w * 0.2, y - h * 0.1, x + w * 0.05, y + h * 0.2, DIM, sw * 0.8, cracksOp);
+    s += line(x - w * 0.1, y + h * 0.3, x + w * 0.1, y + h * 0.1, DIM, sw * 0.8, cracksOp);
+  }
+  return s;
+}
+
+function drawStars(x, y, count, color, radius, spacing, op, pulseFactor) {
+  var g = '';
+  var startX = x - (count - 1) * spacing / 2;
+  for (var i = 0; i < count; i++) {
+    var currentR = radius;
+    if (pulseFactor) {
+      currentR = lerp(radius, radius * 1.2, pulse(i / count, pulseFactor, 0.2));
+    }
+    g += dot(startX + i * spacing, y, currentR, color, op);
+  }
+  return g;
+}
+
+function questionMark(x, y, size, col, op) {
+  var sw = size / 8;
+  var headR = size * 0.3;
+  var d = "M " + x + " " + (y - size * 0.4) +
+          " A " + headR + " " + headR + " 0 1 1 " + (x - headR) + " " + (y - size * 0.4 + headR) +
+          " L " + (x - headR) + " " + (y + size * 0.1) +
+          " L " + (x - headR * 0.5) + " " + (y + size * 0.1);
+  var dotY = y + size * 0.3;
+  return pathTag(d, col, sw, op) + dot(x - headR * 0.5, dotY, sw * 0.8, col, op);
+}
+
+function filterFunnel(x, y, w, h, col, sw, op, outlineOnly) {
+  var topW = w * 1.2;
+  var botW = w * 0.6;
+  var d = "M " + (x - topW / 2) + " " + (y - h / 2) +
+          " L " + (x - botW / 2) + " " + (y + h / 2) +
+          " L " + (x + botW / 2) + " " + (y + h / 2) +
+          " L " + (x + topW / 2) + " " + (y - h / 2) + " Z";
+  if (outlineOnly) {
+    return pathTag(d, col, sw, op);
+  } else {
+    return '<path d="' + d + '" fill="' + col + '" opacity="' + op + '"/>';
+  }
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var figX = CX - 300;
+  var figY = CY + FIG_H / 2 + 100;
+
+  // Screen
+  s += rrectStroke(PROD_X, CY + 10, PROD_W + 100, H - TOP - BOT + 200, 40, WHITE, 12, 0.8);
+
+  // Stick figure (YOU)
+  s += stickFigure(figX, figY, FIG_H, 'neutral', WHITE);
+
+  // Product Box fades in
+  var prodOp = ramp(u, 0.06, 0.2); // focus.mp3 (0.6s) -> u=0.06
+  s += productBox(PROD_X, PROD_Y, PROD_W, PROD_H, 20, WHITE, 10, prodOp, 0);
+
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var figX = CX - 300;
+  var figY = CY + FIG_H / 2 + 100;
+
+  // Camera zoom out to show more product boxes
+  var scale = lerp(1.0, 0.7, smooth(ramp(u, 0.0, 0.3))); // whoosh.mp3 (10.6s) -> u=0.06
+  var camTx = lerp(0, -100, smooth(ramp(u, 0.0, 0.3)));
+  var camTy = lerp(0, -100, smooth(ramp(u, 0.0, 0.3)));
+  s += '<g ' + camera(scale, camTx, camTy) + '>';
+
+  // Stick figure (YOU)
+  var figPose = u < 0.5 ? 'neutral' : 'overwhelmed';
+  s += stickFigure(figX, figY, FIG_H, figPose, WHITE);
+
+  // Screen
+  s += rrectStroke(PROD_X, CY + 10, PROD_W + 100, H - TOP - BOT + 200, 40, WHITE, 12, 0.8);
+
+  // Multiple Product Boxes filling the screen
+  var numBoxes = 3; // 3 rows
+  var boxSpacingY = PROD_H + 100;
+  var boxSpacingX = PROD_W + 100;
+  var boxFade = ramp(u, 0.06, 0.3);
+
+  for (var r = 0; r < numBoxes; r++) {
+    for (var c = 0; c < 2; c++) { // 2 columns
+      var currentProdX = PROD_X + (c - 0.5) * boxSpacingX * 0.8;
+      var currentProdY = PROD_Y + (r - 1) * boxSpacingY * 0.8;
+      s += productBox(currentProdX, currentProdY, PROD_W, PROD_H, 20, WHITE, 10, boxFade, 0);
+
+      // Stars animate onto boxes
+      var starOp = ramp(u, 0.52, 0.7); // complete-done.mp3 (15.2s) -> u=0.52
+      if (starOp > 0.01) {
+        s += drawStars(currentProdX, currentProdY + PROD_H / 2 + STAR_R + 20, 5, AMBER, STAR_R * 0.8, STAR_SPACING * 0.8, starOp);
+      }
+    }
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var figX = CX - 300;
+  var figY = CY + FIG_H / 2 + 100;
+
+  // Camera focuses on single product box (reverse of zoom out)
+  var scale = lerp(0.7, 1.0, smooth(ramp(u, 0.0, 0.3)));
+  var camTx = lerp(-100, 0, smooth(ramp(u, 0.0, 0.3)));
+  var camTy = lerp(-100, 0, smooth(ramp(u, 0.0, 0.3)));
+  s += '<g ' + camera(scale, camTx, camTy) + '>';
+
+  // Stick figure (YOU)
+  var figPose = u < 0.5 ? 'overwhelmed' : 'suspicious';
+  s += stickFigure(figX, figY, FIG_H, figPose, WHITE);
+
+  // Screen
+  s += rrectStroke(PROD_X, CY + 10, PROD_W + 100, H - TOP - BOT + 200, 40, WHITE, 12, 0.8);
+
+  // Focus on one Product Box
+  s += productBox(PROD_X, PROD_Y, PROD_W, PROD_H, 20, WHITE, 10, 1, 0);
+
+  // Stars briefly pulse coral red
+  var starColor = AMBER;
+  var pulseOp = pulse(u, 0.06, 0.1); // drop-thud.mp3 (20.6s) -> u=0.06
+  if (pulseOp > 0.01) {
+    starColor = CORAL;
+  }
+  s += drawStars(PROD_X, STAR_OFFSET_Y, 5, starColor, STAR_R, STAR_SPACING, 1, pulseOp);
+
+  // Question mark icon appears above head
+  var qOp = ramp(u, 0.51, 0.7); // click-soft.mp3 (25.1s) -> u=0.51
+  if (qOp > 0.01) {
+    s += questionMark(figX + 80, figY - FIG_H / 2 - 60, 80, CORAL, qOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var figX = CX - 300;
+  var figY = CY + FIG_H / 2 + 100;
+
+  // Stick figure (YOU)
+  s += stickFigure(figX, figY, FIG_H, 'suspicious', WHITE);
+
+  // Product Box central
+  s += productBox(PROD_X, PROD_Y, PROD_W, PROD_H, 20, WHITE, 10, 1, 0);
+  s += drawStars(PROD_X, STAR_OFFSET_Y, 5, AMBER, STAR_R, STAR_SPACING, 1);
+
+  // Signal blue abstract "filter" or "funnel" appears behind it
+  var filterOp = ramp(u, 0.06, 0.3); // transform.mp3 (30.6s) -> u=0.06
+  var filterY = PROD_Y - PROD_H / 2 - 100;
+  var filterH = PROD_H + 200;
+  s += filterFunnel(PROD_X, filterY + filterH / 2, PROD_W * 1.5, filterH, BLUE, 10, filterOp, false);
+
+  // Small coral dots (negative reviews) hit the filter and vanish.
+  // Small amber dots (positive reviews) pass through and attach as stars.
+  var dotFlow = ramp(u, 0.3, 0.7); // whoosh-fast.mp3 (34.0s) -> u=0.3
+  var vanish = ramp(u, 0.85, 0.95); // stack-collapse.mp3 (38.5s) -> u=0.85
+
+  for (var i = 0; i < 8; i++) {
+    var phase = (u * 0.8 + rnd(i)) % 1;
+    var dotY = lerp(filterY - 200, filterY + filterH / 2, easeOut(phase));
+    var dotX = lerp(PROD_X - PROD_W * 0.8, PROD_X + PROD_W * 0.8, rnd(i + 10));
+    dotX = lerp(dotX, PROD_X, phase); // Converge towards center
+    var dotSize = lerp(10, 20, phase);
+
+    if (dotFlow > 0.01) {
+      if (rnd(i + 20) < 0.4) { // Coral dots (negative)
+        if (dotY > filterY + filterH * 0.4) { // Vanish after hitting filter
+          dotSize = lerp(dotSize, 0, vanish);
+        }
+        if (dotSize > 1) s += dot(dotX, dotY, dotSize, CORAL, dotFlow);
+      } else { // Amber dots (positive)
+        if (dotY < filterY + filterH * 0.4) { // Pass through filter
+          s += dot(dotX, dotY, dotSize, AMBER, dotFlow);
+        } else { // Attach as stars, move towards star position
+          var starAttachProg = clamp((dotY - (filterY + filterH * 0.4)) / (filterH * 0.6), 0, 1);
+          var targetStarX = PROD_X - (5 - 1) * STAR_SPACING / 2 + (i % 5) * STAR_SPACING;
+          var targetStarY = STAR_OFFSET_Y;
+          s += dot(lerp(dotX, targetStarX, starAttachProg), lerp(dotY, targetStarY, starAttachProg), dotSize, AMBER, dotFlow);
+        }
+      }
+    }
+  }
+
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var figX = CX - 300;
+  var figY = CY + FIG_H / 2 + 100;
+
+  // Stick figure (YOU) looks frustrated
+  var figPose = 'frustrated';
+  s += stickFigure(figX, figY, FIG_H, figPose, WHITE);
+
+  // Product Box with 5 amber stars, now has visible cracks
+  var cracksOp = ramp(u, 0.06, 0.2); // drop-thud.mp3 (40.6s) -> u=0.06
+  s += productBox(PROD_X, PROD_Y, PROD_W, PROD_H, 20, WHITE, 10, 1, cracksOp);
+  s += drawStars(PROD_X, STAR_OFFSET_Y, 5, AMBER, STAR_R, STAR_SPACING, 1);
+
+  // Subtle filter outline behind the product box
+  var filterOp = lerp(0.1, 0.2, smooth(u));
+  var filterY = PROD_Y - PROD_H / 2 - 100;
+  var filterH = PROD_H + 200;
+  s += filterFunnel(PROD_X, filterY + filterH / 2, PROD_W * 1.5, filterH, BLUE, 10, filterOp, true);
+
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var figX = CX - 300;
+  var figY = CY + FIG_H / 2 + 100;
+
+  // Stick figure (YOU) looks thoughtful and empowered
+  var figPose = 'thoughtful';
+  s += stickFigure(figX, figY, FIG_H, figPose, WHITE);
+
+  // Product Box with stars is present
+  s += productBox(PROD_X, PROD_Y, PROD_W, PROD_H, 20, WHITE, 10, 1, 0); // Cracks fade out if needed
+  s += drawStars(PROD_X, STAR_OFFSET_Y, 5, AMBER, STAR_R, STAR_SPACING, 1);
+
+  // Signal blue filter subtly visible as an outline around it, now understood.
+  var filterOp = ramp(u, 0.06, 0.2); // focus.mp3 (50.6s) -> u=0.06
+  var filterY = PROD_Y - PROD_H / 2 - 100;
+  var filterH = PROD_H + 200;
+  s += filterFunnel(PROD_X, filterY + filterH / 2, PROD_W * 1.5, filterH, BLUE, 10, filterOp * 0.8, true); // More subtle
+
+  // A subtle glow/ring around the product box to signify understanding/awareness
+  var ringOp = ramp(u, 0.5, 0.8); // complete-done.mp3 (56.0s) -> u=0.6
+  var ringR = lerp(PROD_W * 0.6, PROD_W * 0.7, easeOut(u));
+  s += ring(PROD_X, PROD_Y, ringR, BLUE, 8, ringOp * 0.4);
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Supermarket Music Makes You Spend More</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var SHOPPER_H = 220;                // Shopper height
+var SHOPPER_Y_GROUND = BOT - 180;   // Shopper's feet Y position
+var AISLE_WALL_X_LEFT = 180;        // Left wall of aisle
+var AISLE_WALL_X_RIGHT = W - 180;   // Right wall of aisle
+var AISLE_WIDTH = AISLE_WALL_X_RIGHT - AISLE_WALL_X_LEFT; // Width of the main aisle area
+
+var WHITE = "#FFFFFF";
+var BLACK = "#000000";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue  -> system / music
+var AMBER = "#F2A93B";              // warm amber   -> YOU / shopper
+var CORAL = "#FF5B5B";              // coral red    -> naive assumption / spending
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom elements ---------- */
+
+// Shopper stick figure
+// x, y: feet position
+// pose: 'normal', 'quick', 'ponder', 'tired', 'knowing'
+function shopper(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var headR = 30;
+  var bodyLen = SHOPPER_H * 0.4;
+  var armLen = SHOPPER_H * 0.3;
+  var legLen = SHOPPER_H * 0.4;
+
+  var headY = y - SHOPPER_H + headR;
+  var bodyY1 = headY + headR;
+  var bodyY2 = bodyY1 + bodyLen;
+  var armY = bodyY1 + armLen * 0.3;
+  var legY = bodyY2;
+
+  var g = '<g opacity="' + op + '">';
+  g += dot(x, headY, headR, col); // Head
+
+  var armX_offset = 0;
+  var legX_offset = 0;
+  var headTiltX = 0;
+  var headTiltY = 0;
+  var bodyLeanX = 0;
+
+  switch (pose) {
+    case 'quick':
+      armX_offset = 15;
+      legX_offset = 20;
+      bodyLeanX = 10;
+      break;
+    case 'ponder':
+      headTiltX = -10;
+      headTiltY = 10;
+      g += line(x + headTiltX, headY + headR * 0.6 + headTiltY, x + headTiltX + 20, headY + headR * 0.6 + headTiltY + 15, col, 7); // Hand to chin
+      break;
+    case 'tired':
+      bodyLeanX = 0;
+      headTiltY = 15; // Head droops
+      bodyLen *= 0.9; // Slumped body
+      bodyY2 = bodyY1 + bodyLen;
+      armY = bodyY1 + armLen * 0.2;
+      break;
+    case 'knowing':
+      headTiltY = -10; // Head slightly up
+      break;
+  }
+
+  // Body
+  g += line(x + bodyLeanX, bodyY1, x + bodyLeanX, bodyY2, col, 10);
+  // Arms
+  g += line(x + bodyLeanX, armY, x + bodyLeanX - armX_offset - armLen * 0.8, armY + armLen * 0.3, col, 7);
+  g += line(x + bodyLeanX, armY, x + bodyLeanX + armX_offset + armLen * 0.8, armY + armLen * 0.3, col, 7);
+  // Legs
+  g += line(x + bodyLeanX, legY, x + bodyLeanX - legX_offset, legY + legLen, col, 10);
+  g += line(x + bodyLeanX, legY, x + bodyLeanX + legX_offset, legY + legLen, col, 10);
+
+  g += '</g>';
+  return g;
+}
+
+// Simple clock glyph
+function clockGlyph(x, y, r, col, sw, hourAngle, minuteAngle, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, r, col, sw);
+  // Hour hand
+  var hx = x + r * 0.5 * Math.sin(hourAngle);
+  var hy = y - r * 0.5 * Math.cos(hourAngle);
+  g += line(x, y, hx, hy, col, sw * 0.8);
+  // Minute hand
+  var mx = x + r * 0.8 * Math.sin(minuteAngle);
+  var my = y - r * 0.8 * Math.cos(minuteAngle);
+  g += line(x, y, mx, my, col, sw * 0.8);
+  g += '</g>';
+  return g;
+}
+
+// Question mark glyph
+function questionMarkGlyph(x, y, size, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var d = "M " + (x - size * 0.3) + " " + (y - size * 0.7) +
+          " A " + (size * 0.4) + " " + (size * 0.4) + " 0 1 1 " + (x + size * 0.3) + " " + (y - size * 0.2) +
+          " L " + (x + size * 0.1) + " " + (y + size * 0.1) +
+          " M " + x + " " + (y + size * 0.3) + " V " + (y + size * 0.4);
+  return pathTag(d, col, sw, op);
+}
+
+// Music wave
+function musicWave(x1, y1, x2, y2, freq, amp, phase, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var path = [];
+  var numPoints = 50;
+  var len = x2 - x1;
+  for (var i = 0; i <= numPoints; i++) {
+    var px = x1 + (i / numPoints) * len;
+    var py = y1 + Math.sin((px / len * freq * Math.PI * 2) + phase * Math.PI * 2) * amp;
+    path.push((i === 0 ? "M " : "L ") + px + " " + py);
+  }
+  return pathTag(path.join(" "), col, sw, op);
+}
+
+// Supermarket aisle background
+function supermarketAisle(xLeft, xRight, yTop, yBottom, perspectiveY, strokeCol, strokeW, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var midX = (xLeft + xRight) / 2;
+  var aisleHeight = yBottom - yTop;
+
+  // Floor lines converging upwards
+  var floorTopY = perspectiveY;
+  g += line(xLeft, yBottom, xLeft + (midX - xLeft) * 0.4, floorTopY, strokeCol, strokeW * 0.8); // Left floor edge
+  g += line(xRight, yBottom, xRight - (xRight - midX) * 0.4, floorTopY, strokeCol, strokeW * 0.8); // Right floor edge
+  g += line(xLeft + (midX - xLeft) * 0.2, yBottom, xLeft + (midX - xLeft) * 0.8, floorTopY, strokeCol, strokeW * 0.4, op * 0.6); // Inner left
+  g += line(xRight - (xRight - midX) * 0.2, yBottom, xRight - (xRight - midX) * 0.8, floorTopY, strokeCol, strokeW * 0.4, op * 0.6); // Inner right
+
+  // Shelves (horizontal lines)
+  var shelfCount = 4;
+  for (var i = 0; i < shelfCount; i++) {
+    var shelfY = lerp(yTop + aisleHeight * 0.1, yTop + aisleHeight * 0.9, i / (shelfCount - 1));
+    var shelfLeftX = lerp(xLeft, xLeft + (midX - xLeft) * 0.4, (shelfY - (yTop + aisleHeight * 0.1)) / (aisleHeight * 0.8));
+    var shelfRightX = lerp(xRight, xRight - (xRight - midX) * 0.4, (shelfY - (yTop + aisleHeight * 0.1)) / (aisleHeight * 0.8));
+    g += line(shelfLeftX, shelfY, shelfLeftX + (xRight - xLeft) * 0.15, shelfY, strokeCol, strokeW * 0.6, op * 0.7); // Left shelf
+    g += line(shelfRightX - (xRight - xLeft) * 0.15, shelfY, shelfRightX, shelfY, strokeCol, strokeW * 0.6, op * 0.7); // Right shelf
+  }
+
+  g += '</g>';
+  return g;
+}
+
+// Shopping trolley
+function trolley(x, y, scale, col, fillItems, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ') scale(' + scale + ')">';
+  var bodyW = 100, bodyH = 80;
+  var handleH = 20;
+  var wheelR = 12;
+
+  // Body
+  g += rrectStroke(0, -bodyH/2, bodyW, bodyH, 10, col, 8);
+  // Handle
+  g += line(bodyW/2, -bodyH/2 - handleH, bodyW/2, -bodyH/2, col, 8);
+  // Wheels
+  g += dot(-bodyW/3, bodyH/2 + wheelR, wheelR, col);
+  g += dot(bodyW/3, bodyH/2 + wheelR, wheelR, col);
+
+  if (fillItems > 0) {
+    var itemOp = fillItems;
+    var itemY = -bodyH/2 + 10;
+    var itemSpacing = 16;
+    var itemSize = 20;
+    var numItems = Math.floor(fillItems * 5);
+    for (var i = 0; i < numItems; i++) {
+      var itemX = (i % 2 === 0 ? -1 : 1) * (itemSize/2 + 5 + rnd(i*3)*10);
+      var itemY_offset = i * itemSpacing;
+      if (itemY_offset > bodyH - itemSize - 10) continue; // Don't overflow
+      g += rrect(itemX, itemY + itemY_offset, itemSize, itemSize, 4, AMBER, itemOp * 0.7); // Changed to AMBER for accent count
+    }
+  }
+
+  g += '</g>';
+  return g;
+}
+
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var shopperX = lerp(W * 0.1, CX, easeOut(ramp(u, 0, 0.6)));
+  var shopperY = SHOPPER_Y_GROUND;
+  var shopperPose = 'quick';
+
+  var aisleOp = ramp(u, 0.0, 0.3);
+  s += supermarketAisle(AISLE_WALL_X_LEFT, AISLE_WALL_X_RIGHT, TOP, BOT - 100, TOP + 100, WHITE, 8, aisleOp);
+
+  s += shopper(shopperX, shopperY, AMBER, shopperPose, 1);
+
+  // Thought bubble with clock
+  var bubbleOp = ramp(u, 0.5, 0.8);
+  var bubbleX = shopperX + 100;
+  var bubbleY = shopperY - SHOPPER_H - 80;
+  s += ring(bubbleX, bubbleY, 60, WHITE, 6, bubbleOp);
+  s += clockGlyph(bubbleX, bubbleY, 40, WHITE, 6, u * Math.PI * 2, u * Math.PI * 12, bubbleOp);
+
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var shopperX = lerp(CX, CX + 100, smooth(u));
+  var shopperY = SHOPPER_Y_GROUND;
+  var shopperPose = 'normal';
+
+  s += supermarketAisle(AISLE_WALL_X_LEFT, AISLE_WALL_X_RIGHT, TOP, BOT - 100, TOP + 100, WHITE, 8, 1);
+
+  // Music wave appears and scrolls
+  var musicOp = ramp(u, 0.0, 0.4);
+  var musicAmp = lerp(0, 30, easeOut(u));
+  s += musicWave(AISLE_WALL_X_LEFT, TOP + 100, AISLE_WALL_X_RIGHT, TOP + 100, 4, musicAmp, u * 0.6, WHITE, 8, musicOp);
+
+  s += shopper(shopperX, shopperY, AMBER, shopperPose, 1);
+
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var shopperX = CX + 100;
+  var shopperY = SHOPPER_Y_GROUND;
+  var shopperPose = 'normal';
+
+  // Shopper pauses and looks
+  var pause = smooth(ramp(u, 0.1, 0.3));
+  var lookX = lerp(shopperX, shopperX + 80, pause);
+  shopperPose = pause > 0.5 ? 'ponder' : 'normal';
+
+  s += supermarketAisle(AISLE_WALL_X_LEFT, AISLE_WALL_X_RIGHT, TOP, BOT - 100, TOP + 100, WHITE, 8, 1);
+
+  // Music wave persists
+  s += musicWave(AISLE_WALL_X_LEFT, TOP + 100, AISLE_WALL_X_RIGHT, TOP + 100, 4, 30, u * 0.6 + 0.5, WHITE, 8, 1);
+
+  s += shopper(lookX, shopperY, AMBER, shopperPose, 1);
+
+  // Question mark appears
+  var qOp = ramp(u, 0.4, 0.7) * (1 - ramp(u, 0.8, 1.0));
+  var qSize = lerp(0, 40, easeOut(ramp(u, 0.4, 0.6)));
+  s += questionMarkGlyph(lookX + 60, shopperY - SHOPPER_H - 60, qSize, CORAL, 8, qOp);
+
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var shopperX = lerp(CX + 100, CX + 200, smooth(u));
+  var shopperY = SHOPPER_Y_GROUND;
+  var shopperPose = 'normal';
+
+  s += supermarketAisle(AISLE_WALL_X_LEFT, AISLE_WALL_X_RIGHT, TOP, BOT - 100, TOP + 100, WHITE, 8, 1);
+
+  // Music wave transforms to prominent blue
+  var musicCol = lerp(WHITE, BLUE, smooth(ramp(u, 0.0, 0.3)));
+  var musicAmp = lerp(30, 80, smooth(ramp(u, 0.1, 0.4)));
+  var musicFreq = lerp(4, 3, smooth(ramp(u, 0.1, 0.4))); // Slower tempo = lower freq
+  var musicSW = lerp(8, 12, smooth(ramp(u, 0.1, 0.4)));
+
+  s += musicWave(AISLE_WALL_X_LEFT, TOP + 100, AISLE_WALL_X_RIGHT, TOP + 100, musicFreq, musicAmp, u * 0.3, musicCol, musicSW, 1);
+
+  // Shopper's pace visibly slows, 'pulled' by music
+  var pullX = Math.sin(u * Math.PI * 2) * 10 * ramp(u, 0.4, 1.0);
+  var pullY = Math.sin(u * Math.PI * 4) * 5 * ramp(u, 0.4, 1.0);
+  shopperX += pullX;
+  shopperY += pullY;
+  shopperPose = 'tired'; // Visibly slower, heavier steps
+
+  s += shopper(shopperX, shopperY, AMBER, shopperPose, 1);
+
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var shopperX = lerp(CX + 200, CX + 300, smooth(u));
+  var shopperY = SHOPPER_Y_GROUND;
+  var shopperPose = 'tired';
+
+  s += supermarketAisle(AISLE_WALL_X_LEFT, AISLE_WALL_X_RIGHT, TOP, BOT - 100, TOP + 100, WHITE, 8, 1);
+
+  // Music wave persists as prominent blue
+  s += musicWave(AISLE_WALL_X_LEFT, TOP + 100, AISLE_WALL_X_RIGHT, TOP + 100, 3, 80, u * 0.3 + 0.5, BLUE, 12, 1);
+
+  // Trolley appears and fills with items
+  var trolleyX = shopperX + 120;
+  var trolleyY = shopperY - 20;
+  var trolleyScale = lerp(0.8, 1.0, smooth(ramp(u, 0.0, 0.2)));
+  var fillItems = ramp(u, 0.3, 0.8);
+  s += trolley(trolleyX, trolleyY, trolleyScale, AMBER, fillItems, 1);
+
+  s += shopper(shopperX, shopperY, AMBER, shopperPose, 1);
+
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var shopperX = lerp(CX + 300, W * 1.1, easeIn(ramp(u, 0.0, 0.6))); // Exits right
+  var shopperY = SHOPPER_Y_GROUND;
+  var shopperPose = 'knowing';
+
+  // Aisle fades slightly, or transforms to an exit arch
+  var aisleOp = lerp(1, 0.4, smooth(u));
+  s += supermarketAisle(AISLE_WALL_X_LEFT, AISLE_WALL_X_RIGHT, TOP, BOT - 100, TOP + 100, WHITE, 8, aisleOp);
+
+  // Music wave persists, now perceived as a system
+  var musicOp = lerp(1, 0.6, smooth(u));
+  s += musicWave(AISLE_WALL_X_LEFT, TOP + 100, AISLE_WALL_X_RIGHT, TOP + 100, 3, 80, u * 0.3 + 0.5, BLUE, 12, musicOp);
+
+  // Shopper exits, trolley disappears
+  var shopperOp = 1;
+  if (u > 0.6) shopperOp = lerp(1, 0, ramp(u, 0.6, 0.9));
+
+  s += shopper(shopperX, shopperY, AMBER, shopperPose, shopperOp);
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

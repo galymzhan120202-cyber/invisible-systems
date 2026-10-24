@@ -1,0 +1,15 @@
+{
+  "id": "why-supermarkets-play-slow-music",
+  "slug": "2026-10-24__why-supermarkets-play-slow-music",
+  "title_working": "Why Supermarket Music Makes You Spend More",
+  "system": "tempo manipulation of background music to influence shopping pace",
+  "cluster": "pricing-and-incentives",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-10-24T10:47:03+00:00",
+  "produced_at": "2026-10-24T10:50:24+00:00",
+  "verify": "PASS",
+  "takeaway": "Supermarket background music is deliberately slow to make you spend more time and money without realizing it.",
+  "animation_source": "llm"
+}
