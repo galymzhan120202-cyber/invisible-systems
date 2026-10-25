@@ -1,0 +1,15 @@
+{
+  "id": "why-tv-recommends-what-to-watch",
+  "slug": "2026-10-25__why-tv-recommends-what-to-watch",
+  "title_working": "Why Your TV Knows What You Want to Watch",
+  "system": "recommendation algorithms based on viewing history and collaborative filtering",
+  "cluster": "platforms-and-algorithms",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-10-25T11:24:12+00:00",
+  "produced_at": "2026-10-25T11:27:30+00:00",
+  "verify": "PASS",
+  "takeaway": "Viewing recommendations are not magic, but the result of algorithms analyzing your viewing history and what similar people watch.",
+  "animation_source": "llm"
+}

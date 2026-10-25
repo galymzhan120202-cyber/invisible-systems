@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why You Feel Pressured to Tip More</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var BLACK = "#000000";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue  -> the system / tip options
+var AMBER = "#F2A93B";              // warm amber   -> YOU / the diner
+var CORAL = "#FF5B5B";              // coral red    -> naive assumption / pressure
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, fillCol) {
+  return '<path d="' + d + '" fill="' + (fillCol || 'none') + '" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+// Stick figure constants
+var SF_HEAD_R = 32;
+var SF_BODY_H = 100;
+var SF_ARM_L = 70;
+var SF_LEG_L = 100;
+var SF_SW = 10; // Stroke width for stick figure
+
+/* The Diner stick figure */
+function stickFigure(x, y, col, headTilt, armL, armR, legL, legR, bodyCurve, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headY = y - SF_BODY_H / 2 - SF_HEAD_R;
+
+  // Head
+  g += '<g transform="rotate(' + (headTilt || 0) + ' ' + x + ' ' + headY + ')">';
+  g += dot(x, headY, SF_HEAD_R, col);
+  g += '</g>';
+
+  // Body
+  var bodyTopX = x + (bodyCurve || 0);
+  var bodyTopY = headY + SF_HEAD_R;
+  var bodyBotX = x - (bodyCurve || 0);
+  var bodyBotY = bodyTopY + SF_BODY_H;
+  g += line(bodyTopX, bodyTopY, bodyBotX, bodyBotY, col, SF_SW);
+
+  // Arms (x, y, angle, length)
+  function drawArm(cx, cy, angle, length) {
+    var endX = cx + length * Math.sin(angle);
+    var endY = cy + length * Math.cos(angle);
+    return line(cx, cy, endX, endY, col, SF_SW);
+  }
+  // Default arms: slightly down
+  g += drawArm(bodyTopX, bodyTopY + 20, Math.PI * 0.7, SF_ARM_L + (armL || 0)); // Left arm
+  g += drawArm(bodyTopX, bodyTopY + 20, Math.PI * 0.3, SF_ARM_L + (armR || 0)); // Right arm
+
+  // Legs
+  function drawLeg(cx, cy, angle, length) {
+    var endX = cx + length * Math.sin(angle);
+    var endY = cy + length * Math.cos(angle);
+    return line(cx, cy, endX, endY, col, SF_SW);
+  }
+  // Default legs: slightly apart
+  g += drawLeg(bodyBotX, bodyBotY, Math.PI * 0.6, SF_LEG_L + (legL || 0)); // Left leg
+  g += drawLeg(bodyBotX, bodyBotY, Math.PI * 0.4, SF_LEG_L + (legR || 0)); // Right leg
+
+  g += '</g>';
+  return g;
+}
+
+/* A simple table */
+function table(x, y, w, h, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 20, col, 0.2); // Tabletop
+  g += line(x - w / 2 + 50, y + h / 2, x - w / 2 + 50, y + h / 2 + 150, col, sw); // Left leg
+  g += line(x + w / 2 - 50, y + h / 2, x + w / 2 - 50, y + h / 2 + 150, col, sw); // Right leg
+  g += '</g>';
+  return g;
+}
+
+/* A clock icon */
+function clock(x, y, r, col, sw, u, op) { // u is local time [0,1] for hand movement
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, r, col, sw);
+  var hrAngle = lerp(Math.PI * 0.5, Math.PI * 0.7, smooth(u)); // Hour hand moves a bit
+  var minAngle = lerp(Math.PI * 0.5, Math.PI * 1.5, smooth(u)); // Minute hand moves more
+  g += line(x, y, x + r * 0.4 * Math.sin(hrAngle), y - r * 0.4 * Math.cos(hrAngle), col, sw * 0.8);
+  g += line(x, y, x + r * 0.7 * Math.sin(minAngle), y - r * 0.7 * Math.cos(minAngle), col, sw * 0.8);
+  g += dot(x, y, sw * 0.6, col); // Center dot
+  g += '</g>';
+  return g;
+}
+
+/* A blank plate */
+function plate(x, y, r, col, sw, op) {
+  return ring(x, y, r, col, sw, op);
+}
+
+/* The Bill rectangle, with optional tip boxes */
+function bill(x, y, w, h, rad, col, sw, tipOptions, highlightIdx, anchorOpacity, handPointer, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, rad, col, sw);
+
+  if (tipOptions) {
+    var boxW = w * 0.28;
+    var boxH = h * 0.12;
+    var boxYStart = y + h * 0.2; // Position for the first box
+    var boxGap = h * 0.05;
+
+    for (var i = 0; i < tipOptions; i++) {
+      var boxX = x + w * 0.2; // Right side of the bill
+      var boxY = boxYStart + i * (boxH + boxGap);
+      var boxColor = (i === highlightIdx) ? BLUE : DIM; // Highlight one
+      var boxOp = (i === highlightIdx) ? 1.0 : 0.8;
+      g += rrect(boxX, boxY, boxW, boxH, rad * 0.5, boxColor, boxOp);
+
+      // Add a simple bar glyph to indicate "value" for no-text rule
+      var barH = boxH * (0.4 + i * 0.15); // Higher index, taller bar
+      g += rrect(boxX, boxY, boxW * 0.4, barH, 4, WHITE, 0.9);
+
+      // Anchor lines (implied upward pull)
+      if (anchorOpacity > 0 && i < tipOptions - 1) { // Lines from lower to higher
+        var startAnchorY = boxY - boxH / 2;
+        var endAnchorY = boxYStart + (i + 1) * (boxH + boxGap) + boxH / 2;
+        g += line(boxX, startAnchorY, boxX, endAnchorY, CORAL, sw * 0.6, anchorOpacity * 0.4);
+        g += line(boxX, startAnchorY, boxX + boxW * 0.8, startAnchorY - boxH * 0.4, CORAL, sw * 0.6, anchorOpacity * 0.4);
+        g += line(boxX, endAnchorY, boxX + boxW * 0.8, endAnchorY + boxH * 0.4, CORAL, sw * 0.6, anchorOpacity * 0.4);
+      }
+    }
+  }
+
+  // Hand pointer
+  if (handPointer) {
+    var handX = handPointer.x;
+    var handY = handPointer.y;
+    var handSize = 30;
+    g += dot(handX, handY, handSize * 0.8, AMBER, 0.9); // Palm
+    g += line(handX + handSize * 0.6, handY - handSize * 0.6, handX + handSize * 0.6 + 20, handY - handSize * 0.6 - 20, AMBER, SF_SW); // Finger
+  }
+
+  g += '</g>';
+  return g;
+}
+
+/* Question mark thought bubble */
+function thoughtBubble(x, y, size, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var d = "M " + x + " " + (y - size) +
+          " A " + (size * 0.4) + " " + (size * 0.4) + " 0 1 1 " + (x + size * 0.4) + " " + (y - size * 0.4) +
+          " L " + (x + size * 0.1) + " " + (y + size * 0.1) +
+          " M " + x + " " + (y + size * 0.4) + " L " + x + " " + (y + size * 0.6);
+  return pathTag(d, col, sw, op);
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+var TABLE_Y = BOT - 400;
+var DINER_Y = TABLE_Y - SF_LEG_L - SF_BODY_H / 2 - SF_HEAD_R;
+var BILL_X = CX + 120, BILL_Y = TABLE_Y - 100, BILL_W = 300, BILL_H = 400;
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  s += table(CX, TABLE_Y, 700, 100, WHITE, 8, 0.2);
+  s += plate(CX - 120, TABLE_Y - 80, 60, WHITE, 6, 0.8);
+
+  var dinerStretch = Math.sin(u * Math.PI * 1.5) * 20;
+  var dinerArmL = lerp(0, 30, smooth(u * 0.5));
+  s += stickFigure(CX - 280, DINER_Y + dinerStretch, AMBER, 0, dinerArmL, 0, 0, 0, 0, 1);
+
+  var clockOp = lerp(0.2, 0.8, smooth(u));
+  s += clock(CX + 200, TOP + 100, 40, WHITE, 6, u, clockOp);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14);
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+
+  s += table(CX, TABLE_Y, 700, 100, WHITE, 8, 0.2);
+  s += plate(CX - 120, TABLE_Y - 80, 60, WHITE, 6, 0.8);
+  s += stickFigure(CX - 280, DINER_Y, AMBER, 0, 0, 0, 0, 0, 0, 1);
+
+  // Waiter enters from left, slides bill
+  var waiterX = lerp(CX - 600, CX + 100, easeOut(ramp(u, 0.0, 0.3)));
+  var waiterOp = ramp(u, 0.0, 0.1);
+  s += stickFigure(waiterX, DINER_Y + 100, WHITE, 0, 0, 0, 0, 0, 0, waiterOp);
+
+  var billSlideX = lerp(waiterX, BILL_X, easeOut(ramp(u, 0.2, 0.6)));
+  var billOp = ramp(u, 0.3, 0.7);
+  s += bill(billSlideX, BILL_Y, BILL_W, BILL_H, 20, WHITE, 7, 0, 0, 0, null, billOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH — Pressure builds, questioning the cause. */
+function scene3(u) {
+  var s = '';
+  var zoom = lerp(1.0, 1.2, smooth(ramp(u, 0.2, 0.6)));
+  var panY = lerp(0, -100, smooth(ramp(u, 0.2, 0.6)));
+  s += '<g ' + camera(zoom, 0, panY) + '>';
+
+  s += table(CX, TABLE_Y, 700, 100, WHITE, 8, 0.2);
+  s += plate(CX - 120, TABLE_Y - 80, 60, WHITE, 6, 0.8);
+
+  var dinerHeadTilt = lerp(0, -15, smooth(ramp(u, 0.4, 0.7)));
+  var dinerArmUp = lerp(0, -20, smooth(ramp(u, 0.3, 0.6)));
+  s += stickFigure(CX - 280, DINER_Y, AMBER, dinerHeadTilt, dinerArmUp, 0, 0, 0, 0, 1);
+
+  var tipOptionsOp = ramp(u, 0.5, 0.8);
+  s += bill(BILL_X, BILL_Y, BILL_W, BILL_H, 20, WHITE, 7, 0, 0, 0, null, 1); // Base bill
+  // Add tip options with increasing opacity
+  s += '<g opacity="' + tipOptionsOp + '">';
+  s += bill(BILL_X, BILL_Y, BILL_W, BILL_H, 20, WHITE, 7, 3, 0, 0, null, 1);
+  s += '</g>';
+
+  // Question mark thought bubble
+  var qmOp = pulse(u, 0.7, 0.2) * 0.8;
+  s += thoughtBubble(CX - 280 + 80, DINER_Y - SF_HEAD_R - 60, 40, CORAL, 8, qmOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND — anchoring is revealed. */
+function scene4(u) {
+  var s = '';
+  var zoom = lerp(1.2, 1.6, smooth(ramp(u, 0.0, 0.3)));
+  var panY = lerp(-100, -200, smooth(ramp(u, 0.0, 0.3)));
+  s += '<g ' + camera(zoom, 0, panY) + '>';
+
+  s += table(CX, TABLE_Y, 700, 100, WHITE, 8, 0.2);
+  s += plate(CX - 120, TABLE_Y - 80, 60, WHITE, 6, 0.8);
+  s += stickFigure(CX - 280, DINER_Y, AMBER, -15, -20, 0, 0, 0, 0, 1);
+
+  var anchorOp = ramp(u, 0.4, 0.8);
+  var highlightIdx = Math.floor(lerp(0, 2.99, smooth(ramp(u, 0.6, 0.9)))); // Highlight moves to higher
+  s += bill(BILL_X, BILL_Y, BILL_W, BILL_H, 20, WHITE, 7, 3, highlightIdx, anchorOp, null, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE — cost of succumbing to the system. */
+function scene5(u) {
+  var s = '';
+  var zoom = lerp(1.6, 1.0, smooth(ramp(u, 0.7, 1.0)));
+  var panY = lerp(-200, 0, smooth(ramp(u, 0.7, 1.0)));
+  s += '<g ' + camera(zoom, 0, panY) + '>';
+
+  s += table(CX, TABLE_Y, 700, 100, WHITE, 8, 0.2);
+  s += plate(CX - 120, TABLE_Y - 80, 60, WHITE, 6, 0.8);
+
+  var dinerSlump = lerp(0, 30, smooth(ramp(u, 0.6, 0.9)));
+  var dinerArmPoint = lerp(0, -60, smooth(ramp(u, 0.3, 0.6)));
+  var dinerBodyCurve = lerp(0, 10, smooth(ramp(u, 0.6, 0.9)));
+  s += stickFigure(CX - 280, DINER_Y + dinerSlump, AMBER, 0, dinerArmPoint, 0, 0, 0, dinerBodyCurve, 1);
+
+  var handPointerX = BILL_X + BILL_W * 0.2;
+  var handPointerY = lerp(BILL_Y + BILL_H * 0.2, BILL_Y + BILL_H * 0.2 + 2 * (BILL_H * 0.12 + BILL_H * 0.05), smooth(ramp(u, 0.3, 0.6)));
+  var handPointerOp = ramp(u, 0.3, 0.6);
+  s += bill(BILL_X, BILL_Y, BILL_W, BILL_H, 20, WHITE, 7, 3, 2, 1, {x: handPointerX, y: handPointerY, op: handPointerOp}, 1);
+
+  // Coins dropping
+  var numCoins = 3;
+  for (var i = 0; i < numCoins; i++) {
+    var dropProg = ramp(u, 0.6 + i * 0.08, 0.9 + i * 0.08);
+    if (dropProg > 0 && dropProg < 1) {
+      var coinX = lerp(CX - 280 + 60, CX - 280 + 60 + rnd(i) * 20, easeOut(dropProg));
+      var coinY = lerp(DINER_Y + SF_BODY_H / 2 + 30, TABLE_Y - 20 + rnd(i + 10) * 10, easeIn(dropProg));
+      var coinOp = 1 - dropProg * 0.5;
+      s += dot(coinX, coinY, 12, WHITE, coinOp);
+    }
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE — empowered with new understanding. */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.92, smooth(clamp(u / 0.7, 0, 1)));
+  s += '<g ' + camera(scale, 0, lerp(0, 0, smooth(u))) + '>'; // No pan in this scene
+
+  // New restaurant setting, similar table
+  s += table(CX, TABLE_Y, 700, 100, WHITE, 8, 0.2);
+  s += plate(CX - 120, TABLE_Y - 80, 60, WHITE, 6, 0.8);
+
+  var dinerSmirkHeadTilt = lerp(0, 10, smooth(ramp(u, 0.3, 0.6)));
+  var dinerArmPoint = lerp(0, -60, smooth(ramp(u, 0.4, 0.7))); // Points to a lower option
+  s += stickFigure(CX - 280, DINER_Y, AMBER, dinerSmirkHeadTilt, dinerArmPoint, 0, 0, 0, 0, 1);
+
+  // Bill with transparent anchor lines, diner points confidently to a lower percentage
+  var anchorOp = lerp(1, 0.1, smooth(ramp(u, 0.2, 0.7)));
+  var handPointerX = BILL_X + BILL_W * 0.2;
+  var handPointerY = lerp(BILL_Y + BILL_H * 0.2 + 2 * (BILL_H * 0.12 + BILL_H * 0.05), BILL_Y + BILL_H * 0.2, smooth(ramp(u, 0.4, 0.7))); // Points to lowest
+  s += bill(BILL_X, BILL_Y, BILL_W, BILL_H, 20, WHITE, 7, 3, 0, anchorOp, {x: handPointerX, y: handPointerY}, 1);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

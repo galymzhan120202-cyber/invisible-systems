@@ -1,0 +1,644 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Your TV Knows What You Want to Watch</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> algorithm / system
+var AMBER = "#F2A93B";              // warm amber   -> YOU / viewer / desire
+var CORAL = "#FF5B5B";              // coral red    -> naive model / false signal
+
+var DUR = 60;
+window.__duration = DUR;
+
+var SCREEN_W = 720;
+var SCREEN_H = 1080;
+var SCREEN_CX = CX;
+var SCREEN_CY = CY - 100;
+
+var FIGURE_X = CX;
+var FIGURE_Y = BOT - 180; // Base position for stick figure on couch
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, fill) {
+  return '<path d="' + d + '" fill="' + (fill || 'none') + '" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom shapes for this animation ---------- */
+function couch(x, y, w, h, col, op) {
+  var rad = 20;
+  var armH = h * 0.4;
+  var seatY = y - h/2 + armH;
+  var seatH = h - armH;
+  var g = '<g opacity="' + (op == null ? 1 : op) + '">';
+  g += rrect(x, y, w, h, rad, col, 0.1); // Shadow/base
+  g += rrect(x, seatY + seatH/2, w * 0.9, seatH * 0.8, rad/2, col, 0.8); // Seat
+  g += rrect(x - w/2 + w*0.05, seatY - armH/2, w*0.1, armH, rad/2, col, 0.8); // Left arm
+  g += rrect(x + w/2 - w*0.05, seatY - armH/2, w*0.1, armH, rad/2, col, 0.8); // Right arm
+  g += '</g>';
+  return g;
+}
+
+function stickFigure(x, y, col, posture, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = 30;
+  var bodyLen = 100;
+  var armLen = 70;
+  var legLen = 90;
+  var sw = 8;
+
+  // Head
+  g += dot(x, y - headR - bodyLen / 2, headR, col);
+
+  // Body and limbs based on posture
+  var headY = y - headR - bodyLen / 2;
+  var bodyTopY = headY + headR;
+  var bodyBottomY = bodyTopY + bodyLen;
+
+  switch (posture) {
+    case 'slumped':
+      g += pathTag("M " + x + " " + bodyTopY + " Q " + (x - 20) + " " + (bodyTopY + bodyLen * 0.5) + " " + x + " " + bodyBottomY, col, sw); // Slumped body
+      g += line(x - 20, bodyTopY + 30, x - armLen - 10, bodyTopY + armLen + 20, col, sw); // Left arm down
+      g += line(x + 20, bodyTopY + 30, x + armLen + 10, bodyTopY + armLen + 20, col, sw); // Right arm down
+      g += line(x - 15, bodyBottomY, x - 30, bodyBottomY + legLen, col, sw); // Left leg
+      g += line(x + 15, bodyBottomY, x + 30, bodyBottomY + legLen, col, sw); // Right leg
+      break;
+    case 'surprised':
+      g += line(x, bodyTopY, x, bodyBottomY, col, sw); // Straight body
+      g += line(x, bodyTopY + 20, x - armLen, bodyTopY + 20, col, sw); // Left arm out
+      g += line(x, bodyTopY + 20, x + armLen, bodyTopY + 20, col, sw); // Right arm out
+      g += line(x - 15, bodyBottomY, x - 15, bodyBottomY + legLen, col, sw); // Left leg
+      g += line(x + 15, bodyBottomY, x + 15, bodyBottomY + legLen, col, sw); // Right leg
+      break;
+    case 'crossed':
+      g += line(x, bodyTopY, x, bodyBottomY, col, sw); // Straight body
+      g += line(x - armLen * 0.6, bodyTopY + armLen * 0.8, x + armLen * 0.6, bodyTopY + armLen * 0.8, col, sw); // Crossed arms
+      g += line(x + armLen * 0.6, bodyTopY + armLen * 0.6, x - armLen * 0.6, bodyTopY + armLen * 0.6, col, sw); // Crossed arms
+      g += line(x - 15, bodyBottomY, x - 15, bodyBottomY + legLen, col, sw); // Left leg
+      g += line(x + 15, bodyBottomY, x + 15, bodyBottomY + legLen, col, sw); // Right leg
+      break;
+    case 'nods':
+      g += line(x, bodyTopY, x, bodyBottomY, col, sw); // Straight body
+      g += line(x - 20, bodyTopY + 30, x - armLen + 10, bodyTopY + armLen, col, sw); // Left arm relaxed
+      g += line(x + 20, bodyTopY + 30, x + armLen - 10, bodyTopY + armLen, col, sw); // Right arm relaxed
+      g += line(x - 15, bodyBottomY, x - 15, bodyBottomY + legLen, col, sw); // Left leg
+      g += line(x + 15, bodyBottomY, x + 15, bodyBottomY + legLen, col, sw); // Right leg
+      // Head nod is handled by transform on the whole group
+      break;
+    default: // 'normal' or 'enclosed' (similar base posture)
+      g += line(x, bodyTopY, x, bodyBottomY, col, sw); // Straight body
+      g += line(x - 20, bodyTopY + 30, x - armLen + 10, bodyTopY + armLen, col, sw); // Left arm relaxed
+      g += line(x + 20, bodyTopY + 30, x + armLen - 10, bodyTopY + armLen, col, sw); // Right arm relaxed
+      g += line(x - 15, bodyBottomY, x - 15, bodyBottomY + legLen, col, sw); // Left leg
+      g += line(x + 15, bodyBottomY, x + 15, bodyBottomY + legLen, col, sw); // Right leg
+      break;
+  }
+  g += '</g>';
+  return g;
+}
+
+function tvScreen(x, y, w, h, content, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 30, WHITE, 0.1); // Screen frame
+  g += rrect(x, y, w * 0.96, h * 0.96, 20, '#000000'); // Inner screen black
+  g += '<g transform="translate(' + (x - w * 0.96 / 2) + ' ' + (y - h * 0.96 / 2) + ')">';
+  g += content; // Content inside the screen
+  g += '</g>';
+  g += '</g>';
+  return g;
+}
+
+function contentIcon(x, y, size, type, fill_col, stroke_col, sw, op) {
+  op = (op == null ? 1 : op);
+  sw = sw || 8;
+  var g = '<g opacity="' + op + '">';
+  var half = size / 2;
+  var path = '';
+  switch (type) {
+    case 0: // Circle
+      g += dot(x, y, half * 0.8, fill_col);
+      if (stroke_col) g += ring(x, y, half * 0.8, stroke_col, sw);
+      break;
+    case 1: // Square
+      g += rrect(x, y, half * 1.6, half * 1.6, half * 0.2, fill_col);
+      if (stroke_col) g += rrectStroke(x, y, half * 1.6, half * 1.6, half * 0.2, stroke_col, sw);
+      break;
+    case 2: // Triangle
+      path = "M " + x + " " + (y - half * 0.8) +
+             " L " + (x + half * 0.8) + " " + (y + half * 0.4) +
+             " L " + (x - half * 0.8) + " " + (y + half * 0.4) + " Z";
+      g += pathTag(path, fill_col, sw, 1, fill_col);
+      if (stroke_col) g += pathTag(path, stroke_col, sw);
+      break;
+    case 3: // Cross
+      g += line(x - half * 0.6, y - half * 0.6, x + half * 0.6, y + half * 0.6, fill_col, sw);
+      g += line(x - half * 0.6, y + half * 0.6, x + half * 0.6, y - half * 0.6, fill_col, sw);
+      if (stroke_col) {
+        g += line(x - half * 0.6, y - half * 0.6, x + half * 0.6, y + half * 0.6, stroke_col, sw * 0.5);
+        g += line(x - half * 0.6, y + half * 0.6, x + half * 0.6, y - half * 0.6, stroke_col, sw * 0.5);
+      }
+      break;
+    case 4: // Bar
+      g += rrect(x, y, half * 1.6, half * 0.6, half * 0.2, fill_col);
+      if (stroke_col) g += rrectStroke(x, y, half * 1.6, half * 0.6, half * 0.2, stroke_col, sw);
+      break;
+    case 5: // Diamond
+      path = "M " + x + " " + (y - half * 0.8) +
+             " L " + (x + half * 0.8) + " " + y +
+             " L " + x + " " + (y + half * 0.8) +
+             " L " + (x - half * 0.8) + " " + y + " Z";
+      g += pathTag(path, fill_col, sw, 1, fill_col);
+      if (stroke_col) g += pathTag(path, stroke_col, sw);
+      break;
+  }
+  g += '</g>';
+  return g;
+}
+
+function thoughtBubble(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var path = "M " + (x - size * 1.2) + " " + (y - size * 1.2) +
+             " Q " + (x - size * 2.2) + " " + (y - size * 2.2) + " " + (x - size * 3.2) + " " + (y - size * 1.2) +
+             " Q " + (x - size * 3.8) + " " + (y + size * 0.2) + " " + (x - size * 2.8) + " " + (y + size * 1.2) +
+             " Q " + (x - size * 1.8) + " " + (y + size * 2.2) + " " + (x - size * 0.8) + " " + (y + size * 1.2) +
+             " Q " + (x + size * 0.2) + " " + (y + size * 0.2) + " " + (x - size * 1.2) + " " + (y - size * 1.2) + " Z";
+  var g = pathTag(path, col, 8, op, WHITE);
+  // Question mark glyph
+  g += line(x - size * 2.2, y - size * 0.8, x - size * 2.2, y - size * 0.2, col, 10, op);
+  g += pathTag("M " + (x - size * 2.2) + " " + (y - size * 0.8) +
+               " Q " + (x - size * 1.5) + " " + (y - size * 1.5) + " " + (x - size * 2.8) + " " + (y - size * 1.5), col, 10, op);
+  g += dot(x - size * 2.2, y + size * 0.4, 10, col, op);
+  return g;
+}
+
+function earIcon(x, y, size, col, op, rotate) {
+  op = (op == null ? 1 : op);
+  rotate = rotate || 0;
+  var path = "M " + (x - size * 0.6) + " " + (y - size * 0.8) +
+             " Q " + (x + size * 0.8) + " " + (y - size * 1.0) + " " + (x + size * 0.8) + " " + (y + size * 0.2) +
+             " Q " + (x + size * 0.4) + " " + (y + size * 0.8) + " " + (x - size * 0.6) + " " + (y + size * 0.4) + " Z";
+  var innerPath = "M " + (x - size * 0.2) + " " + (y - size * 0.4) +
+                  " Q " + (x + size * 0.4) + " " + (y - size * 0.6) + " " + (x + size * 0.4) + " " + (y - size * 0.0) +
+                  " Q " + (x + size * 0.2) + " " + (y + size * 0.2) + " " + (x - size * 0.2) + " " + (y + size * 0.0) + " Z";
+  var g = '<g transform="rotate(' + rotate + ' ' + x + ' ' + y + ')" opacity="' + op + '">';
+  g += pathTag(path, col, 8, 1, WHITE);
+  g += pathTag(innerPath, col, 6, 1, col);
+  g += '</g>';
+  return g;
+}
+
+function brainIcon(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var path = "M " + (x - size * 0.8) + " " + (y - size * 0.2) +
+             " Q " + (x - size * 1.2) + " " + (y - size * 0.8) + " " + x + " " + (y - size * 1.0) +
+             " Q " + (x + size * 1.2) + " " + (y - size * 0.8) + " " + (x + size * 0.8) + " " + (y - size * 0.2) +
+             " Q " + (x + size * 1.2) + " " + (y + size * 0.8) + " " + x + " " + (y + size * 1.0) +
+             " Q " + (x - size * 1.2) + " " + (y + size * 0.8) + " " + (x - size * 0.8) + " " + (y - size * 0.2) + " Z";
+  var g = '<g opacity="' + op + '">';
+  g += pathTag(path, col, 8, 1, WHITE);
+  g += pathTag("M " + x + " " + (y - size * 0.8) + " L " + x + " " + (y + size * 0.8), col, 6);
+  g += pathTag("M " + (x - size * 0.6) + " " + (y - size * 0.4) + " Q " + (x - size * 0.2) + " " + (y - size * 0.6) + " " + (x - size * 0.1) + " " + (y - size * 0.2), col, 4);
+  g += pathTag("M " + (x + size * 0.6) + " " + (y - size * 0.4) + " Q " + (x + size * 0.2) + " " + (y - size * 0.6) + " " + (x + size * 0.1) + " " + (y - size * 0.2), col, 4);
+  g += pathTag("M " + (x - size * 0.4) + " " + (y + size * 0.4) + " Q " + (x - size * 0.1) + " " + (y + size * 0.6) + " " + (x - size * 0.05) + " " + (y + size * 0.2), col, 4);
+  g += pathTag("M " + (x + size * 0.4) + " " + (y + size * 0.4) + " Q " + (x + size * 0.1) + " " + (y + size * 0.6) + " " + (x + size * 0.05) + " " + (y + size * 0.2), col, 4);
+  g += '</g>';
+  return g;
+}
+
+function generateGrid(x_offset, y_offset, grid_w, grid_h, cell_size, u_time, type_seed, color_seed, outline_color, op_base, jumble_amount) {
+  var s = '';
+  var cols = Math.floor(grid_w / cell_size);
+  var rows = Math.floor(grid_h / cell_size);
+  jumble_amount = jumble_amount || 0;
+
+  for (var r = 0; r < rows; r++) {
+    for (var c = 0; c < cols; c++) {
+      var iconX = x_offset + c * cell_size + cell_size / 2;
+      var iconY = y_offset + r * cell_size + cell_size / 2;
+      var iconType = Math.floor(rnd(r * cols + c + type_seed) * 6);
+      var iconOp = op_base * (1 - rnd(r * cols + c + 100) * 0.2);
+
+      var current_outline_color = outline_color;
+      if (color_seed) { // For S3 jumbled colors
+        if (rnd(r * cols + c + color_seed) > 0.7) {
+          current_outline_color = CORAL;
+        } else {
+          current_outline_color = WHITE;
+        }
+      }
+
+      if (jumble_amount > 0) {
+        iconX += (rnd(r * cols + c + 200) - 0.5) * cell_size * jumble_amount;
+        iconY += (rnd(r * cols + c + 300) - 0.5) * cell_size * jumble_amount;
+      }
+
+      s += contentIcon(iconX, iconY, cell_size * 0.6, iconType, WHITE, current_outline_color, 8, iconOp);
+    }
+  }
+  return s;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var figY = FIGURE_Y;
+  var slumpFactor = smooth(ramp(u, 0.0, 0.2));
+  var headTilt = lerp(0, 10, slumpFactor);
+  var bodySlump = lerp(0, 20, slumpFactor);
+  var figX = FIGURE_X;
+
+  s += couch(FIGURE_X, FIGURE_Y + 100, 700, 200, DIM, 0.8);
+
+  s += '<g transform="translate(0 ' + bodySlump + ') rotate(' + headTilt + ' ' + figX + ' ' + (figY - 30 - 100/2) + ')">';
+  s += stickFigure(figX, figY, AMBER, 'slumped', 1);
+  s += '</g>';
+
+  s += tvScreen(SCREEN_CX, SCREEN_CY, SCREEN_W, SCREEN_H, '', 1);
+
+  var bubbleOp = ramp(u, 0.6, 0.9);
+  var bubbleScale = lerp(0.5, 1, easeOut(ramp(u, 0.6, 0.9)));
+  if (bubbleOp > 0.01) {
+    s += '<g transform="translate(' + (FIGURE_X + 100) + ' ' + (FIGURE_Y - 300) + ') scale(' + bubbleScale + ') translate(' + (-FIGURE_X - 100) + ' ' + (-FIGURE_Y + 300) + ')">';
+    s += thoughtBubble(FIGURE_X + 100, FIGURE_Y - 300, 60, AMBER, bubbleOp);
+    s += '</g>';
+  }
+
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var cameraScale = lerp(1, 1.05, smooth(ramp(u, 0.1, 0.4)));
+  var figY = FIGURE_Y;
+  var leanFactor = smooth(ramp(u, 0.0, 0.2));
+  var headTilt = lerp(10, -5, leanFactor);
+  var bodyLean = lerp(20, -10, leanFactor);
+  var figX = FIGURE_X;
+
+  s += couch(FIGURE_X, FIGURE_Y + 100, 700, 200, DIM, 0.8);
+
+  s += '<g transform="translate(0 ' + bodyLean + ') rotate(' + headTilt + ' ' + figX + ' ' + (figY - 30 - 100/2) + ')">';
+  s += stickFigure(figX, figY, AMBER, 'surprised', 1);
+  s += '</g>';
+
+  var gridContent = '';
+  var gridFill = ramp(u, 0.0, 0.8);
+  if (gridFill > 0.01) {
+    var cell_size = 120;
+    var screen_inner_w = SCREEN_W * 0.96;
+    var screen_inner_h = SCREEN_H * 0.96;
+    var offset_x = (SCREEN_CX - screen_inner_w / 2);
+    var offset_y = (SCREEN_CY - screen_inner_h / 2);
+
+    var cols = Math.floor(screen_inner_w / cell_size);
+    var rows = Math.floor(screen_inner_h / cell_size);
+
+    for (var r = 0; r < rows; r++) {
+      for (var c = 0; c < cols; c++) {
+        var iconX = c * cell_size + cell_size / 2;
+        var iconY = r * cell_size + cell_size / 2;
+        var iconType = Math.floor(rnd(r * cols + c) * 6);
+        var iconOp = ramp(gridFill, 0.1, 0.8);
+        var iconScale = lerp(0.5, 1, easeOut(ramp(gridFill, (r * cols + c) / (rows * cols) * 0.6, (r * cols + c) / (rows * cols) * 0.6 + 0.3)));
+        var flashOp = pulse(u, (r * cols + c) / (rows * cols) * 0.8 + 0.2, 0.05) * 0.8;
+        var flashColor = AMBER;
+
+        if (iconScale > 0.01) {
+          gridContent += '<g transform="translate(' + iconX + ' ' + iconY + ') scale(' + iconScale + ') translate(' + (-iconX) + ' ' + (-iconY) + ')">';
+          gridContent += contentIcon(iconX, iconY, cell_size * 0.6, iconType, WHITE, flashColor, 8, iconOp + flashOp);
+          gridContent += '</g>';
+        }
+      }
+    }
+  }
+
+  s += '<g ' + camera(cameraScale, 0, 0) + '>';
+  s += tvScreen(SCREEN_CX, SCREEN_CY, SCREEN_W, SCREEN_H, gridContent, 1);
+  s += '</g>';
+
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH — is something targeting me? (funnel + coral beam on the OTHER lane) */
+function scene3(u) {
+  var s = '';
+  var figY = FIGURE_Y;
+  var figX = FIGURE_X;
+  var postureShift = smooth(ramp(u, 0.0, 0.2));
+  var headTilt = lerp(-5, 0, postureShift);
+  var bodyLean = lerp(-10, 0, postureShift);
+
+  s += couch(FIGURE_X, FIGURE_Y + 100, 700, 200, DIM, 0.8);
+
+  s += '<g transform="translate(0 ' + bodyLean + ') rotate(' + headTilt + ' ' + figX + ' ' + (figY - 30 - 100/2) + ')">';
+  s += stickFigure(figX, figY, AMBER, 'crossed', 1);
+  s += '</g>';
+
+  var screen_inner_w = SCREEN_W * 0.96;
+  var screen_inner_h = SCREEN_H * 0.96;
+  var offset_x = (SCREEN_CX - screen_inner_w / 2);
+  var offset_y = (SCREEN_CY - screen_inner_h / 2);
+  var cell_size = 120;
+
+  var jumble = smooth(ramp(u, 0.1, 0.4)) * (1 - smooth(ramp(u, 0.7, 0.9)));
+  var gridContent = generateGrid(offset_x, offset_y, screen_inner_w, screen_inner_h, cell_size, u, 10, 20, WHITE, 0.8, jumble * 0.8);
+
+  s += tvScreen(SCREEN_CX, SCREEN_CY, SCREEN_W, SCREEN_H, gridContent, 1);
+
+  var earOp = ramp(u, 0.4, 0.6) * (1 - ramp(u, 0.8, 0.9));
+  var earShake = Math.sin(u * 40) * 10 * pulse(u, 0.7, 0.1);
+  if (earOp > 0.01) {
+    s += earIcon(FIGURE_X + 200, FIGURE_Y - 200, 60, CORAL, earOp, earShake);
+  }
+
+  return s;
+}
+
+/* SCENE 4 (30-40s): FIND — belts; slow lane passed for minutes, fast lane overtakes in seconds */
+function scene4(u) {
+  var s = '';
+  var figY = FIGURE_Y;
+  var figX = FIGURE_X;
+
+  s += couch(FIGURE_X, FIGURE_Y + 100, 700, 200, DIM, 0.8);
+  s += stickFigure(figX, figY, AMBER, 'normal', 1);
+
+  var screen_inner_w = SCREEN_W * 0.96;
+  var screen_inner_h = SCREEN_H * 0.96;
+  var offset_x = (SCREEN_CX - screen_inner_w / 2);
+  var offset_y = (SCREEN_CY - screen_inner_h / 2);
+
+  var splitFactor = smooth(ramp(u, 0.0, 0.3));
+  var screenLeftX = SCREEN_CX - (screen_inner_w / 4) * splitFactor;
+  var screenRightX = SCREEN_CX + (screen_inner_w / 4) * splitFactor;
+  var screenSplitW = screen_inner_w / 2;
+
+  var brainOp = ramp(u, 0.3, 0.6);
+  var brainPulse = Math.sin(u * 20) * 5 * pulse(u, 0.7, 0.1);
+  var brainScale = lerp(0.8, 1.1, pulse(u, 0.7, 0.1));
+
+  var gridContent = '';
+  if (splitFactor < 0.99) { // Main screen before split
+    gridContent += generateGrid(offset_x, offset_y, screen_inner_w, screen_inner_h, 120, u, 10, 0, null, 0.2 * (1 - splitFactor));
+  }
+
+  // Left side: history (amber icons)
+  if (splitFactor > 0.01) {
+    var historyGridW = screenSplitW * 0.8;
+    var historyGridH = screen_inner_h * 0.8;
+    var historyOffsetX = screenLeftX - historyGridW / 2;
+    var historyOffsetY = offset_y + screen_inner_h * 0.1;
+    var historyFill = ramp(u, 0.2, 0.5);
+    var historyCellSize = 80;
+
+    var cols = Math.floor(historyGridW / historyCellSize);
+    var rows = Math.floor(historyGridH / historyCellSize);
+    for (var r = 0; r < rows; r++) {
+      for (var c = 0; c < cols; c++) {
+        var iconX = historyOffsetX + c * historyCellSize + historyCellSize / 2;
+        var iconY = historyOffsetY + r * historyCellSize + historyCellSize / 2;
+        var iconType = Math.floor(rnd(r * cols + c + 30) * 6);
+        var iconOp = ramp(historyFill, (r * cols + c) / (rows * cols) * 0.6, (r * cols + c) / (rows * cols) * 0.6 + 0.3);
+        if (iconOp > 0.01) gridContent += contentIcon(iconX, iconY, historyCellSize * 0.6, iconType, AMBER, null, 8, iconOp);
+      }
+    }
+  }
+
+  // Right side: collaborative filtering
+  if (splitFactor > 0.01) {
+    var collabGridW = screenSplitW * 0.8;
+    var collabGridH = screen_inner_h * 0.8;
+    var collabOffsetX = screenRightX - collabGridW / 2;
+    var collabOffsetY = offset_y + screen_inner_h * 0.1;
+    var collabFill = ramp(u, 0.3, 0.6);
+    var collabCellSize = 80;
+
+    var cols = Math.floor(collabGridW / collabCellSize);
+    var rows = Math.floor(collabGridH / collabCellSize);
+    var centerIconX = collabOffsetX + collabGridW / 2;
+    var centerIconY = collabOffsetY + collabGridH / 2;
+
+    for (var r = 0; r < rows; r++) {
+      for (var c = 0; c < cols; c++) {
+        var iconX = collabOffsetX + c * collabCellSize + collabCellSize / 2;
+        var iconY = collabOffsetY + r * collabCellSize + collabCellSize / 2;
+        var iconType = Math.floor(rnd(r * cols + c + 40) * 6);
+        var iconOp = ramp(collabFill, (r * cols + c) / (rows * cols) * 0.6, (r * cols + c) / (rows * cols) * 0.6 + 0.3);
+        if (iconOp > 0.01) {
+          gridContent += contentIcon(iconX, iconY, collabCellSize * 0.6, iconType, WHITE, null, 8, iconOp);
+          // Blue lines connecting to central brain
+          var lineOp = ramp(collabFill, (r * cols + c) / (rows * cols) * 0.6 + 0.1, (r * cols + c) / (rows * cols) * 0.6 + 0.4);
+          if (lineOp > 0.01) {
+            gridContent += line(iconX, iconY, centerIconX, centerIconY, BLUE, 4, lineOp);
+          }
+        }
+      }
+    }
+    // Central brain icon
+    if (brainOp > 0.01) {
+      gridContent += '<g transform="translate(' + centerIconX + ' ' + centerIconY + ') scale(' + brainScale + ') translate(' + (-centerIconX) + ' ' + (-centerIconY) + ')">';
+      gridContent += brainIcon(centerIconX, centerIconY, 50, BLUE, brainOp);
+      gridContent += '</g>';
+    }
+  }
+
+  // Final content population on the main screen area
+  var finalContentOp = ramp(u, 0.8, 1.0);
+  if (finalContentOp > 0.01) {
+    var finalCellSize = 120;
+    var finalGrid = generateGrid(offset_x, offset_y, screen_inner_w, screen_inner_h, finalCellSize, u, 50, 0, AMBER, finalContentOp);
+    gridContent += finalGrid;
+  }
+
+  s += tvScreen(SCREEN_CX, SCREEN_CY, SCREEN_W, SCREEN_H, gridContent, 1);
+
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE — losing moments stack into a tall coral memory column */
+function scene5(u) {
+  var s = '';
+  var cameraScale = lerp(1, 0.8, smooth(u));
+  var cameraY = lerp(0, 90, smooth(u));
+  var figY = FIGURE_Y;
+  var figX = FIGURE_X;
+
+  s += couch(FIGURE_X, FIGURE_Y + 100, 700, 200, DIM, 0.8);
+
+  s += '<g ' + camera(cameraScale, 0, cameraY) + '>';
+  s += stickFigure(figX, figY, AMBER, 'normal', 1);
+
+  var screen_inner_w = SCREEN_W * 0.96;
+  var screen_inner_h = SCREEN_H * 0.96;
+  var offset_x = (SCREEN_CX - screen_inner_w / 2);
+  var offset_y = (SCREEN_CY - screen_inner_h / 2);
+  var cell_size = 120;
+
+  var tunnelRadius = lerp(screen_inner_w * 0.4, screen_inner_w * 0.15, smooth(u));
+  var tunnelY = lerp(offset_y + screen_inner_h / 2, FIGURE_Y - 200, smooth(u));
+  var tunnelOp = lerp(1, 0.8, smooth(u));
+
+  var otherIconsOp = lerp(1, 0, smooth(ramp(u, 0.6, 0.9)));
+
+  var numIcons = 12;
+  var gridContent = '';
+  for (var i = 0; i < numIcons; i++) {
+    var angle = (i / numIcons) * Math.PI * 2 + u * Math.PI * 0.5;
+    var iconX = SCREEN_CX + Math.cos(angle) * tunnelRadius;
+    var iconY = tunnelY + Math.sin(angle) * tunnelRadius * 0.6; // Elliptical tunnel
+    var iconType = Math.floor(rnd(i + 60) * 6);
+    gridContent += contentIcon(iconX, iconY, cell_size * 0.6, iconType, WHITE, BLUE, 8, tunnelOp);
+  }
+
+  // Other icons pushed out
+  var otherIconCount = 8;
+  for (var i = 0; i < otherIconCount; i++) {
+    var otherIconX = SCREEN_CX + (rnd(i + 70) - 0.5) * screen_inner_w * 1.5;
+    var otherIconY = offset_y + (rnd(i + 80) - 0.5) * screen_inner_h * 1.5;
+    var otherIconType = Math.floor(rnd(i + 90) * 6);
+    gridContent += contentIcon(otherIconX, otherIconY, cell_size * 0.6, otherIconType, WHITE, null, 8, otherIconsOp * (0.5 + 0.5 * rnd(i + 100)));
+  }
+
+  s += tvScreen(SCREEN_CX, SCREEN_CY, SCREEN_W, SCREEN_H, gridContent, 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE — one shared finish line, then snap back to plain lanes */
+function scene6(u) {
+  var s = '';
+  var cameraScale = lerp(0.8, 1.0, smooth(clamp(u / 0.7, 0, 1)));
+  var cameraY = lerp(90, 0, smooth(u));
+  var figY = FIGURE_Y;
+  var figX = FIGURE_X;
+
+  s += couch(FIGURE_X, FIGURE_Y + 100, 700, 200, DIM, 0.8);
+
+  var nodFactor = smooth(ramp(u, 0.7, 0.9));
+  var headTilt = lerp(0, -15, nodFactor);
+  s += '<g transform="rotate(' + headTilt + ' ' + figX + ' ' + (figY - 30 - 100/2) + ')">';
+  s += stickFigure(figX, figY, AMBER, 'nods', 1);
+  s += '</g>';
+
+  s += '<g ' + camera(cameraScale, 0, cameraY) + '>';
+  var screen_inner_w = SCREEN_W * 0.96;
+  var screen_inner_h = SCREEN_H * 0.96;
+  var offset_x = (SCREEN_CX - screen_inner_w / 2);
+  var offset_y = (SCREEN_CY - screen_inner_h / 2);
+  var cell_size = 120;
+
+  var gridContent = generateGrid(offset_x, offset_y, screen_inner_w, screen_inner_h, cell_size, u, 10, 0, AMBER, 1);
+
+  // Subtle blue overlay of interconnected lines
+  var overlayOp = ramp(u, 0.5, 0.8);
+  if (overlayOp > 0.01) {
+    var numLines = 20;
+    var lineLength = 100;
+    for (var i = 0; i < numLines; i++) {
+      var x1 = offset_x + rnd(i + 10) * screen_inner_w;
+      var y1 = offset_y + rnd(i + 20) * screen_inner_h;
+      var x2 = x1 + (rnd(i + 30) - 0.5) * lineLength;
+      var y2 = y1 + (rnd(i + 40) - 0.5) * lineLength;
+      gridContent += line(x1, y1, x2, y2, BLUE, 4, overlayOp * 0.3);
+    }
+  }
+
+  s += tvScreen(SCREEN_CX, SCREEN_CY, SCREEN_W, SCREEN_H, gridContent, 1);
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
