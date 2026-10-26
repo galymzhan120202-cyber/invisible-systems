@@ -1,0 +1,15 @@
+{
+  "id": "why-fastest-app-loads-first",
+  "slug": "2026-10-26__why-fastest-app-loads-first",
+  "title_working": "Why the Fastest App Loads First",
+  "system": "prioritization in mobile operating systems based on performance metrics",
+  "cluster": "platforms-and-algorithms",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-10-26T12:46:46+00:00",
+  "produced_at": "2026-10-26T12:53:22+00:00",
+  "verify": "PASS",
+  "takeaway": "You now understand that your phone's operating system actively predicts and prioritizes app launches, creating a subtle bias that makes frequently used or historically fast apps appear even quicker.",
+  "animation_source": "fallback"
+}

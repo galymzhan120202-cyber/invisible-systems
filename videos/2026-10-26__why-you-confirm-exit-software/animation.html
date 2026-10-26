@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why You Confirm You Want to Exit Software</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / protection
+var AMBER = "#F2A93B";              // warm amber   -> user's work / data
+var CORAL = "#FF5B5B";              // coral red    -> frustration / loss / naive model
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, fill) {
+  return '<path d="' + d + '" fill="' + (fill || 'none') + '" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+// Stick figure helper
+function stickFigure(x, y, pose, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = 30;
+  var bodyLen = 100;
+  var armLen = 70;
+  var legLen = 90;
+
+  // Head
+  g += dot(x, y - bodyLen / 2 - headR, headR, col);
+
+  // Body
+  g += line(x, y - bodyLen / 2, x, y + bodyLen / 2, col, 8);
+
+  // Arms and Legs based on pose
+  switch (pose) {
+    case 'typing':
+      g += line(x, y - bodyLen / 2 + 20, x - armLen, y - bodyLen / 2 + 50, col, 8); // Left arm
+      g += line(x, y - bodyLen / 2 + 20, x + armLen, y - bodyLen / 2 + 50, col, 8); // Right arm
+      g += dot(x - armLen, y - bodyLen / 2 + 50, 10, col); // Hands
+      g += dot(x + armLen, y - bodyLen / 2 + 50, 10, col);
+      g += line(x, y + bodyLen / 2, x - 30, y + bodyLen / 2 + legLen, col, 8); // Left leg
+      g += line(x, y + bodyLen / 2, x + 30, y + bodyLen / 2 + legLen, col, 8); // Right leg
+      break;
+    case 'reaching':
+      g += line(x, y - bodyLen / 2 + 20, x - armLen * 0.8, y - bodyLen / 2 + 30, col, 8); // Left arm
+      g += line(x, y - bodyLen / 2 + 20, x + armLen * 1.2, y - bodyLen / 2 - 10, col, 8); // Right arm reaching up
+      g += dot(x + armLen * 1.2, y - bodyLen / 2 - 10, 10, col); // Right hand
+      g += line(x, y + bodyLen / 2, x - 30, y + bodyLen / 2 + legLen, col, 8); // Left leg
+      g += line(x, y + bodyLen / 2, x + 30, y + bodyLen / 2 + legLen, col, 8); // Right leg
+      break;
+    case 'annoyed':
+      g += line(x, y - bodyLen / 2 + 20, x - armLen * 0.8, y - bodyLen / 2 - 20, col, 8); // Arms up in exasperation
+      g += line(x, y - bodyLen / 2 + 20, x + armLen * 0.8, y - bodyLen / 2 - 20, col, 8);
+      g += line(x, y + bodyLen / 2, x - 30, y + bodyLen / 2 + legLen, col, 8);
+      g += line(x, y + bodyLen / 2, x + 30, y + bodyLen / 2 + legLen, col, 8);
+      break;
+    case 'distressed':
+      g += line(x, y - bodyLen / 2 + 20, x - armLen * 0.8, y - bodyLen / 2 + 80, col, 8); // Arms down, slumped
+      g += line(x, y - bodyLen / 2 + 20, x + armLen * 0.8, y - bodyLen / 2 + 80, col, 8);
+      g += line(x, y + bodyLen / 2, x - 20, y + bodyLen / 2 + legLen * 0.8, col, 8); // Legs slightly bent
+      g += line(x, y + bodyLen / 2, x + 20, y + bodyLen / 2 + legLen * 0.8, col, 8);
+      break;
+    case 'nodding':
+      g += line(x, y - bodyLen / 2 + 20, x - armLen * 0.7, y - bodyLen / 2 + 60, col, 8); // Arms relaxed
+      g += line(x, y - bodyLen / 2 + 20, x + armLen * 0.7, y - bodyLen / 2 + 60, col, 8);
+      g += line(x, y + bodyLen / 2, x - 30, y + bodyLen / 2 + legLen, col, 8);
+      g += line(x, y + bodyLen / 2, x + 30, y + bodyLen / 2 + legLen, col, 8);
+      // Subtle head nod: head is slightly lower
+      g += dot(x, y - bodyLen / 2 - headR + 10, headR * 0.2, col, 0.5); // "smile" dot
+      break;
+    default: // Default pose: standing
+      g += line(x, y - bodyLen / 2 + 20, x - armLen * 0.7, y - bodyLen / 2 + 60, col, 8);
+      g += line(x, y - bodyLen / 2 + 20, x + armLen * 0.7, y - bodyLen / 2 + 60, col, 8);
+      g += line(x, y + bodyLen / 2, x - 30, y + bodyLen / 2 + legLen, col, 8);
+      g += line(x, y + bodyLen / 2, x + 30, y + bodyLen / 2 + legLen, col, 8);
+      break;
+  }
+  g += '</g>';
+  return g;
+}
+
+// Desk helper
+function desk(x, y, w, h, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 20, col, op); // Tabletop
+  g += line(x - w / 2 + 50, y + h / 2, x - w / 2 + 50, y + h / 2 + 200, col, sw); // Left leg
+  g += line(x + w / 2 - 50, y + h / 2, x + w / 2 - 50, y + h / 2 + 200, col, sw); // Right leg
+  g += '</g>';
+  return g;
+}
+
+// Computer screen helper
+function computerScreen(x, y, w, h, content, borderCol, borderSw, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 30, '#000000', op); // Screen background
+  g += rrectStroke(x, y, w, h, 30, borderCol, borderSw, op); // Screen border
+  g += content; // Inner content
+  g += '</g>';
+  return g;
+}
+
+// Document/Data icon helper (abstract amber shapes)
+function documentIcon(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, size * 1.2, size * 1.6, size * 0.2, col, op * 0.2); // Background shape
+  g += line(x - size * 0.4, y - size * 0.5, x + size * 0.4, y - size * 0.5, col, 8, op);
+  g += line(x - size * 0.4, y - size * 0.1, x + size * 0.4, y - size * 0.1, col, 8, op);
+  g += line(x - size * 0.4, y + size * 0.3, x + size * 0.4, y + size * 0.3, col, 8, op);
+  g += '</g>';
+  return g;
+}
+
+// Pop-up window helper
+function popup(x, y, w, h, iconContent, borderCol, borderSw, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 20, '#000000', op); // Pop-up background
+  g += rrectStroke(x, y, w, h, 20, borderCol, borderSw, op); // Pop-up border
+  g += iconContent; // Inner icon
+  g += '</g>';
+  return g;
+}
+
+// Cursor helper
+function cursor(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var d = "M " + x + " " + y + " L " + (x + size) + " " + (y + size * 0.6) + " L " + (x + size * 0.6) + " " + (y + size) + " Z";
+  return pathTag(d, col, 0, op, col); // Filled triangle
+}
+
+// 'X' icon helper
+function xIcon(x, y, size, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += line(x - size / 2, y - size / 2, x + size / 2, y + size / 2, col, sw);
+  g += line(x - size / 2, y + size / 2, x + size / 2, y - size / 2, col, sw);
+  g += '</g>';
+  return g;
+}
+
+// '?' icon helper (simplified)
+function questionIcon(x, y, size, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  // Curved top part
+  g += pathTag("M " + (x - size * 0.2) + " " + (y - size * 0.4) +
+               " Q " + (x + size * 0.4) + " " + (y - size * 0.5) + " " + (x + size * 0.4) + " " + (y - size * 0.05),
+               col, sw);
+  g += line(x + size * 0.4, y - size * 0.05, x + size * 0.4, y + size * 0.1, col, sw);
+  g += dot(x, y + size * 0.3, sw * 0.8, col); // Dot at the bottom
+  g += '</g>';
+  return g;
+}
+
+// Shield icon helper
+function shieldIcon(x, y, size, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var d = "M " + x + " " + (y - size * 0.6) +
+          " L " + (x + size * 0.5) + " " + (y - size * 0.2) +
+          " L " + (x + size * 0.5) + " " + (y + size * 0.6) +
+          " Q " + x + " " + (y + size * 0.8) + " " + (x - size * 0.5) + " " + (y + size * 0.6) +
+          " L " + (x - size * 0.5) + " " + (y - size * 0.2) + " Z";
+  return pathTag(d, col, sw, op, col); // Filled shield
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+var SF_X = CX - 300, SF_Y = CY + 300; // Stick figure base position
+var DESK_X = CX - 300, DESK_Y = CY + 450; // Desk base position
+var SCREEN_X = CX + 180, SCREEN_Y = CY - 100; // Screen base position
+var SCREEN_W = 700, SCREEN_H = 1200;
+var DOC_ICON_X = SCREEN_X, DOC_ICON_Y = SCREEN_Y;
+var DOC_ICON_SIZE = 120;
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var headBob = Math.sin(u * Math.PI * 4) * 5;
+
+  s += desk(DESK_X, DESK_Y, 800, 80, WHITE, 10);
+  s += stickFigure(SF_X, SF_Y + headBob, 'typing', WHITE);
+
+  var screenContent = documentIcon(DOC_ICON_X, DOC_ICON_Y, DOC_ICON_SIZE, AMBER);
+  s += computerScreen(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, screenContent, WHITE, 12);
+
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  s += desk(DESK_X, DESK_Y, 800, 80, WHITE, 10);
+
+  var cursorStartX = SCREEN_X + 200;
+  var cursorStartY = SCREEN_Y + 200;
+  var cursorEndX = SCREEN_X + SCREEN_W / 2 - 60; // Top right X button
+  var cursorEndY = SCREEN_Y - SCREEN_H / 2 + 60;
+
+  var cursorX = lerp(cursorStartX, cursorEndX, easeOut(u * 1.5));
+  var cursorY = lerp(cursorStartY, cursorEndY, easeOut(u * 1.5));
+
+  var xIconGlow = pulse(u, 0.8, 0.2) * 0.8; // Glows towards end of scene
+  var xIconCol = lerp(WHITE, CORAL, xIconGlow);
+  var xIconSw = lerp(8, 12, xIconGlow);
+
+  var screenContent = documentIcon(DOC_ICON_X, DOC_ICON_Y, DOC_ICON_SIZE, AMBER);
+  screenContent += xIcon(SCREEN_X + SCREEN_W / 2 - 60, SCREEN_Y - SCREEN_H / 2 + 60, 40, xIconCol, xIconSw);
+  s += computerScreen(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, screenContent, WHITE, 12);
+
+  s += stickFigure(SF_X, SF_Y, 'reaching', WHITE);
+  s += cursor(cursorX, cursorY, 30, WHITE);
+
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  s += desk(DESK_X, DESK_Y, 800, 80, WHITE, 10);
+
+  var popupW = 400, popupH = 600;
+  var popupScale = lerp(0.1, 1.0, easeOut(ramp(u, 0.0, 0.3)));
+  var popupOp = ramp(u, 0.0, 0.1);
+
+  var screenContent = documentIcon(DOC_ICON_X, DOC_ICON_Y, DOC_ICON_SIZE, AMBER);
+  s += computerScreen(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, screenContent, WHITE, 12);
+
+  var qIcon = questionIcon(SCREEN_X, SCREEN_Y, 60, WHITE, 8);
+  s += '<g transform="translate(' + SCREEN_X + ' ' + SCREEN_Y + ') scale(' + popupScale + ') translate(' + (-SCREEN_X) + ' ' + (-SCREEN_Y) + ')">';
+  s += popup(SCREEN_X, SCREEN_Y, popupW, popupH, qIcon, CORAL, 10, popupOp);
+  s += '</g>';
+
+  var sfPose = (u < 0.2) ? 'typing' : 'annoyed';
+  s += stickFigure(SF_X, SF_Y, sfPose, WHITE);
+
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  s += desk(DESK_X, DESK_Y, 800, 80, WHITE, 10);
+
+  var screenContent = documentIcon(DOC_ICON_X, DOC_ICON_Y, DOC_ICON_SIZE, AMBER);
+  s += computerScreen(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, screenContent, WHITE, 12);
+
+  var popupW = 400, popupH = 600;
+  var borderTransition = ramp(u, 0.1, 0.6);
+  var popupBorderCol = lerp(CORAL, BLUE, borderTransition);
+  var shieldScale = lerp(0.1, 1.0, easeOut(ramp(u, 0.4, 0.8)));
+  var shieldOp = ramp(u, 0.4, 0.5);
+
+  var qIcon = questionIcon(SCREEN_X, SCREEN_Y, 60, WHITE, 8);
+  s += popup(SCREEN_X, SCREEN_Y, popupW, popupH, qIcon, popupBorderCol, 10);
+
+  // Shield icon appears over the document icon
+  var shieldIconContent = '<g transform="translate(' + DOC_ICON_X + ' ' + DOC_ICON_Y + ') scale(' + shieldScale + ') translate(' + (-DOC_ICON_X) + ' ' + (-DOC_ICON_Y) + ')">';
+  shieldIconContent += shieldIcon(DOC_ICON_X, DOC_ICON_Y, DOC_ICON_SIZE * 0.8, BLUE, 8, shieldOp);
+  shieldIconContent += '</g>';
+  s += shieldIconContent;
+
+  s += stickFigure(SF_X, SF_Y, 'typing', WHITE); // Back to typing, contemplating
+
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  s += desk(DESK_X, DESK_Y, 800, 80, WHITE, 10);
+
+  var screenBlank = ramp(u, 0.0, 0.2);
+  var screenBorderCol = lerp(WHITE, '#000000', screenBlank);
+  var screenContentOp = 1 - screenBlank;
+
+  var screenContent = documentIcon(DOC_ICON_X, DOC_ICON_Y, DOC_ICON_SIZE, AMBER, screenContentOp);
+  s += computerScreen(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, screenContent, screenBorderCol, 12);
+
+  var collapseStart = ramp(u, 0.3, 0.5);
+  var collapseEnd = ramp(u, 0.6, 0.9);
+  var collapseProgress = clamp(collapseStart - collapseEnd, 0, 1);
+
+  // Stack of amber data blocks collapsing
+  var numBlocks = 6;
+  for (var i = 0; i < numBlocks; i++) {
+    var blockY = lerp(DOC_ICON_Y + DOC_ICON_SIZE * 0.8 - i * 40, DOC_ICON_Y + DOC_ICON_SIZE * 0.8 + 200, easeIn(collapseProgress));
+    var blockX = DOC_ICON_X + (rnd(i) - 0.5) * 100 * collapseProgress;
+    var blockOp = 1 - collapseProgress;
+    if (blockOp > 0.01) {
+      s += rrect(blockX, blockY, DOC_ICON_SIZE * 1.2, 30, 8, AMBER, blockOp);
+    }
+  }
+
+  // Coral red burst at the bottom
+  var burstOp = pulse(u, 0.75, 0.2) * 0.8;
+  if (burstOp > 0.01) {
+    s += ring(DOC_ICON_X, DOC_ICON_Y + DOC_ICON_SIZE * 0.8 + 100, lerp(10, 200, burstOp), CORAL, 15, burstOp);
+    s += dot(DOC_ICON_X, DOC_ICON_Y + DOC_ICON_SIZE * 0.8 + 100, 20, CORAL, burstOp);
+  }
+
+  var sfPose = (u < 0.5) ? 'typing' : 'distressed';
+  s += stickFigure(SF_X, SF_Y, sfPose, WHITE);
+
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var cameraScale = lerp(1.0, 0.9, smooth(u));
+  var cameraY = lerp(0, 50, smooth(u));
+
+  s += '<g ' + camera(cameraScale, 0, cameraY) + '>';
+  s += desk(DESK_X, DESK_Y, 800, 80, WHITE, 10);
+
+  var shieldIconContent = shieldIcon(DOC_ICON_X, DOC_ICON_Y, DOC_ICON_SIZE * 0.8, BLUE, 8);
+  var screenContent = documentIcon(DOC_ICON_X, DOC_ICON_Y, DOC_ICON_SIZE, AMBER);
+  screenContent += shieldIconContent;
+  s += computerScreen(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, screenContent, WHITE, 12);
+
+  var popupW = 400, popupH = 600;
+  var popupAppear = ramp(u, 0.2, 0.6);
+  var qIcon = questionIcon(SCREEN_X, SCREEN_Y, 60, WHITE, 8);
+  s += popup(SCREEN_X, SCREEN_Y, popupW, popupH, qIcon, BLUE, 10, popupAppear);
+
+  var sfPose = (u < 0.5) ? 'typing' : 'nodding';
+  s += stickFigure(SF_X, SF_Y, sfPose, WHITE);
+  s += '</g>';
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

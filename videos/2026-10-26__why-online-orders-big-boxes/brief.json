@@ -1,0 +1,15 @@
+{
+  "id": "why-online-orders-big-boxes",
+  "slug": "2026-10-26__why-online-orders-big-boxes",
+  "title_working": "Why Online Orders Arrive in Big Boxes",
+  "system": "standardization of packaging to optimize warehouse logistics",
+  "cluster": "platforms-and-layout",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-10-26T12:58:30+00:00",
+  "produced_at": "2026-10-26T13:01:56+00:00",
+  "verify": "PASS",
+  "takeaway": "Online retailers use a limited set of standard box sizes to optimize warehouse operations, leading to seemingly oversized packaging for small items.",
+  "animation_source": "llm"
+}
