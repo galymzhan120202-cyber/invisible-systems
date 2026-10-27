@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why You Don't See Ads For Things You Search</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary elements
+var BLUE  = "#4C86F0";              // signal blue  -> algorithm's logic, prediction
+var AMBER = "#F2A93B";              // warm amber   -> YOU / viewer's current desire
+var CORAL = "#FF5B5B";              // coral red    -> irrelevant ads, naive expectation
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+// Custom shapes for this animation
+function stickFigure(x, y, col, headR, bodyH, armAngle, legAngle, gazeX, gazeY, op) {
+  op = (op == null ? 1 : op);
+  var sw = 9;
+  var g = '<g opacity="' + op + '">';
+  // Head
+  g += dot(x, y - headR, headR, col);
+  // Body
+  g += line(x, y, x, y + bodyH, col, sw);
+  // Arms
+  var armLen = bodyH * 0.7;
+  g += line(x, y + bodyH * 0.1, x + armLen * Math.cos(armAngle), y + bodyH * 0.1 + armLen * Math.sin(armAngle), col, sw);
+  g += line(x, y + bodyH * 0.1, x - armLen * Math.cos(armAngle), y + bodyH * 0.1 + armLen * Math.sin(armAngle), col, sw);
+  // Legs
+  var legLen = bodyH * 0.8;
+  g += line(x, y + bodyH, x + legLen * Math.cos(legAngle), y + bodyH + legLen * Math.sin(legAngle), col, sw);
+  g += line(x, y + bodyH, x - legLen * Math.cos(legAngle), y + bodyH + legLen * Math.sin(legAngle), col, sw);
+
+  // Gaze (eyes)
+  if (gazeX != null && gazeY != null) {
+    var eyeR = headR * 0.18;
+    var eyeDist = headR * 0.3;
+    var eyeY = y - headR * 1.1;
+    var eyeLX = x - eyeDist;
+    var eyeRX = x + eyeDist;
+
+    var angle = Math.atan2(gazeY - eyeY, gazeX - x);
+    var pupilDist = headR * 0.3; // How far pupils move
+    var pupilX = pupilDist * Math.cos(angle);
+    var pupilY = pupilDist * Math.sin(angle);
+
+    g += dot(eyeLX + pupilX, eyeY + pupilY, eyeR, WHITE);
+    g += dot(eyeRX + pupilX, eyeY + pupilY, eyeR, WHITE);
+  }
+
+  g += '</g>';
+  return g;
+}
+
+function searchBar(x, y, w, h, rad, col, sw, op) {
+  return rrectStroke(x, y, w, h, rad, col, sw, op);
+}
+
+function adBlock(x, y, w, h, rad, col, sw, op, icon) {
+  var g = '<g opacity="' + (op == null ? 1 : op) + '">';
+  g += rrectStroke(x, y, w, h, rad, col, sw);
+  if (icon === 'X') {
+    g += line(x - w / 4, y - h / 4, x + w / 4, y + h / 4, col, sw * 0.8);
+    g += line(x - w / 4, y + h / 4, x + w / 4, y - h / 4, col, sw * 0.8);
+  } else if (icon === 'dot') {
+    g += dot(x, y, h / 4, col);
+  } else if (icon === 'bar') {
+    g += line(x - w / 4, y, x + w / 4, y, col, sw * 0.8);
+  } else if (icon === 'arrow') {
+    g += pathTag("M " + (x - w / 4) + " " + (y + h / 8) + " L " + x + " " + (y - h / 8) + " L " + (x + w / 4) + " " + (y + h / 8), col, sw * 0.8);
+  }
+  g += '</g>';
+  return g;
+}
+
+function questionMark(x, y, size, col, sw, op) {
+  var d = "M " + (x - size * 0.3) + " " + (y - size * 0.4) +
+          " A " + (size * 0.3) + " " + (size * 0.3) + " 0 1 1 " + (x + size * 0.3) + " " + (y - size * 0.1) +
+          " L " + (x + size * 0.05) + " " + (y + size * 0.15) +
+          " M " + x + " " + (y + size * 0.3);
+  return pathTag(d, col, sw, op) + dot(x, y + size * 0.45, sw * 0.6, col, op);
+}
+
+function gear(x, y, r, teeth, col, sw, rot, op) {
+  var g = '<g opacity="' + (op == null ? 1 : op) + '" transform="rotate(' + rot + ' ' + x + ' ' + y + ')">';
+  g += ring(x, y, r, col, sw);
+  for (var i = 0; i < teeth; i++) {
+    var angle = (i / teeth) * Math.PI * 2;
+    var x1 = x + r * Math.cos(angle);
+    var y1 = y + r * Math.sin(angle);
+    var x2 = x + (r + sw * 0.8) * Math.cos(angle);
+    var y2 = y + (r + sw * 0.8) * Math.sin(angle);
+    g += line(x1, y1, x2, y2, col, sw);
+  }
+  g += '</g>';
+  return g;
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+// Stick figure constants
+var FIG_H = 220; // Total height from head top to feet bottom
+var FIG_HEAD_R = 30;
+var FIG_BODY_H = 120; // Body length from neck to crotch
+var FIG_ARM_ANGLE_REST = -Math.PI / 2 + 0.3;
+var FIG_LEG_ANGLE_REST = Math.PI / 2 - 0.2;
+var FIG_NECK_Y_OFFSET = FIG_HEAD_R * 0.8; // Y offset from head center to neck
+
+// Main screen/search bar element
+var SCREEN_W = 700;
+var SCREEN_H = 800;
+var SCREEN_Y = CY + 100; // Center Y of the screen
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var deskY = BOT - 180;
+  var figX = CX;
+  var figY = deskY - FIG_BODY_H - FIG_HEAD_R - FIG_NECK_Y_OFFSET + 20;
+
+  // YOU (warm amber) at a desk
+  var armAngle = FIG_ARM_ANGLE_REST + Math.sin(u * Math.PI * 2) * 0.1;
+  var legAngle = FIG_LEG_ANGLE_REST;
+  s += stickFigure(figX, figY, AMBER, FIG_HEAD_R, FIG_BODY_H, armAngle, legAngle, CX, SCREEN_Y - SCREEN_H/2, 1);
+  s += rrect(CX, deskY + 60, 800, 180, 20, WHITE, 0.1); // Desk
+
+  // Large, empty search bar (white outline)
+  var barRad = 30;
+  var barCol = WHITE;
+  var barSW = 10;
+  var barOp = 1;
+  s += searchBar(CX, SCREEN_Y, SCREEN_W, SCREEN_H * 0.3, barRad, barCol, barSW, barOp);
+
+  // Cursor blinking
+  var cursorX = CX - SCREEN_W / 2 + 80;
+  var cursorY = SCREEN_Y - SCREEN_H * 0.3 / 2 + 2;
+  var cursorH = SCREEN_H * 0.3 * 0.6;
+  var blink = Math.floor(u * 5) % 2; // Blinks 5 times per 10s
+  var typeProgress = ramp(u, 0.35, 0.85);
+  var currentCursorX = lerp(cursorX, cursorX + SCREEN_W * 0.5, typeProgress);
+  if (blink === 0 && typeProgress < 1) { // Only blink when not fully typed
+    s += line(currentCursorX, cursorY - cursorH / 2, currentCursorX, cursorY + cursorH / 2, AMBER, 8);
+  }
+
+  // Search bar glows faintly amber
+  var glowOp = pulse(u, 0.5, 0.5) * 0.1 + 0.05; // Constant faint glow, with a subtle pulse
+  s += rrect(CX, SCREEN_Y, SCREEN_W, SCREEN_H * 0.3, barRad, AMBER, glowOp);
+
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var deskY = BOT - 180;
+  var figX = CX;
+  var figY = deskY - FIG_BODY_H - FIG_HEAD_R - FIG_NECK_Y_OFFSET + 20;
+
+  // YOU (warm amber) looking at screen
+  var headTilt = Math.sin(u * Math.PI * 2) * 0.05; // Subtle head movement
+  s += stickFigure(figX, figY, AMBER, FIG_HEAD_R, FIG_BODY_H, FIG_ARM_ANGLE_REST, FIG_LEG_ANGLE_REST, CX, SCREEN_Y, 1);
+  s += rrect(CX, deskY + 60, 800, 180, 20, WHITE, 0.1); // Desk
+
+  // Screen displaying search results
+  var screenCol = WHITE;
+  var screenSW = 10;
+  var screenRad = 30;
+  s += rrectStroke(CX, SCREEN_Y, SCREEN_W, SCREEN_H, screenRad, screenCol, screenSW);
+
+  // Search results (simple white lines)
+  var resultsY = SCREEN_Y - SCREEN_H / 2 + 100;
+  for (var i = 0; i < 4; i++) {
+    var lineW = lerp(SCREEN_W * 0.6, SCREEN_W * 0.8, rnd(i));
+    s += line(CX - lineW / 2, resultsY + i * 80, CX + lineW / 2, resultsY + i * 80, WHITE, 6, 0.8);
+  }
+
+  // Ad blocks (coral red outlines) appear below results
+  var adY = SCREEN_Y + SCREEN_H / 2 - 200;
+  var adH = 180;
+  var adW = SCREEN_W * 0.4;
+  var adRad = 15;
+  var adSW = 8;
+  var adIcons = ['dot', 'bar', 'arrow'];
+
+  for (var j = 0; j < 3; j++) {
+    var pop = ramp(u, 0.2 + j * 0.1, 0.5 + j * 0.1); // Pop in one by one
+    if (pop > 0) {
+      var currentAdY = lerp(SCREEN_Y + SCREEN_H / 2 + 100, adY - j * (adH + 30), easeOut(pop));
+      var currentAdOp = lerp(0, 1, pop);
+      s += adBlock(CX - adW / 2 - 50, currentAdY, adW, adH, adRad, CORAL, adSW, currentAdOp, adIcons[j]);
+      s += adBlock(CX + adW / 2 + 50, currentAdY, adW, adH, adRad, CORAL, adSW, currentAdOp, adIcons[(j + 1) % 3]);
+    }
+  }
+
+  // YOU gestures towards the ads
+  var gesture = ramp(u, 0.4, 0.7);
+  if (gesture > 0) {
+    var armX = figX + FIG_HEAD_R * 1.5;
+    var armY = figY + FIG_BODY_H * 0.1;
+    var fingerX = lerp(armX, CX + adW / 2 + 50 + adW / 2, easeOut(gesture));
+    var fingerY = lerp(armY, adY - (adH + 30) * 1.5, easeOut(gesture));
+    s += line(armX, armY, fingerX, fingerY, AMBER, 8);
+  }
+
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var deskY = BOT - 180;
+  var figX = CX;
+  var figY = deskY - FIG_BODY_H - FIG_HEAD_R - FIG_NECK_Y_OFFSET + 20;
+
+  // YOU (amber), confused, with a large, coral red question mark above their head
+  var headScratch = ramp(u, 0.1, 0.5);
+  var armAngle = FIG_ARM_ANGLE_REST;
+  var legAngle = FIG_LEG_ANGLE_REST;
+  if (headScratch > 0) {
+    armAngle = lerp(FIG_ARM_ANGLE_REST, -Math.PI / 2 + 0.8, smooth(headScratch)); // Arm up to head
+  }
+  s += stickFigure(figX, figY, AMBER, FIG_HEAD_R, FIG_BODY_H, armAngle, legAngle, CX, SCREEN_Y, 1);
+  s += rrect(CX, deskY + 60, 800, 180, 20, WHITE, 0.1); // Desk
+
+  // Question mark pulses coral red
+  var qmSize = 120;
+  var qmY = figY - FIG_HEAD_R - qmSize / 2 - 60;
+  var qmPulse = pulse(u, 0.5, 0.4) * 0.4 + 0.6;
+  s += questionMark(figX, qmY, qmSize, CORAL, 10, qmPulse);
+
+  // Irrelevant ad blocks still visible, now with faint coral red "X" marks
+  var screenCol = WHITE;
+  var screenSW = 10;
+  var screenRad = 30;
+  s += rrectStroke(CX, SCREEN_Y, SCREEN_W, SCREEN_H, screenRad, screenCol, screenSW);
+
+  var adY = SCREEN_Y + SCREEN_H / 2 - 200;
+  var adH = 180;
+  var adW = SCREEN_W * 0.4;
+  var adRad = 15;
+  var adSW = 8;
+  
+  var fadeAds = ramp(u, 0.7, 1.0); // Ads slightly recede
+  for (var j = 0; j < 3; j++) {
+    var currentAdY = adY - j * (adH + 30);
+    var currentAdOp = lerp(1, 0.3, fadeAds);
+    s += adBlock(CX - adW / 2 - 50, currentAdY, adW, adH, adRad, CORAL, adSW, currentAdOp, 'X');
+    s += adBlock(CX + adW / 2 + 50, currentAdY, adW, adH, adRad, CORAL, adSW, currentAdOp, 'X');
+  }
+
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var deskY = BOT - 180;
+  var figX = CX;
+  var figY = deskY - FIG_BODY_H - FIG_HEAD_R - FIG_NECK_Y_OFFSET + 20;
+
+  // YOU points to the engine as it lights up
+  var armAngle = FIG_ARM_ANGLE_REST;
+  var legAngle = FIG_LEG_ANGLE_REST;
+  var point = ramp(u, 0.2, 0.6);
+  if (point > 0) {
+    armAngle = lerp(FIG_ARM_ANGLE_REST, -Math.PI / 2 + 0.5, smooth(point));
+  }
+  s += stickFigure(figX, figY, AMBER, FIG_HEAD_R, FIG_BODY_H, armAngle, legAngle, CX, SCREEN_Y, 1);
+  s += rrect(CX, deskY + 60, 800, 180, 20, WHITE, 0.1); // Desk
+
+  // Screen transforms into a simplified "prediction engine" (signal blue outline, gears/arrows inside)
+  var transformProg = ramp(u, 0.0, 0.4);
+  var screenCol = lerp(1, 0, transformProg) > 0.5 ? WHITE : BLUE; // Morph color
+  var screenSW = lerp(10, 12, transformProg);
+  var screenRad = lerp(30, 20, transformProg);
+  s += rrectStroke(CX, SCREEN_Y, SCREEN_W, SCREEN_H, screenRad, BLUE, screenSW);
+
+  // Gears inside
+  var gearOp = ramp(u, 0.2, 0.6);
+  if (gearOp > 0) {
+    var gearR = 100;
+    var gearSW = 8;
+    s += gear(CX - 150, SCREEN_Y - 100, gearR, 10, BLUE, gearSW, u * 360, gearOp);
+    s += gear(CX + 150, SCREEN_Y + 100, gearR * 0.8, 8, BLUE, gearSW, -u * 360 * 0.8, gearOp);
+  }
+
+  // Line connects YOU to the engine
+  var connectOp = ramp(u, 0.3, 0.7);
+  if (connectOp > 0) {
+    s += line(figX, figY + FIG_BODY_H, CX, SCREEN_Y + SCREEN_H / 2 - 50, BLUE, 6, connectOp);
+  }
+
+  // then branches to *future* potential purchases (small white boxes, some signal blue)
+  var branchOp = ramp(u, 0.5, 0.9);
+  var branchY = SCREEN_Y + SCREEN_H / 2 + 50;
+  var boxW = 100, boxH = 60, boxRad = 10;
+  var boxColors = [WHITE, BLUE, WHITE, DIM, BLUE];
+  for (var i = 0; i < 5; i++) {
+    var branchX = CX + (i - 2) * 150;
+    s += line(CX, branchY, branchX, branchY + 150, BLUE, 4, branchOp);
+    s += rrectStroke(branchX, branchY + 150 + boxH / 2, boxW, boxH, boxRad, boxColors[i], 5, branchOp);
+  }
+
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var deskY = BOT - 180;
+  var figX = CX;
+  var figY = deskY - FIG_BODY_H - FIG_HEAD_R - FIG_NECK_Y_OFFSET + 20;
+
+  // Camera pulls back slightly
+  var camScale = lerp(1.0, 0.8, smooth(u));
+  var camY = lerp(0, 100, smooth(u));
+  s += '<g ' + camera(camScale, 0, camY) + '>';
+
+  // YOU watches, no longer the sole focus
+  s += stickFigure(figX, figY, AMBER, FIG_HEAD_R, FIG_BODY_H, FIG_ARM_ANGLE_REST, FIG_LEG_ANGLE_REST, CX, SCREEN_Y, 0.8); // Faintly visible
+
+  // Prediction engine (signal blue) now shows multiple stick figures
+  var screenCol = BLUE;
+  var screenSW = 12;
+  var screenRad = 20;
+  s += rrectStroke(CX, SCREEN_Y, SCREEN_W, SCREEN_H, screenRad, screenCol, screenSW);
+
+  // Gears inside
+  var gearR = 100;
+  var gearSW = 8;
+  s += gear(CX - 150, SCREEN_Y - 100, gearR, 10, BLUE, gearSW, u * 360 + 360 * 4, 1); // Continue rotation
+  s += gear(CX + 150, SCREEN_Y + 100, gearR * 0.8, 8, BLUE, gearSW, -u * 360 * 0.8 - 360 * 4, 1);
+
+  // Multiple stick figures interacting with the prediction engine's output
+  var otherFigY = SCREEN_Y + SCREEN_H / 2 - 100;
+  var otherFigH = FIG_H * 0.6;
+  var otherFigHeadR = FIG_HEAD_R * 0.6;
+  var otherFigBodyH = FIG_BODY_H * 0.6;
+
+  for (var i = 0; i < 3; i++) {
+    var fX = CX + (i - 1) * 200;
+    var fY = otherFigY - otherFigBodyH - otherFigHeadR - FIG_NECK_Y_OFFSET * 0.6 + rnd(i) * 20;
+    var figOp = lerp(0.3, 1, ramp(u, 0.1 + i * 0.1, 0.5 + i * 0.1));
+    s += stickFigure(fX, fY, DIM, otherFigHeadR, otherFigBodyH, FIG_ARM_ANGLE_REST, FIG_LEG_ANGLE_REST, CX, SCREEN_Y, figOp);
+
+    // Some looking at "future need" items (small signal blue boxes)
+    var itemY = fY + otherFigBodyH + 50;
+    var itemW = 80, itemH = 50, itemRad = 8;
+    var itemOp = lerp(0.3, 1, ramp(u, 0.3 + i * 0.1, 0.7 + i * 0.1));
+    s += rrectStroke(fX, itemY, itemW, itemH, itemRad, BLUE, 4, itemOp);
+    s += dot(fX, itemY, itemH / 3, BLUE, itemOp * 0.6); // Simple glyph
+  }
+
+  // New ads (faint signal blue outline) appear, relevant to *other* figures' future needs
+  var adY = SCREEN_Y - SCREEN_H / 2 + 100;
+  var adH = 120;
+  var adW = SCREEN_W * 0.3;
+  var adRad = 10;
+  var adSW = 6;
+  var adIcons = ['dot', 'bar', 'arrow'];
+
+  for (var j = 0; j < 2; j++) {
+    var newAdOp = ramp(u, 0.4 + j * 0.1, 0.8 + j * 0.1);
+    s += adBlock(CX - adW / 2 - 100, adY + j * (adH + 20), adW, adH, adRad, BLUE, adSW, newAdOp * 0.6, adIcons[j]);
+    s += adBlock(CX + adW / 2 + 100, adY + j * (adH + 20), adW, adH, adRad, BLUE, adSW, newAdOp * 0.6, adIcons[(j + 1) % 3]);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var deskY = BOT - 180;
+  var figX = CX;
+  var figY = deskY - FIG_BODY_H - FIG_HEAD_R - FIG_NECK_Y_OFFSET + 20;
+
+  // YOU (warm amber), back at the desk
+  var nod = ramp(u, 0.1, 0.4);
+  var headNodY = lerp(0, FIG_HEAD_R * 0.1, smooth(nod));
+  var armAngle = FIG_ARM_ANGLE_REST;
+  var legAngle = FIG_LEG_ANGLE_REST;
+  s += stickFigure(figX, figY + headNodY, AMBER, FIG_HEAD_R, FIG_BODY_H, armAngle, legAngle, CX, SCREEN_Y, 1);
+  s += rrect(CX, deskY + 60, 800, 180, 20, WHITE, 0.1); // Desk
+
+  // Screen now displays subtle, mostly white ads
+  var screenMorph = ramp(u, 0.0, 0.6); // Morph back from engine to screen
+  var screenCol = lerp(BLUE, WHITE, smooth(screenMorph));
+  var screenSW = lerp(12, 8, smooth(screenMorph));
+  var screenRad = lerp(20, 30, smooth(screenMorph));
+  s += rrectStroke(CX, SCREEN_Y, SCREEN_W, SCREEN_H, screenRad, screenCol, screenSW);
+
+  // Subtle ads
+  var adY = SCREEN_Y + SCREEN_H / 2 - 200;
+  var adH = 180;
+  var adW = SCREEN_W * 0.4;
+  var adRad = 15;
+  var adSW = 8;
+  var adIcons = ['dot', 'bar', 'arrow'];
+
+  var adFade = ramp(u, 0.0, 0.4); // Fade in subtle ads
+  for (var j = 0; j < 3; j++) {
+    var currentAdOp = lerp(0, 0.4, adFade); // Faint opacity
+    s += adBlock(CX - adW / 2 - 50, adY - j * (adH + 30), adW, adH, adRad, WHITE, adSW, currentAdOp, adIcons[j]);
+    s += adBlock(CX + adW / 2 + 50, adY - j * (adH + 30), adW, adH, adRad, WHITE, adSW, currentAdOp, adIcons[(j + 1) % 3]);
+  }
+
+  // YOU's eyes glow with signal blue, indicating understanding
+  var eyeGlow = ramp(u, 0.5, 0.8);
+  if (eyeGlow > 0) {
+    var headX = figX;
+    var headY = figY - FIG_HEAD_R - FIG_NECK_Y_OFFSET + headNodY;
+    var eyeR = FIG_HEAD_R * 0.18;
+    var eyeDist = FIG_HEAD_R * 0.3;
+    var eyeY = headY - FIG_HEAD_R * 1.1;
+    var eyeLX = headX - eyeDist;
+    var eyeRX = headX + eyeDist;
+
+    // Zoom in briefly
+    var zoomFactor = pulse(u, 0.65, 0.1) * 0.3; // Zoom in at ~55s
+    var currentEyeR = eyeR * (1 + zoomFactor);
+
+    s += dot(eyeLX, eyeY, currentEyeR, BLUE, eyeGlow * 0.8);
+    s += dot(eyeRX, eyeY, currentEyeR, BLUE, eyeGlow * 0.8);
+  }
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

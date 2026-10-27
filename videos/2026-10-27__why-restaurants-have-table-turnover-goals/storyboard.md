@@ -1,0 +1,22 @@
+# Production Plan: Why Restaurants Aim For Fast Table Turnover
+
+**System:** Incentivizing rapid seating and clearing to maximize capacity
+**Narrator:** Bright, energetic adult-female voice (AvaNeural / JennyNeural)
+**Palette:** signal blue (system/rules), warm amber (you/desire), coral red (friction/naive model)
+**Hero Element:** The dining table, which transforms to represent a resource.
+
+| # | Time | Story beat | Stick-figure scene | Motion / camera / transition | English VO | SFX |
+|---|---|---|---|---|---|---|
+| 1 | 0–10s | **YOU + NEED** (Enjoying, wanting to linger) | A stick-figure 'YOU' (warm amber) sits comfortably at a simple dining table. A plate of food is in front of them. The background is simple restaurant decor. | Camera is stable on YOU and table. Slight ambient sway to indicate comfort. | You're at your favorite restaurant, soaking in the ambiance. The food is great, the company is perfect, and you want to linger all evening. | click-soft.mp3, focus.mp3 |
+| 2 | 10–20s | **GO** (Subtle push to leave) | YOU (warm amber) is still at the table. A waiter quickly clears the empty plate. Another waiter places a check icon on the table. | Waiter enters frame from right, swiftly clears plate. Another waiter from left places a small rectangular check icon. Quick, efficient movements. | Suddenly, the subtle cues begin: plates whisked away almost before you're done, the check appearing without you even asking for it. | whoosh-fast.mp3, click-soft.mp3 |
+| 3 | 20–30s | **SEARCH** (Confusion, feeling rushed) | YOU (warm amber) looks confused, with a question mark thought bubble over their head. The table surface is now tinted coral red, with subtle lines radiating out, indicating pressure. | YOU leans back slightly, head tilts. Question mark appears and gently pulses. Table's red tint intensifies, radiating lines become more prominent. | You might wonder if the staff is being rude, or perhaps just overly efficient, but you feel a gentle, yet firm, push to finish up. | focus.mp3, drop-thud.mp3 |
+| 4 | 30–40s | **FIND** (The mechanism revealed) | Camera pulls back to reveal multiple dining tables (some empty, some with people). The central table (now signal blue) has a clock icon on it. Blue lines connect the tables to a revenue counter icon at the top of the screen. | Camera zooms out smoothly. The central table subtly transforms to signal blue. A simple clock icon appears on it. Blue lines extend from each table, converging on a dollar sign icon (revenue counter) at the top. | Then it clicks: each table isn't just a place to eat, it's a valuable resource. Every minute it's empty, or occupied by finished diners, is lost potential revenue. | transform.mp3, whoosh.mp3 |
+| 5 | 40–50s | **TAKE** (The cost of the illusion) | YOU (warm amber) stands up from the now coral red table, looking slightly disappointed. The table retains its red tint and radiating pressure lines. | YOU slowly stands up, pushing the chair back slightly. The red tint on the table pulses once more, emphasizing the discomfort. | The cost? Your relaxed dining experience is subtly rushed. That lingering conversation cut short, the feeling of being hurried out the door. | stack-collapse.mp3, drop-thud.mp3 |
+| 6 | 50–60s | **RETURN + CHANGE** (New understanding) | YOU (warm amber) is back at a dining table. The table is neutral, but a small, subtle signal blue clock icon now appears on it, ticking silently. YOU glances at it, then smiles knowingly. | YOU settles into the chair. The table is plain, then the small, blue clock icon appears and ticks. YOU's eyes track to it, then they nod with a small, knowing smile. | Next time you're out, you'll see the invisible timer ticking on your table. The restaurant isn't just serving food; it's orchestrating a silent dance of turnover. | complete-done.mp3, focus.mp3 |
+
+**Continuity map:**
+- **Scene 1-2:** YOU and the dining table remain, but waiters enter and actions begin.
+- **Scene 2-3:** YOU and the table remain, but the table's color shifts to coral red, and YOU's expression changes.
+- **Scene 3-4:** YOU and the central table remain, but the camera pulls back, revealing more tables and the system's blue connections.
+- **Scene 4-5:** YOU returns to the central (now red) table, standing up, experiencing the system's cost.
+- **Scene 5-6:** YOU is again at a table, which is now neutral with a blue timer, signifying new awareness.

@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Restaurants Aim For Fast Table Turnover</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+var STROKE_W = 9;                   // general stroke width for figures and main elements
+var THIN_STROKE_W = 4;              // for background elements or details
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / rules
+var AMBER = "#F2A93B";              // warm amber   -> YOU / desire
+var CORAL = "#FF5B5B";              // coral red    -> friction / naive model
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom elements ---------- */
+var TABLE_W = 400, TABLE_H = 280;
+var TABLE_Y = CY + 200;
+var YOU_X = CX - 120;
+var YOU_Y_SITTING = TABLE_Y - 100;
+var YOU_Y_STANDING = TABLE_Y - 240;
+
+// Stick figure: x, y is base of torso. head, torso, 2 arms, 2 legs.
+function stickFigure(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" stroke="' + col + '" stroke-width="' + STROKE_W + '" stroke-linecap="round">';
+  var headR = 30;
+  var torsoH = 120;
+  var armL = 80;
+  var legL = 100;
+
+  var headY = y - torsoH - headR;
+  g += dot(x, headY, headR, col); // Head
+
+  // Torso
+  g += line(x, y - torsoH, x, y, col, STROKE_W);
+
+  if (pose === 'sitting' || pose === 'smiling' || pose === 'confused') {
+    // Arms (relaxed for sitting, slightly raised for confused)
+    var armXOffset = (pose === 'confused' ? 70 : 80);
+    var armYOffset = (pose === 'confused' ? -10 : 60);
+    g += line(x - 40, y - torsoH + 30, x - armXOffset, y - torsoH + armYOffset, col, STROKE_W); // Left arm
+    g += line(x + 40, y - torsoH + 30, x + armXOffset, y - torsoH + armYOffset, col, STROKE_W); // Right arm
+    // Legs (bent for sitting)
+    g += line(x - 20, y, x - 60, y + 40, col, STROKE_W);
+    g += line(x + 20, y, x + 60, y + 40, col, STROKE_W);
+  } else if (pose === 'standing' || pose === 'disappointed') {
+    // Arms (down)
+    g += line(x - 40, y - torsoH + 30, x - 40, y + armL - 40, col, STROKE_W);
+    g += line(x + 40, y - torsoH + 30, x + 40, y + armL - 40, col, STROKE_W);
+    // Legs (straight)
+    g += line(x - 20, y, x - 20, y + legL, col, STROKE_W);
+    g += line(x + 20, y, x + 20, y + legL, col, STROKE_W);
+  }
+
+  // Gaze/expression details
+  if (pose === 'confused') {
+    g += line(x, headY - headR, x + 10, headY - headR - 20, WHITE, THIN_STROKE_W); // Gaze up
+  } else if (pose === 'smiling') {
+    g += line(x, headY - headR, x + 20, headY - headR + 10, WHITE, THIN_STROKE_W); // Gaze at clock
+  } else if (pose === 'disappointed') {
+    g += line(x, headY - headR, x, headY - headR + 20, WHITE, THIN_STROKE_W); // Head tilt down
+  }
+  g += '</g>';
+  return g;
+}
+
+// Dining table: x, y is center of tabletop
+function diningTable(x, y, w, h, col, op, pressureLines) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  // Tabletop
+  g += rrectStroke(x, y, w, h, 20, col, STROKE_W, op);
+  // Legs
+  g += line(x - w / 2 + 30, y + h / 2, x - w / 2 + 30, y + h / 2 + 120, col, STROKE_W);
+  g += line(x + w / 2 - 30, y + h / 2, x + w / 2 - 30, y + h / 2 + 120, col, STROKE_W);
+  if (pressureLines) {
+    var numLines = 8;
+    for (var i = 0; i < numLines; i++) {
+      var angle = i * (Math.PI * 2 / numLines);
+      var startX = x + Math.cos(angle) * (w / 2 - 10);
+      var startY = y + Math.sin(angle) * (h / 2 - 10);
+      var endX = x + Math.cos(angle) * (w / 2 + 80);
+      var endY = y + Math.sin(angle) * (h / 2 + 80);
+      g += line(startX, startY, endX, endY, col, THIN_STROKE_W, op * 0.4);
+    }
+  }
+  g += '</g>';
+  return g;
+}
+
+function plate(x, y, foodCol, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, 40, WHITE, THIN_STROKE_W * 2, op); // Plate rim
+  g += dot(x, y, 30, foodCol, op * 0.8); // Food
+  g += '</g>';
+  return g;
+}
+
+function checkIcon(x, y, op) {
+  op = (op == null ? 1 : op);
+  var w = 100, h = 70;
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, 10, WHITE, STROKE_W, op);
+  g += line(x - w / 2 + 20, y - h / 2 + 20, x + w / 2 - 20, y - h / 2 + 20, WHITE, THIN_STROKE_W, op);
+  g += line(x - w / 2 + 20, y - h / 2 + 40, x + w / 2 - 40, y - h / 2 + 40, WHITE, THIN_STROKE_W, op);
+  g += '</g>';
+  return g;
+}
+
+function questionMark(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var d = "M " + x + " " + (y - size) +
+          " A " + (size * 0.5) + " " + (size * 0.5) + " 0 1 1 " + (x + size * 0.5) + " " + (y - size * 0.5) +
+          " L " + (x + size * 0.2) + " " + (y + size * 0.1) +
+          " M " + x + " " + (y + size * 0.3);
+  return pathTag(d, col, STROKE_W, op);
+}
+
+function clockIcon(x, y, size, col, op, minuteHandAngle) {
+  op = (op == null ? 1 : op);
+  minuteHandAngle = minuteHandAngle == null ? Math.PI / 6 : minuteHandAngle; // Default to 1 o'clock
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, size, col, STROKE_W, op);
+  g += line(x, y, x + size * 0.6 * Math.cos(Math.PI / 2), y + size * 0.6 * Math.sin(Math.PI / 2), col, THIN_STROKE_W, op); // Hour hand (fixed at 3)
+  g += line(x, y, x + size * 0.8 * Math.cos(minuteHandAngle), y + size * 0.8 * Math.sin(minuteHandAngle), col, THIN_STROKE_W, op); // Minute hand
+  g += '</g>';
+  return g;
+}
+
+function dollarSignIcon(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var d = "M " + (x - size * 0.2) + " " + (y - size * 0.4) +
+          " Q " + (x - size * 0.5) + " " + (y - size * 0.4) + " " + (x - size * 0.5) + " " + (y - size * 0.1) +
+          " Q " + (x - size * 0.5) + " " + (y + size * 0.2) + " " + (x - size * 0.2) + " " + (y + size * 0.2) +
+          " Q " + (x + size * 0.5) + " " + (y + size * 0.2) + " " + (x + size * 0.5) + " " + (y - size * 0.1) +
+          " Q " + (x + size * 0.5) + " " + (y - size * 0.4) + " " + (x + size * 0.2) + " " + (y - size * 0.4) +
+          " M " + x + " " + (y - size * 0.6) + " L " + x + " " + (y + size * 0.6);
+  g += pathTag(d, col, STROKE_W, op);
+  g += '</g>';
+  return g;
+}
+
+function waiter(x, y, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" stroke="' + WHITE + '" stroke-width="' + STROKE_W + '" stroke-linecap="round">';
+  var headR = 25;
+  var torsoH = 100;
+  var armL = 70;
+  var legL = 90;
+
+  var headY = y - torsoH - headR;
+  g += dot(x, headY, headR, WHITE); // Head
+  g += line(x, y - torsoH, x, y, WHITE, STROKE_W); // Torso
+  g += line(x - 30, y - torsoH + 20, x - 30, y + armL - 30, WHITE, STROKE_W); // Left arm
+  g += line(x + 30, y - torsoH + 20, x + 30, y + armL - 30, WHITE, STROKE_W); // Right arm
+  g += line(x - 15, y, x - 15, y + legL, WHITE, STROKE_W); // Left leg
+  g += line(x + 15, y, x + 15, y + legL, WHITE, STROKE_W); // Right leg
+  g += '</g>';
+  return g;
+}
+
+function restaurantBackground(op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  // Wall panels/decor
+  var panelW = 180;
+  for (var i = 0; i < 6; i++) {
+    var x = 100 + i * panelW;
+    g += line(x, TOP, x, BOT, DIM, THIN_STROKE_W, 0.2);
+    g += line(x + panelW/2, TOP, x + panelW/2, BOT, DIM, THIN_STROKE_W, 0.1);
+  }
+  // Lights
+  g += dot(CX - 300, TOP + 50, 10, DIM, 0.3);
+  g += dot(CX + 300, TOP + 50, 10, DIM, 0.3);
+  g += '</g>';
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var headBob = Math.sin(u * Math.PI * 2) * 3; // Subtle movement
+  s += restaurantBackground(1);
+  s += diningTable(CX, TABLE_Y, TABLE_W, TABLE_H, WHITE, 1);
+  s += plate(YOU_X + 60, YOU_Y_SITTING + headBob + 10, WHITE, 1); // Plate with food
+  s += stickFigure(YOU_X, YOU_Y_SITTING + headBob, AMBER, 'sitting', 1);
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var waiter1X = lerp(W + 100, CX + 200, smooth(ramp(u, 0.1, 0.3)));
+  var waiter1Op = 1 - ramp(u, 0.4, 0.6); // Waiter clears plate and leaves
+  var plateY = lerp(YOU_Y_SITTING + 10, YOU_Y_SITTING - 80, smooth(ramp(u, 0.1, 0.3)));
+  var plateOp = 1 - ramp(u, 0.3, 0.4);
+
+  var waiter2X = lerp(W + 100, CX + 100, smooth(ramp(u, 0.5, 0.7)));
+  var checkOp = ramp(u, 0.6, 0.8);
+
+  s += restaurantBackground(1);
+  s += diningTable(CX, TABLE_Y, TABLE_W, TABLE_H, WHITE, 1);
+  s += stickFigure(YOU_X, YOU_Y_SITTING, AMBER, 'sitting', 1);
+
+  if (plateOp > 0.01) s += plate(YOU_X + 60, plateY, WHITE, plateOp);
+  if (waiter1Op > 0.01) s += waiter(waiter1X, YOU_Y_SITTING + 50, waiter1Op);
+
+  if (checkOp > 0.01) s += checkIcon(CX + 100, TABLE_Y - 50, checkOp);
+  if (checkOp > 0.01 && u < 0.8) s += waiter(waiter2X, YOU_Y_SITTING + 50, checkOp); // Waiter places check
+
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var tableColor = lerp(WHITE, CORAL, smooth(ramp(u, 0.1, 0.4)));
+  var pressureOp = smooth(ramp(u, 0.3, 0.7));
+  var qMarkOp = smooth(ramp(u, 0.2, 0.5)) * (1 - smooth(ramp(u, 0.8, 1.0)));
+
+  s += restaurantBackground(1);
+  s += diningTable(CX, TABLE_Y, TABLE_W, TABLE_H, tableColor, 1, pressureOp > 0.05);
+  s += stickFigure(YOU_X, YOU_Y_SITTING, AMBER, 'confused', 1);
+  if (qMarkOp > 0.01) s += questionMark(YOU_X + 80, YOU_Y_SITTING - 180, 50, WHITE, qMarkOp);
+
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var zoom = lerp(1.0, 0.6, smooth(ramp(u, 0.0, 0.4)));
+  var tableColor = lerp(CORAL, BLUE, smooth(ramp(u, 0.0, 0.2)));
+  var mainTableY = lerp(TABLE_Y, CY + 100, smooth(ramp(u, 0.0, 0.4)));
+  var mainTableX = lerp(CX, CX - 200, smooth(ramp(u, 0.0, 0.4)));
+
+  var otherTablesOp = smooth(ramp(u, 0.3, 0.6));
+  var clockOp = smooth(ramp(u, 0.4, 0.7));
+  var dollarOp = smooth(ramp(u, 0.5, 0.8));
+  var lineOp = smooth(ramp(u, 0.6, 0.9));
+
+  s += '<g ' + camera(zoom, 0, 0) + '>';
+  s += restaurantBackground(1);
+
+  // Other tables
+  var tableSpacingX = 300, tableSpacingY = 400;
+  var otherTableW = TABLE_W * 0.7, otherTableH = TABLE_H * 0.7;
+  var figureScale = 0.7;
+  var figureYOffset = 70;
+
+  if (otherTablesOp > 0.01) {
+    // Top row
+    s += diningTable(mainTableX, mainTableY - tableSpacingY, otherTableW, otherTableH, WHITE, otherTablesOp);
+    s += stickFigure(mainTableX - 120 * figureScale, mainTableY - tableSpacingY - figureYOffset * figureScale, DIM, 'sitting', otherTablesOp * 0.7);
+    s += diningTable(mainTableX + tableSpacingX, mainTableY - tableSpacingY, otherTableW, otherTableH, WHITE, otherTablesOp);
+    s += stickFigure(mainTableX + tableSpacingX - 120 * figureScale, mainTableY - tableSpacingY - figureYOffset * figureScale, DIM, 'sitting', otherTablesOp * 0.7);
+    // Bottom row
+    s += diningTable(mainTableX + tableSpacingX, mainTableY + tableSpacingY, otherTableW, otherTableH, WHITE, otherTablesOp);
+    s += stickFigure(mainTableX + tableSpacingX - 120 * figureScale, mainTableY + tableSpacingY - figureYOffset * figureScale, DIM, 'sitting', otherTablesOp * 0.7);
+    s += diningTable(mainTableX, mainTableY + tableSpacingY, otherTableW, otherTableH, WHITE, otherTablesOp);
+    s += stickFigure(mainTableX - 120 * figureScale, mainTableY + tableSpacingY - figureYOffset * figureScale, DIM, 'sitting', otherTablesOp * 0.7);
+  }
+
+  // Main table
+  s += diningTable(mainTableX, mainTableY, TABLE_W, TABLE_H, tableColor, 1);
+  s += stickFigure(YOU_X, YOU_Y_SITTING, AMBER, 'sitting', 1);
+
+  // Clock on main table
+  if (clockOp > 0.01) s += clockIcon(mainTableX + 100, mainTableY - 50, 40, BLUE, clockOp);
+
+  // Revenue counter
+  if (dollarOp > 0.01) s += dollarSignIcon(CX, TOP + 100, 60, BLUE, dollarOp);
+
+  // Connecting lines
+  if (lineOp > 0.01) {
+    s += line(mainTableX, mainTableY - TABLE_H / 2, CX, TOP + 100, BLUE, THIN_STROKE_W, lineOp * 0.6);
+    s += line(mainTableX, mainTableY - tableSpacingY - otherTableH / 2, CX, TOP + 100, BLUE, THIN_STROKE_W, lineOp * 0.4);
+    s += line(mainTableX + tableSpacingX, mainTableY - tableSpacingY - otherTableH / 2, CX, TOP + 100, BLUE, THIN_STROKE_W, lineOp * 0.4);
+    s += line(mainTableX + tableSpacingX, mainTableY + tableSpacingY - otherTableH / 2, CX, TOP + 100, BLUE, THIN_STROKE_W, lineOp * 0.4);
+    s += line(mainTableX, mainTableY + tableSpacingY - otherTableH / 2, CX, TOP + 100, BLUE, THIN_STROKE_W, lineOp * 0.4);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var standUp = smooth(ramp(u, 0.0, 0.3));
+  var youY = lerp(YOU_Y_SITTING, YOU_Y_STANDING, standUp);
+  var tableColor = CORAL;
+  var pressureOp = 1 - smooth(ramp(u, 0.7, 1.0)); // Pressure fades slightly at end
+  var tablePulse = 1 + Math.sin(u * Math.PI * 6) * 0.05 * pulse(u, 0.5, 0.3); // Table pulses once
+
+  s += restaurantBackground(1);
+  s += diningTable(CX, TABLE_Y, TABLE_W * tablePulse, TABLE_H * tablePulse, tableColor, 1, pressureOp > 0.05);
+  s += stickFigure(YOU_X, youY, AMBER, 'disappointed', 1);
+
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var settleDown = smooth(ramp(u, 0.0, 0.3));
+  var youY = lerp(YOU_Y_STANDING, YOU_Y_SITTING, settleDown);
+  var tableColor = WHITE;
+  var clockFadeIn = smooth(ramp(u, 0.5, 0.8));
+  var clockMinuteHandAngle = Math.PI / 6 + (Math.floor(u * 10) % 2) * Math.PI / 12; // Simple tick animation
+
+  s += restaurantBackground(1);
+  s += diningTable(CX, TABLE_Y, TABLE_W, TABLE_H, tableColor, 1);
+  s += stickFigure(YOU_X, youY, AMBER, 'smiling', 1);
+
+  if (clockFadeIn > 0.01) {
+    var clockSize = lerp(0, 30, clockFadeIn);
+    s += clockIcon(CX + 100, TABLE_Y - 50, clockSize, BLUE, clockFadeIn, clockMinuteHandAngle);
+  }
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

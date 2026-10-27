@@ -1,0 +1,15 @@
+{
+  "id": "why-you-dont-see-ads-for-things-you-search",
+  "slug": "2026-10-27__why-you-dont-see-ads-for-things-you-search",
+  "title_working": "Why You Don't See Ads For Things You Search",
+  "system": "ad algorithms optimizing for future purchases over immediate searches",
+  "cluster": "platforms-and-algorithms",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-10-27T12:07:02+00:00",
+  "produced_at": "2026-10-27T12:10:49+00:00",
+  "verify": "PASS",
+  "takeaway": "Ad algorithms are designed to predict your future needs or someone else's, not merely echo your last search.",
+  "animation_source": "llm"
+}

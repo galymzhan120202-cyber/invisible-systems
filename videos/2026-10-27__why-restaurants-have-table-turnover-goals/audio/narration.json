@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You're at your favorite restaurant, soaking in the ambiance. The food is great, the company is perfect, and you want to linger all evening.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "Suddenly, the subtle cues begin: plates whisked away almost before you're done, the check appearing without you even asking for it.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "You might wonder if the staff is being rude, or perhaps just overly efficient, but you feel a gentle, yet firm, push to finish up.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "Then it clicks: each table isn't just a place to eat, it's a valuable resource. Every minute it's empty, or occupied by finished diners, is lost potential revenue.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "The cost? Your relaxed dining experience is subtly rushed. That lingering conversation cut short, the feeling of being hurried out the door.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "Next time you're out, you'll see the invisible timer ticking on your table. The restaurant isn't just serving food; it's orchestrating a silent dance of turnover.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]
