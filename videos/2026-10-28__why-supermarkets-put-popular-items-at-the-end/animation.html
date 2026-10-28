@@ -1,0 +1,570 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Supermarkets Put Popular Items At The End</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary elements
+var BLUE  = "#4C86F0";              // signal blue  -> the system / path
+var AMBER = "#F2A93B";              // warm amber   -> YOU / desire
+var CORAL = "#FF5B5B";              // coral red    -> confusion / naive model
+
+var DUR = 60;
+window.__duration = DUR;
+
+// Stick figure and cart dimensions
+var SF_H = 220; // Stick figure height
+var SF_W = 100; // Stick figure width
+var CART_W = 140;
+var CART_H = 100;
+var SF_Y_BASE = BOT - 200; // Resting Y for stick figure's feet
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, fill) {
+  return '<path d="' + d + '" fill="' + (fill || 'none') + '" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom elements ---------- */
+
+// Stick figure: x, y (feet position), scale, headTurn (-1:left, 0:forward, 1:right), legPhase (0-1 for walk cycle), armPhase (0-1 for arm swing)
+function stickFigure(x, y, scale, headTurn, legPhase, armPhase, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ') scale(' + scale + ')">';
+  var bodyY = -SF_H * 0.7; // body top
+  var headR = SF_H * 0.1;
+  var armLen = SF_H * 0.4;
+  var legLen = SF_H * 0.5;
+
+  // Head
+  g += dot(0, bodyY - headR, headR, WHITE);
+
+  // Body
+  g += line(0, bodyY, 0, -legLen, WHITE, 8);
+
+  // Arms (swinging)
+  var armX = Math.sin(armPhase * Math.PI * 2) * 20;
+  var armY = Math.cos(armPhase * Math.PI * 2) * 10;
+  g += line(0, bodyY + 20, armX - 25, bodyY + armY + armLen * 0.8, WHITE, 8); // Left arm
+  g += line(0, bodyY + 20, -armX + 25, bodyY - armY + armLen * 0.8, WHITE, 8); // Right arm
+
+  // Legs (walking)
+  var legSwingX = Math.sin(legPhase * Math.PI * 2) * 25;
+  var legSwingY = Math.abs(Math.sin(legPhase * Math.PI)) * 20; // Lift
+  g += line(0, -legLen, legSwingX - 20, -legLen + legSwingY + legLen * 0.8, WHITE, 8); // Left leg
+  g += line(0, -legLen, -legSwingX + 20, -legLen - legSwingY + legLen * 0.8, WHITE, 8); // Right leg
+
+  // Gaze direction
+  if (headTurn !== 0) {
+    g += line(0, bodyY - headR, (headTurn > 0 ? 1 : -1) * headR * 0.6, bodyY - headR * 0.4, WHITE, 5);
+  }
+
+  g += '</g>';
+  return g;
+}
+
+// Shopping cart: x, y (bottom-center), scale, contents (array of {x,y,w,h} for impulse buys), op
+function shoppingCart(x, y, scale, contents, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ') scale(' + scale + ')">';
+  var cartBodyY = -CART_H * 0.6; // Top of cart body
+  var wheelR = CART_H * 0.12;
+
+  // Cart body outline
+  g += rrectStroke(0, cartBodyY, CART_W, CART_H, 10, AMBER, 8);
+  // Handle
+  g += line(CART_W / 2 - 10, cartBodyY - CART_H / 2 + 10, CART_W / 2 + 20, cartBodyY - CART_H / 2 + 10, AMBER, 8);
+  // Wheels
+  g += dot(-CART_W / 2 + 20, cartBodyY + CART_H / 2 - wheelR, wheelR, AMBER);
+  g += dot(CART_W / 2 - 20, cartBodyY + CART_H / 2 - wheelR, wheelR, AMBER);
+
+  // Contents
+  if (contents && contents.length > 0) {
+    for (var i = 0; i < contents.length; i++) {
+      var c = contents[i];
+      g += rrect(c.x, c.y, c.w, c.h, c.rad || 6, AMBER, c.op || 1);
+    }
+  }
+
+  g += '</g>';
+  return g;
+}
+
+// Milk carton icon: x, y (bottom-center), size, color, op
+function milkCarton(x, y, size, color, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ') scale(' + (size / 100) + ')">';
+  g += rrect(0, -30, 60, 80, 8, color); // Body
+  g += rrect(0, -80, 40, 20, 4, color); // Spout base
+  g += pathTag("M -20 -90 L 20 -90 L 0 -110 Z", color, 0, 1, color); // Spout top triangle
+  g += '</g>';
+  return g;
+}
+
+// Question mark icon: x, y (center), size, color, op
+function questionMark(x, y, size, color, op) {
+  op = (op == null ? 1 : op);
+  var d = "M " + (x - size * 0.2) + " " + (y - size * 0.3) +
+          " A " + (size * 0.2) + " " + (size * 0.2) + " 0 1 1 " + (x + size * 0.2) + " " + (y - size * 0.3) +
+          " L " + (x + size * 0.1) + " " + (y + size * 0.1) +
+          " L " + (x + size * 0.1) + " " + (y + size * 0.2) +
+          " M " + x + " " + (y + size * 0.35) + " L " + x + " " + (y + size * 0.45);
+  return pathTag(d, color, size * 0.12, op);
+}
+
+// Overhead stick figure (simpler)
+function stickFigureOverhead(x, y, scale, color, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ') scale(' + scale + ')">';
+  g += dot(0, 0, 18, color); // Head
+  g += line(0, 0, 0, 30, color, 8); // Body
+  g += line(0, 10, -20, 25, color, 8); // Arms
+  g += line(0, 10, 20, 25, color, 8);
+  g += line(0, 30, -15, 50, color, 8); // Legs
+  g += line(0, 30, 15, 50, color, 8);
+  g += '</g>';
+  return g;
+}
+
+// Overhead shopping cart (simpler)
+function shoppingCartOverhead(x, y, scale, color, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ') scale(' + scale + ')">';
+  g += rrectStroke(0, 0, 40, 30, 5, color, 6);
+  g += dot(-15, 12, 5, color);
+  g += dot(15, 12, 5, color);
+  g += '</g>';
+  return g;
+}
+
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var sfX = lerp(-200, CX - 150, easeOut(ramp(u, 0.0, 0.4)));
+  var sfY = SF_Y_BASE;
+  var walkPhase = (u * 2) % 1;
+  var cameraShiftX = lerp(0, -100, smooth(ramp(u, 0.0, 0.5)));
+
+  s += '<g ' + camera(1.0, cameraShiftX, 0) + '>';
+
+  // Entrance arch
+  s += line(CX - 400, BOT, CX - 400, TOP, WHITE, 8, 0.3);
+  s += line(CX - 280, BOT, CX - 280, TOP, WHITE, 8, 0.3);
+  s += pathTag("M " + (CX - 400) + " " + TOP + " A 60 60 0 0 1 " + (CX - 340) + " " + (TOP - 60) + " A 60 60 0 0 1 " + (CX - 280) + " " + TOP, WHITE, 8, 0.3);
+
+  // Faint aisle lines
+  s += line(CX + 100, BOT, CX + 100, TOP, WHITE, 4, 0.1);
+  s += line(CX + 300, BOT, CX + 300, TOP, WHITE, 4, 0.1);
+
+  // Milk carton icon, far right, fades in
+  var milkOp = ramp(u, 0.2, 0.6);
+  s += milkCarton(CX + 450, SF_Y_BASE - 10, 100, WHITE, milkOp);
+
+  // Stick figure and cart
+  s += shoppingCart(sfX + CART_W / 2 + 20, sfY, 1.0, [], 1);
+  s += stickFigure(sfX, sfY, 1.0, 0, walkPhase, walkPhase, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var sfX = lerp(CX - 150, CX + 200, easeOut(u));
+  var sfY = SF_Y_BASE;
+  var walkPhase = (u * 3) % 1;
+  var cameraShiftX = lerp(-100, -300, smooth(u));
+
+  s += '<g ' + camera(1.0, cameraShiftX, 0) + '>';
+
+  // Abstract shelf shapes
+  var shelfYOffset = -u * 500; // Scrolls shelves
+  for (var i = 0; i < 4; i++) {
+    var shelfY = TOP + 200 + i * 300 + shelfYOffset;
+    while (shelfY < TOP) shelfY += 1200;
+    while (shelfY > BOT + 200) shelfY -= 1200;
+    s += rrectStroke(CX + 100, shelfY, 180, 200, 10, WHITE, 6, 0.3);
+    s += rrectStroke(CX + 300, shelfY + 100, 180, 200, 10, WHITE, 6, 0.3);
+  }
+
+  // Milk carton icon, further right, almost off-screen
+  s += milkCarton(CX + 650, SF_Y_BASE - 10, 100, WHITE, 1);
+
+  // White dashed path behind stick figure
+  var pathStart = CX - 150;
+  var pathEnd = sfX - 50;
+  var pathY = sfY - 50;
+  var dashPhase = (u * 2) % 1;
+  var dashLen = 80, dashGap = 120;
+  for (var x = pathStart - dashGap + dashPhase * dashGap; x < pathEnd; x += dashGap) {
+    var segmentEnd = Math.min(x + dashLen, pathEnd);
+    if (segmentEnd > x) {
+      s += line(x, pathY, segmentEnd, pathY, WHITE, 8, 0.4);
+    }
+  }
+
+  // Stick figure and cart
+  s += shoppingCart(sfX + CART_W / 2 + 20, sfY, 1.0, [], 1);
+  s += stickFigure(sfX, sfY, 1.0, 0, walkPhase, walkPhase, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var sfX = CX + 200;
+  var sfY = SF_Y_BASE;
+  var headTurn = Math.sin(u * Math.PI * 2) > 0 ? 1 : -1; // Looks left then right
+  var zoom = lerp(1.0, 1.08, smooth(ramp(u, 0.1, 0.4)));
+  var cameraShiftY = lerp(0, -60, smooth(ramp(u, 0.1, 0.4)));
+
+  s += '<g ' + camera(zoom, -300, cameraShiftY) + '>';
+
+  // Confusing converging white lines (aisles)
+  var aisleOp = lerp(0.1, 0.8, smooth(ramp(u, 0.0, 0.3))) * (1 - smooth(ramp(u, 0.8, 1.0)));
+  var aisleBend = Math.sin(u * Math.PI * 3) * 100; // Wobbly aisles
+  s += pathTag("M " + (CX - 150) + " " + TOP + " Q " + (CX - 150 + aisleBend) + " " + CY + " " + (CX - 150) + " " + BOT, WHITE, 7, aisleOp);
+  s += pathTag("M " + (CX + 50) + " " + TOP + " Q " + (CX + 50 - aisleBend) + " " + CY + " " + (CX + 50) + " " + BOT, WHITE, 7, aisleOp);
+  s += pathTag("M " + (CX + 250) + " " + TOP + " Q " + (CX + 250 + aisleBend) + " " + CY + " " + (CX + 250) + " " + BOT, WHITE, 7, aisleOp);
+  s += pathTag("M " + (CX + 450) + " " + TOP + " Q " + (CX + 450 - aisleBend) + " " + CY + " " + (CX + 450) + " " + BOT, WHITE, 7, aisleOp);
+
+  // Milk carton icon, still far
+  s += milkCarton(CX + 650, SF_Y_BASE - 10, 100, WHITE, 0.3);
+
+  // Stick figure and cart
+  s += shoppingCart(sfX + CART_W / 2 + 20, sfY, 1.0, [], 1);
+  s += stickFigure(sfX, sfY, 1.0, headTurn, 0, 0, 1);
+
+  // Coral red question mark icon above head
+  var qmOp = smooth(ramp(u, 0.3, 0.5)) * (1 - smooth(ramp(u, 0.7, 0.9)));
+  var qmY = lerp(SF_Y_BASE - SF_H * 1.5, SF_Y_BASE - SF_H * 1.2, smooth(ramp(u, 0.3, 0.5)));
+  s += questionMark(sfX, qmY, 80, CORAL, qmOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var transformProg = smooth(ramp(u, 0.0, 0.3)); // For camera and layout transform
+  var pathDrawProg = smooth(ramp(u, 0.3, 0.8)); // For path drawing
+
+  // Camera transform to overhead view
+  var camScale = lerp(1.08, 0.5, transformProg);
+  var camTX = lerp(-300, 0, transformProg);
+  var camTY = lerp(-60, 0, transformProg);
+
+  s += '<g ' + camera(camScale, camTX, camTY) + '>';
+
+  // Overhead grid-like supermarket layout
+  var gridX = CX - 300, gridY = CY - 400, gridW = 600, gridH = 800;
+  var aisleCountX = 3, aisleCountY = 4;
+  var aisleWidth = 100;
+  var aisleGapX = (gridW - aisleCountX * aisleWidth) / (aisleCountX + 1);
+  var aisleGapY = (gridH - aisleCountY * aisleWidth) / (aisleCountY + 1);
+
+  // Draw aisles
+  var aisleOp = lerp(0.1, 0.3, transformProg);
+  for (var i = 0; i < aisleCountX; i++) {
+    for (var j = 0; j < aisleCountY; j++) {
+      var x = gridX + aisleGapX * (i + 1) + aisleWidth * i + aisleWidth / 2;
+      var y = gridY + aisleGapY * (j + 1) + aisleWidth * j + aisleWidth / 2;
+      s += rrect(x, y, aisleWidth, aisleWidth, 10, WHITE, aisleOp);
+    }
+  }
+
+  // Entrance at bottom-left
+  var entranceX = gridX + aisleWidth / 2 + 20;
+  var entranceY = gridY + gridH - 50;
+  s += rrect(entranceX, entranceY, 80, 40, 10, WHITE, 0.5 * transformProg);
+
+  // Destination at top-right
+  var destX = gridX + gridW - aisleWidth / 2 - 20;
+  var destY = gridY + 50;
+  s += rrect(destX, destY, 80, 40, 10, BLUE, 0.5 * transformProg);
+  s += milkCarton(destX, destY + 10, 60, WHITE, transformProg);
+
+  // Signal blue path draws dynamically
+  var pathPoints = [
+    {x: entranceX, y: entranceY},
+    {x: entranceX, y: gridY + gridH - 200},
+    {x: gridX + aisleWidth + aisleGapX * 1.5, y: gridY + gridH - 200},
+    {x: gridX + aisleWidth + aisleGapX * 1.5, y: gridY + 200},
+    {x: gridX + gridW - aisleWidth / 2 - 20, y: gridY + 200},
+    {x: destX, y: destY}
+  ];
+
+  var pathD = "M " + pathPoints[0].x + " " + pathPoints[0].y;
+  var totalPathLen = 0;
+  var segmentLengths = [];
+  for (var i = 1; i < pathPoints.length; i++) {
+    pathD += " L " + pathPoints[i].x + " " + pathPoints[i].y;
+    var dx = pathPoints[i].x - pathPoints[i - 1].x;
+    var dy = pathPoints[i].y - pathPoints[i - 1].y;
+    var len = Math.sqrt(dx * dx + dy * dy);
+    segmentLengths.push(len);
+    totalPathLen += len;
+  }
+
+  var currentPathLen = totalPathLen * pathDrawProg;
+  var currentD = "M " + pathPoints[0].x + " " + pathPoints[0].y;
+  var accumulatedLen = 0;
+  for (var i = 0; i < segmentLengths.length; i++) {
+    if (currentPathLen > accumulatedLen) {
+      var segmentStart = pathPoints[i];
+      var segmentEnd = pathPoints[i + 1];
+      var segmentRemaining = currentPathLen - accumulatedLen;
+      if (segmentRemaining >= segmentLengths[i]) {
+        currentD += " L " + segmentEnd.x + " " + segmentEnd.y;
+      } else {
+        var t = segmentRemaining / segmentLengths[i];
+        var x = lerp(segmentStart.x, segmentEnd.x, t);
+        var y = lerp(segmentStart.y, segmentEnd.y, t);
+        currentD += " L " + x + " " + y;
+        break;
+      }
+    }
+    accumulatedLen += segmentLengths[i];
+  }
+  s += pathTag(currentD, BLUE, 14, 1);
+
+  // Stick figure and cart appear at entrance
+  var sfScale = lerp(1.0, 0.5, transformProg);
+  var sfX = lerp(CX + 200, entranceX - 20, transformProg);
+  var sfY = lerp(SF_Y_BASE, entranceY + 20, transformProg);
+  s += shoppingCartOverhead(sfX + 20, sfY + 10, sfScale, AMBER, 1);
+  s += stickFigureOverhead(sfX, sfY, sfScale, WHITE, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var focusScale = lerp(0.5, 0.9, smooth(u));
+  var focusTX = lerp(0, -100, smooth(u));
+  var focusTY = lerp(0, 50, smooth(u));
+
+  s += '<g ' + camera(focusScale, focusTX, focusTY) + '>';
+
+  // Overhead grid-like supermarket layout (faded)
+  var gridX = CX - 300, gridY = CY - 400, gridW = 600, gridH = 800;
+  var aisleCountX = 3, aisleCountY = 4;
+  var aisleWidth = 100;
+  var aisleGapX = (gridW - aisleCountX * aisleWidth) / (aisleCountX + 1);
+  var aisleGapY = (gridH - aisleCountY * aisleWidth) / (aisleCountY + 1);
+
+  for (var i = 0; i < aisleCountX; i++) {
+    for (var j = 0; j < aisleCountY; j++) {
+      var x = gridX + aisleGapX * (i + 1) + aisleWidth * i + aisleWidth / 2;
+      var y = gridY + aisleGapY * (j + 1) + aisleWidth * j + aisleWidth / 2;
+      s += rrect(x, y, aisleWidth, aisleWidth, 10, WHITE, 0.1);
+    }
+  }
+
+  // Destination at top-right (highlighted)
+  var destX = gridX + gridW - aisleWidth / 2 - 20;
+  var destY = gridY + 50;
+  s += rrect(destX, destY, 80, 40, 10, BLUE, 0.6);
+  s += milkCarton(destX, destY + 10, 60, WHITE, 1);
+
+  // Signal blue path (static, faded)
+  var pathPoints = [
+    {x: gridX + aisleWidth / 2 + 20, y: gridY + gridH - 50},
+    {x: gridX + aisleWidth / 2 + 20, y: gridY + gridH - 200},
+    {x: gridX + aisleWidth + aisleGapX * 1.5, y: gridY + gridH - 200},
+    {x: gridX + aisleWidth + aisleGapX * 1.5, y: gridY + 200},
+    {x: gridX + gridW - aisleWidth / 2 - 20, y: gridY + 200},
+    {x: destX, y: destY}
+  ];
+  var pathD = "M " + pathPoints[0].x + " " + pathPoints[0].y;
+  for (var i = 1; i < pathPoints.length; i++) {
+    pathD += " L " + pathPoints[i].x + " " + pathPoints[i].y;
+  }
+  s += pathTag(pathD, BLUE, 14, 0.3);
+
+  // Stick figure and cart at destination
+  var sfX = destX - 20;
+  var sfY = destY + 20;
+  s += stickFigureOverhead(sfX, sfY, 0.9, WHITE, 1);
+
+  // Cart now contains several small, warm amber abstract shapes (impulse buys)
+  var cartContents = [];
+  var popInProg = smooth(ramp(u, 0.3, 0.8));
+  var numItems = Math.floor(popInProg * 5);
+  for (var i = 0; i < numItems; i++) {
+    var itemX = rnd(i) * 20 - 10;
+    var itemY = rnd(i + 10) * 15 - 10;
+    var itemW = rnd(i + 20) * 15 + 15;
+    var itemH = rnd(i + 30) * 10 + 10;
+    cartContents.push({x: itemX, y: itemY, w: itemW, h: itemH});
+  }
+  s += shoppingCartOverhead(sfX + 20, sfY + 10, 0.9, AMBER, 1, cartContents);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var pullBackProg = smooth(ramp(u, 0.0, 0.6));
+  var nodProg = smooth(ramp(u, 0.7, 1.0));
+
+  var camScale = lerp(0.9, 1.0, pullBackProg);
+  var camTX = lerp(-100, 0, pullBackProg);
+  var camTY = lerp(50, 0, pullBackProg);
+
+  s += '<g ' + camera(camScale, camTX, camTY) + '>';
+
+  // Supermarket layout (highlighted signal blue)
+  var gridX = CX - 300, gridY = CY - 400, gridW = 600, gridH = 800;
+  var aisleCountX = 3, aisleCountY = 4;
+  var aisleWidth = 100;
+  var aisleGapX = (gridW - aisleCountX * aisleWidth) / (aisleCountX + 1);
+  var aisleGapY = (gridH - aisleCountY * aisleWidth) / (aisleCountY + 1);
+
+  s += rrect(CX, CY, gridW + 100, gridH + 100, 20, BLUE, 0.2); // Overall highlight
+
+  for (var i = 0; i < aisleCountX; i++) {
+    for (var j = 0; j < aisleCountY; j++) {
+      var x = gridX + aisleGapX * (i + 1) + aisleWidth * i + aisleWidth / 2;
+      var y = gridY + aisleGapY * (j + 1) + aisleWidth * j + aisleWidth / 2;
+      s += rrect(x, y, aisleWidth, aisleWidth, 10, WHITE, 0.2);
+    }
+  }
+
+  // Entrance at bottom-left
+  var entranceX = gridX + aisleWidth / 2 + 20;
+  var entranceY = gridY + gridH - 50;
+  s += rrect(entranceX, entranceY, 80, 40, 10, WHITE, 0.5);
+
+  // Destination at top-right
+  var destX = gridX + gridW - aisleWidth / 2 - 20;
+  var destY = gridY + 50;
+  s += rrect(destX, destY, 80, 40, 10, BLUE, 0.6);
+  s += milkCarton(destX, destY + 10, 60, WHITE, 1);
+
+  // Path clearly visible
+  var pathPoints = [
+    {x: entranceX, y: entranceY},
+    {x: entranceX, y: gridY + gridH - 200},
+    {x: gridX + aisleWidth + aisleGapX * 1.5, y: gridY + gridH - 200},
+    {x: gridX + aisleWidth + aisleGapX * 1.5, y: gridY + 200},
+    {x: gridX + gridW - aisleWidth / 2 - 20, y: gridY + 200},
+    {x: destX, y: destY}
+  ];
+  var pathD = "M " + pathPoints[0].x + " " + pathPoints[0].y;
+  for (var i = 1; i < pathPoints.length; i++) {
+    pathD += " L " + pathPoints[i].x + " " + pathPoints[i].y;
+  }
+  s += pathTag(pathD, BLUE, 14, 1);
+
+  // Stick figure with cart at original entrance, looking back
+  var sfScale = lerp(0.9, 1.0, pullBackProg);
+  var sfX = lerp(destX - 20, entranceX - 20, pullBackProg);
+  var sfY = lerp(destY + 20, entranceY + 20, pullBackProg);
+  var headTurn = lerp(0, 1, pullBackProg); // Turns to look back
+  var nodOffset = Math.sin(nodProg * Math.PI * 2) * 10; // Nods slightly
+
+  s += shoppingCartOverhead(sfX + 20, sfY + 10 + nodOffset, sfScale, AMBER, 1);
+  s += stickFigureOverhead(sfX, sfY + nodOffset, sfScale, WHITE, 1);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

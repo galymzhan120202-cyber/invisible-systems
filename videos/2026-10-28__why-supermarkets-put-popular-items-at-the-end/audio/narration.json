@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You enter the supermarket, just needing milk. A quick grab and go, that's the plan. Pure efficiency, a simple routine.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "But the milk isn't upfront. You walk past produce, snacks, then cleaning supplies. Your 'quick trip' stretches, deeper into the store.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "Why this layout? Bad design? Random? You want your milk, but it feels like a deliberate maze, testing patience.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "Then it clicks. Essentials like milk and bread are always at the back. It's strategic; stores ensure you pass *every* tempting product.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "This system maximizes exposure. Each extra step offers impulse buy chances, transforming your focused mission into a larger, unplanned cart.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "Next time you trek to the back, you'll see the journey differently. You're not just shopping; you're navigating an invisible system.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

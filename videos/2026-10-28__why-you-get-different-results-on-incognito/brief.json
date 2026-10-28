@@ -1,0 +1,15 @@
+{
+  "id": "why-you-get-different-results-on-incognito",
+  "slug": "2026-10-28__why-you-get-different-results-on-incognito",
+  "title_working": "Why You Get Different Results on Incognito",
+  "system": "search engine personalization even without cookies",
+  "cluster": "platforms-and-algorithms",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-10-28T12:43:13+00:00",
+  "produced_at": "2026-10-28T12:46:59+00:00",
+  "verify": "PASS",
+  "takeaway": "Even in Incognito mode, search engines use visible data points like your IP and location to personalize your search results, meaning you're still in a tailored information bubble.",
+  "animation_source": "llm"
+}

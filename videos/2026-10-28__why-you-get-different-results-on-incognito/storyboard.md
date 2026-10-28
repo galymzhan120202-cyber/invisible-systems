@@ -1,0 +1,22 @@
+# Why You Get Different Results on Incognito
+
+- **System:** Search engine personalization even without cookies
+- **Narrator:** Bright, energetic adult-female voice (e.g., AvaNeural)
+- **Palette:** `warm amber` (user, input, expectation), `coral red` (naive model, perceived trickery), `signal blue` (system, data points, personalization bubble)
+- **Hero Element:** A search bar with a magnifying glass icon, which transforms into other representations of the search process and data.
+
+| # | Time | Story beat | Stick-figure scene | Motion / camera / transition | English VO | SFX |
+|---|---|---|---|---|---|---|
+| 1 | 0–10s | **YOU + NEED:** Expecting objective results. | A stick figure (warm amber) sits at a simple desk, typing into a glowing search bar (warm amber). Below it, a few identical, grey result cards appear. | Camera focused on the desk and search bar. Typing animation, then results pop into view. | Searching online for a product or information, you expect objective, relevant results, believing the internet a neutral source. | `focus.mp3` (0.6s), `complete-done.mp3` (2.5s) |
+| 2 | 10–20s | **GO:** Trying Incognito for unbiased search. | The stick figure clicks a button labeled with an 'eye with a slash' icon (warm amber). The screen changes to a darker shade, and the search bar gains a small incognito mask icon (warm amber). | Camera pans slightly to the button, then focuses back on the changing screen and search bar. | A friend suggests: "Try Incognito for unbiased results!" You open a private window, shedding your history for a fresh start. | `click-soft.mp3` (10.6s), `whoosh-fast.mp3` (12.0s) |
+| 3 | 20–30s | **SEARCH:** Different results, confusion. | The stick figure types the *same* query into the Incognito search bar. Below, new result cards appear, but they are subtly different in content/order (coral red highlights on some). The stick figure shows confusion. | The previous grey results slide away as the new results appear. A coral red pulsating outline briefly highlights the *difference* between the new and old sets of results (off-screen, implied comparison). | You type the exact same query. The results are different. You wonder if a hidden cookie or cached page is tricking you. | `complete-done.mp3` (21.0s), `focus.mp3` (23.5s) |
+| 4 | 30–40s | **FIND:** The system's actual data points. | The search bar morphs into a network diagram (signal blue lines and nodes). Nodes represent IP address, device type, browser fingerprint, and location. These connect to a central 'profile' node (signal blue). | The search bar dissolves into abstract data nodes, which then visibly connect with signal blue lines, forming a temporary profile. | The system knows. Even in Incognito, your IP, device, browser, and location are visible. These create a temporary, personalized profile for search engines. | `transform.mp3` (30.8s), `whoosh.mp3` (33.5s) |
+| 5 | 40–50s | **TAKE:** The personalized bubble. | The network diagram collapses around the stick figure, forming a translucent, spherical 'bubble' (signal blue outline). Inside this bubble, new search results (still slightly tailored) appear. The stick figure looks slightly trapped. | The network nodes quickly coalesce and form a signal blue sphere around the stick figure. Results appear *inside* this sphere. | This unseen system tailors your results, showing what it thinks you want, not always the objective best. Your personalized bubble follows you into "private" mode. | `stack-collapse.mp3` (40.5s), `focus.mp3` (43.0s) |
+| 6 | 50–60s | **RETURN + CHANGE:** New understanding. | The bubble dissolves. The stick figure is back at the desk, looking at the standard search bar. The expression is now one of understanding, a subtle nod. | The signal blue bubble dissolves. The scene returns to the desk and search bar from scene 1. The stick figure's posture suggests insight. | Next time you compare options or research, remember Incognito isn't a blank slate. You're still navigating a world shaped for you. | `complete-done.mp3` (51.0s), `click-soft.mp3` (54.0s) |
+
+**Continuity map:**
+- **Scene 1 to 2:** Stick figure at desk, search bar.
+- **Scene 2 to 3:** Incognito search bar and screen state.
+- **Scene 3 to 4:** The search bar and context morphs into the hidden system visualization.
+- **Scene 4 to 5:** The system visualization collapses into the personalized bubble around the user.
+- **Scene 5 to 6:** The bubble dissolves, returning to the stick figure at the desk with the search bar, now with new understanding.

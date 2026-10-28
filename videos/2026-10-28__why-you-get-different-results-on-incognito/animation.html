@@ -1,0 +1,519 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why You Get Different Results on Incognito</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots / results
+var BLUE  = "#4C86F0";              // signal blue  -> the system / personalization bubble
+var AMBER = "#F2A93B";              // warm amber   -> YOU / input / expectation
+var CORAL = "#FF5B5B";              // coral red    -> naive model / perceived trickery / difference
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+// Stick figure: head, body, arms, legs. Poses: typing, confused, understanding.
+// x, y is the center of the figure's body.
+function stickFigure(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = 30;
+  var bodyLen = 100;
+  var armLen = 60;
+  var legLen = 80;
+
+  // Head
+  g += dot(x, y - headR - bodyLen / 2, headR, col);
+
+  // Body
+  g += line(x, y - bodyLen / 2, x, y + bodyLen / 2, col, 10);
+
+  // Arms & Legs based on pose
+  if (pose === 'typing') {
+    // Arms bent forward towards a desk
+    g += line(x, y - bodyLen / 4, x - armLen * 0.8, y + armLen * 0.2, col, 10);
+    g += line(x, y - bodyLen / 4, x + armLen * 0.8, y + armLen * 0.2, col, 10);
+    // Legs bent sitting
+    g += line(x - 20, y + bodyLen / 2, x - 50, y + bodyLen / 2 + legLen * 0.6, col, 10);
+    g += line(x + 20, y + bodyLen / 2, x + 50, y + bodyLen / 2 + legLen * 0.6, col, 10);
+  } else if (pose === 'confused') {
+    // Arms up, head tilted, small dot for thought bubble
+    g += line(x, y - bodyLen / 4, x - armLen, y - bodyLen / 4 - armLen * 0.8, col, 10);
+    g += line(x, y - bodyLen / 4, x + armLen, y - bodyLen / 4 - armLen * 0.8, col, 10);
+    g += line(x - 20, y + bodyLen / 2, x - 20, y + bodyLen / 2 + legLen, col, 10);
+    g += line(x + 20, y + bodyLen / 2, x + 20, y + bodyLen / 2 + legLen, col, 10);
+    // Head tilt
+    g += '<g transform="rotate(-15 ' + x + ' ' + (y - headR - bodyLen / 2) + ')">';
+    g += dot(x, y - headR - bodyLen / 2, headR, col);
+    g += '</g>';
+    g += dot(x + headR + 10, y - headR - bodyLen / 2 - 10, 8, col, 0.8); // confusion dot
+  } else if (pose === 'understanding') {
+    // Arms relaxed, head slightly tilted forward
+    g += line(x, y - bodyLen / 4, x - armLen * 0.7, y + bodyLen / 4, col, 10);
+    g += line(x, y - bodyLen / 4, x + armLen * 0.7, y + bodyLen / 4, col, 10);
+    g += line(x - 20, y + bodyLen / 2, x - 20, y + bodyLen / 2 + legLen, col, 10);
+    g += line(x + 20, y + bodyLen / 2, x + 20, y + bodyLen / 2 + legLen, col, 10);
+    // Head slightly forward
+    g += '<g transform="translate(0 10)">';
+    g += dot(x, y - headR - bodyLen / 2, headR, col);
+    g += '</g>';
+  } else { // default standing
+    g += line(x, y - bodyLen / 4, x - armLen, y + bodyLen / 4, col, 10);
+    g += line(x, y - bodyLen / 4, x + armLen, y + bodyLen / 4, col, 10);
+    g += line(x - 20, y + bodyLen / 2, x - 20, y + bodyLen / 2 + legLen, col, 10);
+    g += line(x + 20, y + bodyLen / 2, x + 20, y + bodyLen / 2 + legLen, col, 10);
+  }
+  g += '</g>';
+  return g;
+}
+
+// Simple desk
+function desk(x, y, w, h, col, sw, op) {
+  return rrectStroke(x, y, w, h, 12, col, sw, op);
+}
+
+// Search bar with magnifying glass icon
+function searchBar(x, y, w, h, col, sw, op, incognito, glow) {
+  op = (op == null ? 1 : op);
+  glow = (glow == null ? 0 : glow);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, h / 2, col, glow * 0.2); // inner glow
+  g += rrectStroke(x, y, w, h, h / 2, col, sw);
+
+  // Magnifying glass icon
+  var iconX = x + w / 2 - h / 2;
+  var iconY = y;
+  var iconR = h * 0.2;
+  g += ring(iconX, iconY, iconR, col, sw * 0.8);
+  g += line(iconX + iconR * 0.7, iconY + iconR * 0.7, iconX + iconR * 1.4, iconY + iconR * 1.4, col, sw * 0.8);
+
+  // Incognito mask icon (small, top right)
+  if (incognito) {
+    var maskX = x + w / 2 - 30;
+    var maskY = y - h / 2 + 30;
+    var maskSize = 20;
+    // Eye with slash
+    g += dot(maskX - maskSize / 2, maskY, maskSize * 0.4, col); // Left eye
+    g += dot(maskX + maskSize / 2, maskY, maskSize * 0.4, col); // Right eye
+    g += line(maskX - maskSize, maskY - maskSize * 0.8, maskX + maskSize, maskY + maskSize * 0.8, col, sw * 0.6); // Slash
+  }
+  g += '</g>';
+  return g;
+}
+
+// Result card
+function resultCard(x, y, w, h, col, sw, op, highlight) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  if (highlight) {
+    g += rrect(x, y, w, h, 10, CORAL, 0.15); // subtle coral fill
+    g += rrectStroke(x, y, w, h, 10, CORAL, sw * 1.2);
+  } else {
+    g += rrectStroke(x, y, w, h, 10, col, sw);
+  }
+  // Simulate content with a few lines
+  g += line(x - w * 0.3, y - h * 0.3, x + w * 0.3, y - h * 0.3, col, sw * 0.6);
+  g += line(x - w * 0.3, y, x + w * 0.2, y, col, sw * 0.6);
+  g += line(x - w * 0.3, y + h * 0.3, x + w * 0.1, y + h * 0.3, col, sw * 0.6);
+  g += '</g>';
+  return g;
+}
+
+// Button with eye-slash icon
+function incognitoButton(x, y, w, h, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, h / 2, col, sw);
+  // Eye-slash icon
+  var iconX = x, iconY = y;
+  var iconR = h * 0.3;
+  g += ring(iconX, iconY, iconR, col, sw * 0.8);
+  g += line(iconX - iconR * 0.8, iconY - iconR * 0.8, iconX + iconR * 0.8, iconY + iconR * 0.8, col, sw * 0.8);
+  g += '</g>';
+  return g;
+}
+
+// Network node
+function networkNode(x, y, r, col, label, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += dot(x, y, r, col);
+  // Simple label glyphs (no text)
+  if (label === 'ip') { // two dots
+    g += dot(x - r * 0.3, y, r * 0.2, WHITE);
+    g += dot(x + r * 0.3, y, r * 0.2, WHITE);
+  } else if (label === 'device') { // square
+    g += rrect(x, y, r * 0.8, r * 0.8, r * 0.1, WHITE);
+  } else if (label === 'browser') { // three dots in triangle
+    g += dot(x, y - r * 0.3, r * 0.2, WHITE);
+    g += dot(x - r * 0.25, y + r * 0.2, r * 0.2, WHITE);
+    g += dot(x + r * 0.25, y + r * 0.2, r * 0.2, WHITE);
+  } else if (label === 'location') { // crosshair
+    g += line(x - r * 0.4, y, x + r * 0.4, y, WHITE, 4);
+    g += line(x, y - r * 0.4, x, y + r * 0.4, WHITE, 4);
+  } else if (label === 'profile') { // star/asterisk
+    g += line(x - r * 0.4, y, x + r * 0.4, y, WHITE, 4);
+    g += line(x, y - r * 0.4, x, y + r * 0.4, WHITE, 4);
+    g += line(x - r * 0.3, y - r * 0.3, x + r * 0.3, y + r * 0.3, WHITE, 4);
+    g += line(x - r * 0.3, y + r * 0.3, x + r * 0.3, y - r * 0.3, WHITE, 4);
+  }
+  g += '</g>';
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+var DESK_Y = BOT - 200;
+var FIGURE_Y = DESK_Y - 100;
+var SEARCH_BAR_Y = DESK_Y - 180;
+var SEARCH_BAR_W = 700;
+var SEARCH_BAR_H = 80;
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  s += desk(CX, DESK_Y, 800, 200, WHITE, 8, 1);
+  s += stickFigure(CX, FIGURE_Y, AMBER, 'typing', 1);
+
+  var typingGlow = Math.sin(u * Math.PI * 4) * 0.5 + 0.5; // Pulsing glow
+  var searchBarOp = 1;
+  if (u > 0.8) searchBarOp = lerp(1, 0.2, ramp(u, 0.8, 1.0)); // Fade out slightly at end
+
+  s += searchBar(CX, SEARCH_BAR_Y, SEARCH_BAR_W, SEARCH_BAR_H, AMBER, 10, searchBarOp, false, typingGlow * ramp(u, 0, 0.2));
+
+  // Result cards appearing
+  var numResults = 3;
+  var resultW = SEARCH_BAR_W * 0.8;
+  var resultH = 100;
+  var resultGap = 140;
+  var resultsStartY = SEARCH_BAR_Y + SEARCH_BAR_H / 2 + 80;
+
+  for (var i = 0; i < numResults; i++) {
+    var resultU = ramp(u, 0.2 + i * 0.1, 0.6 + i * 0.1);
+    if (resultU > 0) {
+      var resultY = lerp(resultsStartY + 200, resultsStartY + i * resultGap, easeOut(resultU));
+      var resultOp = resultU;
+      s += resultCard(CX, resultY, resultW, resultH, DIM, 7, resultOp);
+    }
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14);
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+
+  s += desk(CX, DESK_Y, 800, 200, WHITE, 8, 1);
+  s += stickFigure(CX, FIGURE_Y, AMBER, 'typing', 1);
+
+  // Search bar fades out, new one appears with incognito mask
+  var searchBarOp1 = lerp(0.2, 0, ramp(u, 0, 0.3)); // Old search bar fades
+  var searchBarOp2 = lerp(0, 1, ramp(u, 0.4, 0.7)); // New search bar fades in
+
+  s += searchBar(CX, SEARCH_BAR_Y, SEARCH_BAR_W, SEARCH_BAR_H, AMBER, 10, searchBarOp1, false, 0);
+
+  // Incognito button appears and is clicked
+  var buttonX = CX + 300, buttonY = FIGURE_Y + 100;
+  var buttonOp = lerp(0, 1, ramp(u, 0.1, 0.4));
+  var buttonClickScale = lerp(1, 0.8, pulse(u, 0.3, 0.1));
+  s += '<g transform="translate(' + buttonX + ' ' + buttonY + ') scale(' + buttonClickScale + ') translate(' + (-buttonX) + ' ' + (-buttonY) + ')">';
+  s += incognitoButton(buttonX, buttonY, 100, 100, AMBER, 8, buttonOp);
+  s += '</g>';
+
+  // Screen darkens
+  var screenDarkenOp = lerp(0, 0.2, ramp(u, 0.5, 0.8));
+  s += rrect(CX, CY, W, H, 0, DIM, screenDarkenOp);
+
+  // New incognito search bar
+  s += searchBar(CX, SEARCH_BAR_Y, SEARCH_BAR_W, SEARCH_BAR_H, AMBER, 10, searchBarOp2, true, 0);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH — different results, confusion. */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  s += desk(CX, DESK_Y, 800, 200, WHITE, 8, 1);
+  var figurePose = (u < 0.7) ? 'typing' : 'confused';
+  s += stickFigure(CX, FIGURE_Y, AMBER, figurePose, 1);
+
+  s += rrect(CX, CY, W, H, 0, DIM, 0.2); // Screen remains dark
+  s += searchBar(CX, SEARCH_BAR_Y, SEARCH_BAR_W, SEARCH_BAR_H, AMBER, 10, 1, true, ramp(u, 0, 0.2) * 0.5); // Typing glow
+
+  // Previous results slide away, new results appear
+  var numResults = 3;
+  var resultW = SEARCH_BAR_W * 0.8;
+  var resultH = 100;
+  var resultGap = 140;
+  var resultsStartY = SEARCH_BAR_Y + SEARCH_BAR_H / 2 + 80;
+
+  // Simulate old results sliding down and out
+  for (var i = 0; i < numResults; i++) {
+    var oldResultOp = lerp(1, 0, ramp(u, 0.0, 0.3));
+    var oldResultY = resultsStartY + i * resultGap + lerp(0, 100, ramp(u, 0.0, 0.3));
+    if (oldResultOp > 0.01) {
+      s += resultCard(CX, oldResultY, resultW, resultH, DIM, 7, oldResultOp);
+    }
+  }
+
+  // New results appearing, some highlighted coral
+  for (var i = 0; i < numResults; i++) {
+    var newResultU = ramp(u, 0.4 + i * 0.1, 0.8 + i * 0.1);
+    if (newResultU > 0) {
+      var newResultY = lerp(resultsStartY + 200, resultsStartY + i * resultGap, easeOut(newResultU));
+      var newResultOp = newResultU;
+      var isHighlighted = (i === 1 || i === 2) && u > 0.7; // Highlight middle and last for difference
+      s += resultCard(CX, newResultY, resultW, resultH, (isHighlighted ? CORAL : DIM), 7, newResultOp, isHighlighted);
+    }
+  }
+
+  // Coral pulsating outline to highlight the difference (implied comparison)
+  var pulseOp = pulse(u, 0.85, 0.1) * 0.8;
+  if (pulseOp > 0.05) {
+    s += rrectStroke(CX, resultsStartY + resultGap, resultW + 40, resultH + 40 + resultGap, 15, CORAL, 12, pulseOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND — the system's actual data points. */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  s += desk(CX, DESK_Y, 800, 200, WHITE, 8, 1);
+  s += stickFigure(CX, FIGURE_Y, AMBER, 'confused', 1);
+
+  s += rrect(CX, CY, W, H, 0, DIM, 0.2); // Screen remains dark
+
+  // Search bar morphs into network diagram
+  var searchBarOp = lerp(1, 0, ramp(u, 0.0, 0.2));
+  s += searchBar(CX, SEARCH_BAR_Y, SEARCH_BAR_W, SEARCH_BAR_H, AMBER, 10, searchBarOp, true, 0);
+
+  // Network diagram elements
+  var nodeR = 40;
+  var centralProfileR = 60;
+  var nodeOp = lerp(0, 1, ramp(u, 0.2, 0.5));
+  var lineOp = lerp(0, 1, ramp(u, 0.4, 0.7));
+
+  var nodes = [
+    { x: CX - 200, y: CY - 150, label: 'ip' },
+    { x: CX + 200, y: CY - 150, label: 'device' },
+    { x: CX - 200, y: CY + 150, label: 'browser' },
+    { x: CX + 200, y: CY + 150, label: 'location' }
+  ];
+  var profileNode = { x: CX, y: CY, label: 'profile' };
+
+  // Nodes appear
+  for (var i = 0; i < nodes.length; i++) {
+    var node = nodes[i];
+    s += networkNode(node.x, node.y, nodeR, BLUE, node.label, nodeOp);
+    // Lines connecting to profile
+    s += line(node.x, node.y, profileNode.x, profileNode.y, BLUE, 6, lineOp);
+  }
+  s += networkNode(profileNode.x, profileNode.y, centralProfileR, BLUE, profileNode.label, nodeOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE — the personalized bubble. */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.8, smooth(u));
+  s += '<g ' + camera(scale, 0, lerp(0, 90, smooth(u))) + '>';
+
+  s += desk(CX, DESK_Y, 800, 200, WHITE, 8, 1);
+  s += stickFigure(CX, FIGURE_Y, AMBER, 'confused', 1);
+
+  s += rrect(CX, CY, W, H, 0, DIM, 0.2); // Screen remains dark
+
+  // Network diagram collapses into bubble
+  var nodeCollapseU = ramp(u, 0.0, 0.3);
+  var bubbleExpandU = ramp(u, 0.2, 0.6);
+
+  var nodeR = 40;
+  var centralProfileR = 60;
+  var nodes = [
+    { x: CX - 200, y: CY - 150, label: 'ip' },
+    { x: CX + 200, y: CY - 150, label: 'device' },
+    { x: CX - 200, y: CY + 150, label: 'browser' },
+    { x: CX + 200, y: CY + 150, label: 'location' }
+  ];
+  var profileNode = { x: CX, y: CY, label: 'profile' };
+
+  // Nodes moving towards center
+  for (var i = 0; i < nodes.length; i++) {
+    var node = nodes[i];
+    var currX = lerp(node.x, profileNode.x, easeIn(nodeCollapseU));
+    var currY = lerp(node.y, profileNode.y, easeIn(nodeCollapseU));
+    s += networkNode(currX, currY, nodeR, BLUE, node.label, 1 - nodeCollapseU);
+    s += line(node.x, node.y, profileNode.x, profileNode.y, BLUE, 6, 1 - nodeCollapseU);
+  }
+  s += networkNode(profileNode.x, profileNode.y, centralProfileR, BLUE, profileNode.label, 1 - nodeCollapseU);
+
+  // Personalized bubble forms around the stick figure
+  var bubbleR = lerp(0, 400, easeOut(bubbleExpandU));
+  s += ring(CX, FIGURE_Y + 50, bubbleR, BLUE, 12, bubbleExpandU * 0.8);
+  s += dot(CX, FIGURE_Y + 50, bubbleR, BLUE, bubbleExpandU * 0.08); // Translucent fill
+
+  // New search results appear inside the bubble
+  var numResults = 2; // Fewer results to emphasize the bubble
+  var resultW = SEARCH_BAR_W * 0.7;
+  var resultH = 90;
+  var resultGap = 120;
+  var resultsStartY = FIGURE_Y + 50 + bubbleR * 0.3; // Below the figure, inside bubble
+
+  for (var i = 0; i < numResults; i++) {
+    var resultU = ramp(u, 0.6 + i * 0.1, 0.9 + i * 0.1);
+    if (resultU > 0) {
+      var resultY = lerp(resultsStartY + 100, resultsStartY + i * resultGap, easeOut(resultU));
+      var resultOp = resultU * bubbleExpandU; // Only appear when bubble is forming
+      s += resultCard(CX, resultY, resultW, resultH, DIM, 7, resultOp, true); // Still slightly tailored
+    }
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE — new understanding. */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.8, 1.0, smooth(clamp(u / 0.7, 0, 1)));
+  s += '<g ' + camera(scale, 0, lerp(90, 0, smooth(u))) + '>';
+
+  s += desk(CX, DESK_Y, 800, 200, WHITE, 8, 1);
+  s += stickFigure(CX, FIGURE_Y, AMBER, 'understanding', 1);
+
+  // Bubble dissolves
+  var bubbleDissolveU = ramp(u, 0.0, 0.3);
+  var bubbleR = lerp(400, 0, easeIn(bubbleDissolveU));
+  var bubbleOp = lerp(0.8, 0, bubbleDissolveU);
+  if (bubbleOp > 0.01) {
+    s += ring(CX, FIGURE_Y + 50, bubbleR, BLUE, 12, bubbleOp);
+    s += dot(CX, FIGURE_Y + 50, bubbleR, BLUE, bubbleOp * 0.08);
+  }
+
+  // Scene returns to initial state: standard search bar
+  var searchBarAppearU = ramp(u, 0.5, 0.8);
+  s += searchBar(CX, SEARCH_BAR_Y, SEARCH_BAR_W, SEARCH_BAR_H, AMBER, 10, searchBarAppearU, false, 0);
+
+  // A single result card appears below, representing the new understanding
+  var resultW = SEARCH_BAR_W * 0.8;
+  var resultH = 100;
+  var resultsStartY = SEARCH_BAR_Y + SEARCH_BAR_H / 2 + 80;
+  var finalResultU = ramp(u, 0.7, 1.0);
+  if (finalResultU > 0) {
+    var resultY = lerp(resultsStartY + 100, resultsStartY, easeOut(finalResultU));
+    s += resultCard(CX, resultY, resultW, resultH, DIM, 7, finalResultU);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(SCENES.length - 1, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = SCENES.length - 1; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

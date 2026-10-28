@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Parking Lots Have Specific Patterns</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band
+var AISLE_CENTER_X = CX;            // Center X for the main parking aisle hero element
+var CAR_Y_REST = CY + 100;          // "You" car resting height
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary elements
+var BLUE  = "#4C86F0";              // signal blue  -> the system / optimized flow
+var AMBER = "#F2A93B";              // warm amber   -> YOU / your car / desire
+var CORAL = "#FF5B5B";              // coral red    -> naive model / inefficiency / chaos
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function chevron(x, y, size, col, op) {
+  var d = "M " + (x - size) + " " + (y + size * 0.55) + " L " + x + " " + (y - size * 0.55) + " L " + (x + size) + " " + (y + size * 0.55);
+  return pathTag(d, col, 14, op);
+}
+/* Stick figure car: body, head, two wheels */
+function stickCar(x, y, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  // Head (circle) - top of car
+  g += dot(x, y - 60, 20, col, op);
+  // Body (rectangle) - centered below head
+  g += rrect(x, y + 10, 100, 120, 10, col, op);
+  // Wheels (circles) - at bottom of body
+  g += dot(x - 35, y + 70, 12, col, op);
+  g += dot(x + 35, y + 70, 12, col, op);
+  g += '</g>';
+  return g;
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  var aisleWidth = 200;
+  // Hero element: Central aisle outline (white)
+  s += rrectStroke(AISLE_CENTER_X, CY, aisleWidth, BOT - TOP, 20, WHITE, 7, 0.2);
+
+  // Other parked white stick-figure cars
+  var carSpacing = 260; // Vertical spacing between parked cars
+  var numCars = 6;
+  for (var i = 0; i < numCars; i++) {
+    var y = BOT - 90 - i * carSpacing - u * 50 + rnd(i) * 40;
+    while (y < TOP) y += (BOT - TOP);
+    s += stickCar(AISLE_CENTER_X - 160, y, WHITE, 0.6); // Left side parked
+    s += stickCar(AISLE_CENTER_X + 160, y + 130, WHITE, 0.6); // Right side parked (staggered)
+  }
+
+  // Amber car entering the lot
+  var carEnterY = lerp(BOT + 100, CAR_Y_REST, easeOut(u));
+  var carEnterX = lerp(CX, AISLE_CENTER_X - 50, easeOut(u * 0.5)); // Slight curve into aisle
+  s += stickCar(carEnterX, carEnterY, AMBER, 1);
+
+  // "Want a spot": a rising stream of chevrons ahead of the car
+  for (var c = 0; c < 3; c++) {
+    var cp = (u * 2 + c / 3) % 1;
+    s += chevron(carEnterX, carEnterY - 180 - cp * 150, 26, AMBER, (1 - cp) * 0.7);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14);
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+
+  var aisleWidth = 200;
+  // Hero element: Central aisle outline (white)
+  s += rrectStroke(AISLE_CENTER_X, CY, aisleWidth, BOT - TOP, 20, WHITE, 7, 0.2);
+
+  // Angled parking spots appear
+  var spotAngle = lerp(0, 60, smooth(u)); // Angle from vertical
+  var spotLength = 100;
+  var spotSpacing = 160; // Vertical spacing
+  var numSpotRows = 8;
+  var spotStroke = 8;
+
+  for (var i = 0; i < numSpotRows; i++) {
+    var spotY = TOP + 100 + i * spotSpacing - u * 50; // Slight scroll
+    if (spotY < TOP - 50 || spotY > BOT + 50) continue;
+
+    // Left spots
+    var x1_L = AISLE_CENTER_X - aisleWidth / 2;
+    var y1_L = spotY;
+    var x2_L = x1_L - spotLength * Math.sin(spotAngle * Math.PI / 180);
+    var y2_L = y1_L + spotLength * Math.cos(spotAngle * Math.PI / 180);
+    s += line(x1_L, y1_L, x2_L, y2_L, WHITE, spotStroke, 0.8);
+
+    // Right spots (mirrored)
+    var x1_R = AISLE_CENTER_X + aisleWidth / 2;
+    var y1_R = spotY;
+    var x2_R = x1_R + spotLength * Math.sin(spotAngle * Math.PI / 180);
+    var y2_R = y1_R + spotLength * Math.cos(spotAngle * Math.PI / 180);
+    s += line(x1_R, y1_R, x2_R, y2_R, WHITE, spotStroke, 0.8);
+  }
+
+  // White directional arrows animate into existence
+  var arrowOp = ramp(u, 0.2, 0.8);
+  s += chevron(AISLE_CENTER_X, CY - 100, 30, WHITE, arrowOp);
+  s += chevron(AISLE_CENTER_X, CY + 100, 30, WHITE, arrowOp);
+
+  // Amber car moves down an aisle, pauses at an angled spot
+  var carY = lerp(CAR_Y_REST, CAR_Y_REST - 200, easeOut(u * 0.8)); // Car moves up then pauses
+  s += stickCar(AISLE_CENTER_X - 50, carY, AMBER, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH — Questioning the "inefficiency" */
+function scene3(u) {
+  var s = '';
+  var zoom = lerp(1.0, 0.8, smooth(u * 0.4)); // Zoom out slightly
+  var tilt = Math.sin(u * Math.PI * 2) * 5 * ramp(u, 0.1, 0.3); // Car tilt for confusion
+  s += '<g ' + camera(zoom, 0, 0) + ' transform-origin="' + CX + ' ' + CY + '" transform="rotate(' + tilt + ' ' + CX + ' ' + CY + ')">';
+
+  var aisleWidth = 200;
+  // Hero element: Central aisle outline (white)
+  s += rrectStroke(AISLE_CENTER_X, CY, aisleWidth, BOT - TOP, 20, WHITE, 7, 0.2);
+
+  // Existing angled spots (faded)
+  var spotAngle = 60;
+  var spotLength = 100;
+  var spotSpacing = 160;
+  var numSpotRows = 8;
+  var spotStroke = 8;
+  for (var i = 0; i < numSpotRows; i++) {
+    var spotY = TOP + 100 + i * spotSpacing;
+    var x1_L = AISLE_CENTER_X - aisleWidth / 2;
+    var y1_L = spotY;
+    var x2_L = x1_L - spotLength * Math.sin(spotAngle * Math.PI / 180);
+    var y2_L = y1_L + spotLength * Math.cos(spotAngle * Math.PI / 180);
+    s += line(x1_L, y1_L, x2_L, y2_L, WHITE, spotStroke, 0.3);
+    var x1_R = AISLE_CENTER_X + aisleWidth / 2;
+    var y1_R = spotY;
+    var x2_R = x1_R + spotLength * Math.sin(spotAngle * Math.PI / 180);
+    var y2_R = y1_R + spotLength * Math.cos(spotAngle * Math.PI / 180);
+    s += line(x1_R, y1_R, x2_R, y2_R, WHITE, spotStroke, 0.3);
+  }
+
+  // Amber car (from above, slightly tilted)
+  s += stickCar(AISLE_CENTER_X - 50, CAR_Y_REST - 200, AMBER, 1);
+
+  // Naive layout thought bubble (coral red)
+  var thoughtOp = ramp(u, 0.1, 0.4) * (1 - ramp(u, 0.7, 1.0));
+  if (thoughtOp > 0.01) {
+    var bubbleX = CX + 200, bubbleY = CY - 300;
+    var bubbleScale = lerp(0.5, 1.0, easeOut(ramp(u, 0.1, 0.4)));
+    s += '<g transform="translate(' + bubbleX + ' ' + bubbleY + ') scale(' + bubbleScale + ')" opacity="' + thoughtOp + '">';
+    s += rrect(0, 0, 300, 200, 20, CORAL, 0.2); // Thought bubble background
+    s += rrectStroke(0, 0, 300, 200, 20, CORAL, 6, 0.8);
+    // Naive straight-on spots
+    var naiveAisleX = 0;
+    var naiveAisleWidth = 100;
+    s += rrectStroke(naiveAisleX, 0, naiveAisleWidth, 180, 10, CORAL, 4, 0.6); // Naive aisle
+    for (var i = -1; i <= 1; i++) {
+      var naiveSpotY = i * 60;
+      s += line(naiveAisleX - naiveAisleWidth / 2, naiveSpotY - 20, naiveAisleX - naiveAisleWidth / 2 - 40, naiveSpotY - 20, CORAL, 4, 0.6);
+      s += line(naiveAisleX + naiveAisleWidth / 2, naiveSpotY - 20, naiveAisleX + naiveAisleWidth / 2 + 40, naiveSpotY - 20, CORAL, 4, 0.6);
+    }
+    // Naive two-way arrows
+    s += chevron(naiveAisleX, -50, 15, CORAL, 0.6);
+    s += chevron(naiveAisleX, 50, 15, CORAL, 0.6);
+    s += '</g>';
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND — The mechanism of optimized flow */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var aisleWidth = lerp(200, 240, smooth(u)); // Aisle widens slightly
+  var heroStroke = lerp(7, 10, smooth(u));
+
+  // Hero element: Central aisle morphs to signal blue
+  s += rrect(AISLE_CENTER_X, CY, aisleWidth, BOT - TOP, 20, BLUE, 0.2); // Blue fill
+  s += rrectStroke(AISLE_CENTER_X, CY, aisleWidth, BOT - TOP, 20, BLUE, heroStroke, 0.8);
+
+  // Angled parking spots highlighted in signal blue
+  var spotAngle = 60;
+  var spotLength = 100;
+  var spotSpacing = 160;
+  var numSpotRows = 8;
+  var spotStroke = 8;
+
+  for (var i = 0; i < numSpotRows; i++) {
+    var spotY = TOP + 100 + i * spotSpacing;
+    var x1_L = AISLE_CENTER_X - aisleWidth / 2;
+    var y1_L = spotY;
+    var x2_L = x1_L - spotLength * Math.sin(spotAngle * Math.PI / 180);
+    var y2_L = y1_L + spotLength * Math.cos(spotAngle * Math.PI / 180);
+    s += line(x1_L, y1_L, x2_L, y2_L, BLUE, spotStroke, 0.8);
+
+    var x1_R = AISLE_CENTER_X + aisleWidth / 2;
+    var y1_R = spotY;
+    var x2_R = x1_R + spotLength * Math.sin(spotAngle * Math.PI / 180);
+    var y2_R = y1_R + spotLength * Math.cos(spotAngle * Math.PI / 180);
+    s += line(x1_R, y1_R, x2_R, y2_R, BLUE, spotStroke, 0.8);
+  }
+
+  // One-way arrows in signal blue
+  var arrowOp = ramp(u, 0.2, 0.8);
+  s += chevron(AISLE_CENTER_X, CY - 100, 30, BLUE, arrowOp);
+  s += chevron(AISLE_CENTER_X, CY + 100, 30, BLUE, arrowOp);
+
+  // Second amber car demonstrating easy entry/exit
+  var demoCarY = CAR_Y_REST + 100;
+  var carStartX = AISLE_CENTER_X - 50;
+  var spotCenterX = AISLE_CENTER_X + aisleWidth / 2 + 50; // Center of a spot to park into
+
+  var entryProgress = ramp(u, 0.2, 0.5);
+  var exitProgress = ramp(u, 0.6, 0.9);
+
+  var currentCarX, currentCarY;
+  if (entryProgress < 1) { // Car entering spot
+    currentCarX = lerp(carStartX, spotCenterX, easeOut(entryProgress));
+    currentCarY = lerp(demoCarY, demoCarY + 20, easeOut(entryProgress));
+    s += stickCar(currentCarX, currentCarY, AMBER, 1);
+  } else if (exitProgress < 1) { // Car exiting spot
+    currentCarX = lerp(spotCenterX, carStartX, easeIn(exitProgress));
+    currentCarY = lerp(demoCarY + 20, demoCarY, easeIn(exitProgress));
+    s += stickCar(currentCarX, currentCarY, AMBER, 1);
+  } else {
+    // Car is off-screen or waiting
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE — The cost (perceived restriction) and benefit */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.8, smooth(u));
+  s += '<g ' + camera(scale, 0, lerp(0, 90, smooth(u))) + '>';
+
+  var aisleWidth = 240;
+  var heroStroke = 10;
+
+  // Hero element: Central aisle (signal blue)
+  s += rrect(AISLE_CENTER_X, CY, aisleWidth, BOT - TOP, 20, BLUE, 0.2);
+  s += rrectStroke(AISLE_CENTER_X, CY, aisleWidth, BOT - TOP, 20, BLUE, heroStroke, 0.8);
+
+  // Angled parking spots (signal blue, faded)
+  var spotAngle = 60;
+  var spotLength = 100;
+  var spotSpacing = 160;
+  var numSpotRows = 8;
+  var spotStroke = 8;
+  for (var i = 0; i < numSpotRows; i++) {
+    var spotY = TOP + 100 + i * spotSpacing;
+    var x1_L = AISLE_CENTER_X - aisleWidth / 2;
+    var y1_L = spotY;
+    var x2_L = x1_L - spotLength * Math.sin(spotAngle * Math.PI / 180);
+    var y2_L = y1_L + spotLength * Math.cos(spotAngle * Math.PI / 180);
+    s += line(x1_L, y1_L, x2_L, y2_L, BLUE, spotStroke, 0.3);
+
+    var x1_R = AISLE_CENTER_X + aisleWidth / 2;
+    var y1_R = spotY;
+    var x2_R = x1_R + spotLength * Math.sin(spotAngle * Math.PI / 180);
+    var y2_R = y1_R + spotLength * Math.cos(spotAngle * Math.PI / 180);
+    s += line(x1_R, y1_R, x2_R, y2_R, BLUE, spotStroke, 0.3);
+  }
+
+  // Multiple amber cars flowing smoothly
+  var numFlowCars = 4;
+  var flowSpeed = 300; // pixels per second
+  for (var i = 0; i < numFlowCars; i++) {
+    var carFlowY = (BOT - (u * flowSpeed + rnd(i) * 200) % (BOT - TOP + 200));
+    if (carFlowY < TOP - 100) carFlowY += (BOT - TOP + 200); // Wrap around
+    s += stickCar(AISLE_CENTER_X - 50 + rnd(i + 10) * 100 - 50, carFlowY, AMBER, 1); // Slight horizontal variation
+  }
+
+  // Brief red 'X' over head-on cars (chaos)
+  var chaosOp = ramp(u, 0.4, 0.5) * (1 - ramp(u, 0.6, 0.7));
+  if (chaosOp > 0.01) {
+    var chaosX = CX, chaosY = CY;
+    var chaosSize = 150;
+    // Two cars approaching head-on
+    s += stickCar(chaosX - 80, chaosY - 50, CORAL, chaosOp);
+    s += stickCar(chaosX + 80, chaosY + 50, CORAL, chaosOp);
+    // Red X
+    s += line(chaosX - chaosSize / 2, chaosY - chaosSize / 2, chaosX + chaosSize / 2, chaosY + chaosSize / 2, CORAL, 12, chaosOp);
+    s += line(chaosX + chaosSize / 2, chaosY - chaosSize / 2, chaosX - chaosSize / 2, chaosY + chaosSize / 2, CORAL, 12, chaosOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE — Seeing the system now */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.8, 0.92, smooth(clamp(u / 0.7, 0, 1)));
+  s += '<g ' + camera(scale, 0, lerp(90, 0, smooth(u))) + '>';
+
+  var reform = smooth(ramp(u, 0.58, 0.86)); // For reforming to final state
+  var aisleWidth = lerp(240, 200, reform);
+  var heroStroke = lerp(10, 7, reform);
+
+  // Hero element: Central aisle (signal blue)
+  s += rrect(AISLE_CENTER_X, CY, aisleWidth, BOT - TOP, 20, BLUE, 0.2);
+  s += rrectStroke(AISLE_CENTER_X, CY, aisleWidth, BOT - TOP, 20, BLUE, heroStroke, 0.8);
+
+  // Angled parking spots (signal blue)
+  var spotAngle = 60;
+  var spotLength = 100;
+  var spotSpacing = 160;
+  var numSpotRows = 8;
+  var spotStroke = 8;
+  for (var i = 0; i < numSpotRows; i++) {
+    var spotY = TOP + 100 + i * spotSpacing;
+    var x1_L = AISLE_CENTER_X - aisleWidth / 2;
+    var y1_L = spotY;
+    var x2_L = x1_L - spotLength * Math.sin(spotAngle * Math.PI / 180);
+    var y2_L = y1_L + spotLength * Math.cos(spotAngle * Math.PI / 180);
+    s += line(x1_L, y1_L, x2_L, y2_L, BLUE, spotStroke, 0.8 * (1 - reform) + 0.2 * reform);
+
+    var x1_R = AISLE_CENTER_X + aisleWidth / 2;
+    var y1_R = spotY;
+    var x2_R = x1_R + spotLength * Math.sin(spotAngle * Math.PI / 180);
+    var y2_R = y1_R + spotLength * Math.cos(spotAngle * Math.PI / 180);
+    s += line(x1_R, y1_R, x2_R, y2_R, BLUE, spotStroke, 0.8 * (1 - reform) + 0.2 * reform);
+  }
+
+  // One-way arrows (signal blue)
+  s += chevron(AISLE_CENTER_X, CY - 100, 30, BLUE, 0.8 * (1 - reform) + 0.2 * reform);
+  s += chevron(AISLE_CENTER_X, CY + 100, 30, BLUE, 0.8 * (1 - reform) + 0.2 * reform);
+
+  // Original amber car confidently parking
+  var parkProgress = ramp(u, 0.0, 0.4);
+  var finalParkX = AISLE_CENTER_X + aisleWidth / 2 + 50; // Target spot
+  var finalParkY = CAR_Y_REST + 100;
+
+  var carStartX = AISLE_CENTER_X - 50;
+  var carStartY = BOT - 100;
+
+  var currentCarX = lerp(carStartX, finalParkX, easeOut(parkProgress));
+  var currentCarY = lerp(carStartY, finalParkY, easeOut(parkProgress));
+
+  s += stickCar(currentCarX, currentCarY, AMBER, 1);
+
+  // Subtle blue flow lines for the entire lot
+  var flowOp = ramp(u, 0.6, 1.0);
+  if (flowOp > 0.01) {
+    s += line(CX - 300, TOP + 50, CX - 200, BOT - 50, BLUE, 4, flowOp * 0.4);
+    s += line(CX + 300, TOP + 50, CX + 200, BOT - 50, BLUE, 4, flowOp * 0.4);
+    s += line(CX - 100, TOP + 150, CX + 100, BOT - 150, BLUE, 4, flowOp * 0.4); // Crossing flow
+  }
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
