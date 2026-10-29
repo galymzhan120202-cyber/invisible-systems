@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why The Cheapest Online Option Has Long Shipping</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary elements
+var BLUE  = "#4C86F0";              // signal blue  -> system / consolidation
+var AMBER = "#F2A93B";              // warm amber   -> YOU / desired item / price
+var CORAL = "#FF5B5B";              // coral red    -> frustration / long wait / naive model
+
+var DUR = 60;
+window.__duration = DUR;
+
+// Hero element dimensions
+var STICK_H = 200; // height of stick figure body
+var STICK_HEAD_R = 30;
+var PACKAGE_S = 80; // size of package cube
+var SCREEN_W = 320, SCREEN_H = 480;
+var STROKE_W = 9; // general stroke width
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+function degToRad(deg) { return deg * Math.PI / 180; }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom hero elements ---------- */
+// Stick figure: x, y is base of feet. scale controls overall size.
+function stickFigure(x, y, scale, armAngle, legAngle, headAngle, col, op) {
+  op = (op == null ? 1 : op);
+  scale = scale || 1;
+  armAngle = armAngle == null ? 0 : armAngle; // 0 = arms down
+  legAngle = legAngle == null ? 0 : legAngle; // 0 = legs straight
+  headAngle = headAngle == null ? 0 : headAngle; // 0 = head straight
+  var sw = STROKE_W * scale;
+  var headR = STICK_HEAD_R * scale;
+  var bodyH = STICK_H * scale;
+
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ')">';
+
+  // Head
+  g += dot(0, -bodyH - headR, headR, col);
+
+  // Body
+  g += line(0, -bodyH, 0, 0, col, sw);
+
+  // Arms
+  var armLen = bodyH * 0.6;
+  var armY = -bodyH * 0.7;
+  g += line(0, armY, Math.cos(degToRad(armAngle)) * armLen, armY + Math.sin(degToRad(armAngle)) * armLen, col, sw); // Right arm
+  g += line(0, armY, -Math.cos(degToRad(armAngle)) * armLen, armY + Math.sin(degToRad(armAngle)) * armLen, col, sw); // Left arm
+
+  // Legs
+  var legLen = bodyH * 0.8;
+  g += line(0, 0, Math.cos(degToRad(legAngle + 90)) * legLen, Math.sin(degToRad(legAngle + 90)) * legLen, col, sw); // Right leg
+  g += line(0, 0, -Math.cos(degToRad(legAngle + 90)) * legLen, Math.sin(degToRad(legAngle + 90)) * legLen, col, sw); // Left leg
+
+  g += '</g>';
+  return g;
+}
+
+// Package: simple square with a cross on top
+function packageBox(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var sw = STROKE_W * 0.8;
+  var half = size / 2;
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, size, size, size * 0.1, col, sw);
+  g += line(x - half * 0.6, y - half * 0.6, x + half * 0.6, y + half * 0.6, col, sw * 0.7);
+  g += line(x + half * 0.6, y - half * 0.6, x - half * 0.6, y + half * 0.6, col, sw * 0.7);
+  g += '</g>';
+  return g;
+}
+
+// Screen: rounded rectangle with a small dot as a button/cursor
+function screenIcon(x, y, w, h, col, op, content) {
+  op = (op == null ? 1 : op);
+  var sw = STROKE_W;
+  var rad = 20;
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, rad, col, sw);
+  if (content === 'price') { // Small dot for "low price"
+    g += dot(x, y + h * 0.3, 12, AMBER);
+  } else if (content === 'buy') { // Small square for "buy button"
+    g += rrect(x, y + h * 0.3, w * 0.3, h * 0.1, 8, AMBER);
+  } else if (content === 'check') { // Checkmark
+    g += pathTag("M " + (x - w * 0.1) + " " + (y + h * 0.1) + " L " + x + " " + (y + h * 0.2) + " L " + (x + w * 0.15) + " " + (y - h * 0.15), AMBER, sw * 1.2);
+  } else if (content === 'loading') { // Three dots
+    g += dot(x - w * 0.15, y + h * 0.1, 8, DIM);
+    g += dot(x, y + h * 0.1, 8, DIM);
+    g += dot(x + w * 0.15, y + h * 0.1, 8, DIM);
+  }
+  g += '</g>';
+  return g;
+}
+
+// Conveyor belt element with scrolling dashes
+function conveyorBelt(x1, y1, x2, y2, phase, col, sw, op) {
+  op = (op == null ? 1 : op);
+  sw = sw || STROKE_W;
+  var g = '<g opacity="' + op + '">';
+  var len = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+  var dashLen = 40;
+  var gapLen = 60;
+  var totalSegment = dashLen + gapLen;
+
+  g += line(x1, y1, x2, y2, col, sw * 1.2, op * 0.4); // Main belt line
+
+  // Calculate the number of segments that fit, plus some for wrap-around
+  var numSegments = Math.ceil(len / totalSegment) + 2;
+
+  for (var i = 0; i < numSegments; i++) {
+    // Calculate the start position of this segment, offset by phase
+    var segmentStartFraction = ((phase + i) * totalSegment / len) % 1;
+    if (segmentStartFraction < 0) segmentStartFraction += 1; // Ensure positive
+
+    var dashStartFraction = segmentStartFraction;
+    var dashEndFraction = (segmentStartFraction + dashLen / len);
+
+    // Clamp to [0, 1] range for drawing
+    var actualDashStart = clamp(dashStartFraction, 0, 1);
+    var actualDashEnd = clamp(dashEndFraction, 0, 1);
+
+    if (actualDashEnd > actualDashStart) {
+      var sx = lerp(x1, x2, actualDashStart);
+      var sy = lerp(y1, y2, actualDashStart);
+      var ex = lerp(x1, x2, actualDashEnd);
+      var ey = lerp(y1, y2, actualDashEnd);
+      g += line(sx, sy, ex, ey, col, sw * 0.6, op);
+    }
+  }
+  g += '</g>';
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + SCREEN + PACKAGE */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  var screenX = CX, screenY = CY - 100;
+  var youX = CX, youY = BOT - 100;
+
+  // Screen with package and price/buy button
+  var packagePulse = Math.sin(u * Math.PI * 4) * 0.05 + 1;
+  var packageScale = lerp(1, packagePulse, pulse(u, 0.5, 0.4));
+  var buttonContent = (u < 0.7) ? 'price' : 'buy';
+  s += screenIcon(screenX, screenY, SCREEN_W, SCREEN_H, WHITE, 1, buttonContent);
+  s += packageBox(screenX, screenY - SCREEN_H * 0.2, PACKAGE_S * packageScale, AMBER);
+
+  // You looking at screen
+  var headAngle = lerp(0, -15, smooth(u)); // Look down at screen
+  var armAngle = lerp(0, 20, smooth(u)); // Arms slightly raised for interaction
+  s += stickFigure(youX, youY, 1, armAngle, 0, headAngle, AMBER);
+
+  // Small pointer/cursor on screen
+  var cursorX = lerp(screenX - SCREEN_W * 0.2, screenX, ramp(u, 0.6, 0.8));
+  var cursorY = lerp(screenY - SCREEN_H * 0.3, screenY + SCREEN_H * 0.3, ramp(u, 0.6, 0.8));
+  s += dot(cursorX, cursorY, 8, WHITE, ramp(u, 0.5, 0.9));
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): PACKAGE ENTERS SYSTEM */
+function scene2(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var youX = CX, youY = BOT - 100;
+  var screenX = CX, screenY = CY - 100;
+
+  // Screen fades out/moves up
+  var screenOp = lerp(1, 0, ramp(u, 0.0, 0.3));
+  var screenOffsetY = lerp(0, -SCREEN_H * 0.5, ramp(u, 0.0, 0.3));
+  s += screenIcon(screenX, screenY + screenOffsetY, SCREEN_W, SCREEN_H, WHITE, screenOp, 'check');
+
+  // You, now looking forward/expectant
+  var headAngle = lerp(-15, 0, smooth(u));
+  s += stickFigure(youX, youY, 1, 0, 0, headAngle, AMBER);
+
+  // Package moving from screen to conveyor belt
+  var packageStartX = screenX;
+  var packageStartY = screenY - SCREEN_H * 0.2;
+  var beltY = CY + 100;
+  var packageTargetX = CX - 200;
+  var packageTargetY = beltY;
+
+  var packageMoveT = ramp(u, 0.1, 0.6);
+  var currentPackageX = lerp(packageStartX, packageTargetX, easeOut(packageMoveT));
+  var currentPackageY = lerp(packageStartY, packageTargetY, easeOut(packageMoveT));
+  var packageScale = lerp(1, 0.8, packageMoveT);
+
+  s += packageBox(currentPackageX, currentPackageY, PACKAGE_S * packageScale, AMBER);
+
+  // Conveyor belt appears and starts moving
+  var beltOp = ramp(u, 0.3, 0.7);
+  var beltWidth = lerp(0, W * 0.6, ramp(u, 0.3, 0.7));
+  var beltX = CX;
+  s += rrect(beltX, beltY, beltWidth, 100, 20, BLUE, beltOp * 0.2); // Base belt
+  s += conveyorBelt(beltX - beltWidth / 2, beltY, beltX + beltWidth / 2, beltY, u * 0.8, BLUE, STROKE_W, beltOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): CONSOLIDATION - PACKAGE WAITS */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var youX = CX, youY = BOT - 100;
+  var beltY = CY + 100;
+  var beltWidth = W * 0.6;
+  var beltX = CX;
+
+  // Conveyor belt, moving slowly
+  s += rrect(beltX, beltY, beltWidth, 100, 20, BLUE, 0.2);
+  s += conveyorBelt(beltX - beltWidth / 2, beltY, beltX + beltWidth / 2, beltY, u * 0.3, BLUE, STROKE_W, 1);
+
+  // You, showing impatience
+  var headBob = Math.sin(u * Math.PI * 6) * 5;
+  var armTap = Math.sin(u * Math.PI * 10) * 10;
+  s += stickFigure(youX, youY + headBob, 1, armTap, 0, 0, AMBER);
+
+  // Clock for impatience
+  var clockR = 40;
+  var clockX = youX + 150, clockY = youY - 150;
+  s += ring(clockX, clockY, clockR, WHITE, STROKE_W * 0.8);
+  var hourAngle = lerp(-90, -90 + u * 360 * 0.1, 1); // Slow hour hand
+  var minuteAngle = lerp(-90, -90 + u * 360, 1); // Faster minute hand
+  s += line(clockX, clockY, clockX + Math.cos(degToRad(hourAngle)) * clockR * 0.5, clockY + Math.sin(degToRad(hourAngle)) * clockR * 0.5, WHITE, STROKE_W * 0.6);
+  s += line(clockX, clockY, clockX + Math.cos(degToRad(minuteAngle)) * clockR * 0.8, clockY + Math.sin(degToRad(minuteAngle)) * clockR * 0.8, WHITE, STROKE_W * 0.4);
+
+  // Amber package on the belt, waiting
+  var packageX = beltX - beltWidth * 0.2;
+  s += packageBox(packageX, beltY, PACKAGE_S * 0.8, AMBER);
+
+  // Other grey packages accumulating around it
+  var numGreyPackages = Math.floor(lerp(0, 6, easeIn(u)));
+  for (var i = 0; i < numGreyPackages; i++) {
+    var pX = beltX - beltWidth * 0.2 + rnd(i) * 100 - 50;
+    var pY = beltY + rnd(i + 1) * 30 - 15;
+    var pOp = lerp(0.4, 0.9, rnd(i + 2));
+    s += packageBox(pX, pY, PACKAGE_S * 0.6, DIM, pOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): THE BIG MOVE - CONSOLIDATED SHIPMENT */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var youX = CX, youY = BOT - 100;
+  var beltY = CY + 100;
+  var beltWidth = W * 0.6;
+  var beltX = CX;
+
+  // You, observing the fast movement
+  var headAngle = lerp(0, 10, smooth(u)); // Head tilted to follow
+  var armAngle = lerp(0, -15, smooth(u)); // Arms slightly back
+  s += stickFigure(youX, youY, 1, armAngle, 0, headAngle, AMBER);
+
+  // Consolidated shipment container
+  var containerW = lerp(beltWidth, W * 0.8, smooth(u));
+  var containerH = lerp(100, 200, smooth(u));
+  var containerY = lerp(beltY, CY - 50, smooth(u));
+
+  var containerSpeed = lerp(0.3, 2.5, easeIn(u)); // Speed up the container
+  var containerMoveX = (u * containerSpeed * 500) % (W + containerW); // Loop movement
+  var containerDrawX = CX - W / 2 + containerMoveX - containerW / 2;
+
+  // The container itself, moving rapidly
+  s += rrect(containerDrawX + containerW / 2, containerY, containerW, containerH, 30, BLUE, 0.8);
+  s += rrectStroke(containerDrawX + containerW / 2, containerY, containerW, containerH, 30, WHITE, STROKE_W);
+
+  // Packages inside the container, moving with it
+  var numPackages = 12;
+  for (var i = 0; i < numPackages; i++) {
+    var pX = containerDrawX + (rnd(i) * containerW * 0.8) + containerW * 0.1;
+    var pY = containerY + (rnd(i + 1) * containerH * 0.6) - containerH * 0.3;
+    var pCol = (i % 3 === 0) ? AMBER : DIM; // One amber package (yours)
+    var pSize = PACKAGE_S * lerp(0.5, 0.7, rnd(i + 2));
+    s += packageBox(pX, pY, pSize, pCol, 0.9);
+  }
+
+  // Motion lines behind the container
+  var numLines = 5;
+  for (var j = 0; j < numLines; j++) {
+    var lineX = containerDrawX + containerW + j * 40 + (u * 300 % 200);
+    s += line(lineX, containerY - containerH / 2 + j * 50, lineX + 80, containerY - containerH / 2 + j * 50, WHITE, STROKE_W * 0.5, 0.3);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): FRUSTRATION - THE DELAY */
+function scene5(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var youX = CX, youY = BOT - 100;
+  var hubY = CY;
+  var hubW = W * 0.8;
+  var hubH = H * 0.6;
+
+  // Hub building/area (Blue)
+  s += rrect(CX, hubY, hubW, hubH, 40, BLUE, 0.15);
+  s += rrectStroke(CX, hubY, hubW, hubH, 40, BLUE, STROKE_W * 1.2, 0.4);
+
+  // Unloading area/secondary belt
+  var unloadBeltY = hubY + hubH / 2 - 80;
+  var unloadBeltW = hubW * 0.7;
+  var unloadBeltX = CX - hubW / 2 + unloadBeltW / 2 + 50;
+  s += conveyorBelt(unloadBeltX - unloadBeltW / 2, unloadBeltY, unloadBeltX + unloadBeltW / 2, unloadBeltY, u * 0.1, DIM, STROKE_W, 0.6);
+
+  // Your package, separated and waiting on a slow/frustrating (Coral) path
+  var packageX = lerp(unloadBeltX + unloadBeltW / 2 - PACKAGE_S, unloadBeltX - unloadBeltW / 2 + PACKAGE_S, easeIn(u * 0.8));
+  var packageY = unloadBeltY;
+  s += packageBox(packageX, packageY, PACKAGE_S, AMBER);
+
+  // Other packages (DIM) being processed faster or moving away
+  for (var i = 0; i < 5; i++) {
+    var pX = unloadBeltX + unloadBeltW / 2 - PACKAGE_S * 2 - i * 150 - (u * 100 % 300);
+    var pY = unloadBeltY + rnd(i) * 30 - 15;
+    s += packageBox(pX, pY, PACKAGE_S * 0.7, DIM, 0.5);
+  }
+
+  // You, showing frustration (Coral)
+  var headShake = Math.sin(u * Math.PI * 8) * 8;
+  var armFrustration = lerp(0, 40, smooth(u));
+  s += stickFigure(youX, youY, 1, armFrustration, 0, headShake, AMBER);
+
+  // Frustration indicator (coral bar filling up or pulsing)
+  var frustrationBarX = youX + 180;
+  var frustrationBarY = youY - 150;
+  var frustrationBarW = 120;
+  var frustrationBarH = 30;
+  s += rrectStroke(frustrationBarX, frustrationBarY, frustrationBarW, frustrationBarH, 8, CORAL, STROKE_W * 0.8);
+  var fillAmount = easeIn(u);
+  s += rrect(frustrationBarX - frustrationBarW / 2 + frustrationBarW * fillAmount / 2, frustrationBarY, frustrationBarW * fillAmount, frustrationBarH * 0.8, 6, CORAL);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): ARRIVAL - THE TRADE-OFF */
+function scene6(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var youX = CX - 200, youY = BOT - 100;
+  var packageX = lerp(CX, youX, ramp(u, 0.4, 0.7));
+  var packageY = lerp(CY, youY - STICK_H * 0.5, ramp(u, 0.4, 0.7));
+
+  // Package arrives at You
+  s += packageBox(packageX, packageY, PACKAGE_S, AMBER, lerp(1, 0.9, ramp(u, 0.8, 1.0)));
+
+  // You receiving the package
+  var armReach = lerp(40, -20, ramp(u, 0.4, 0.7)); // Arms reaching out, then holding
+  s += stickFigure(youX, youY, 1, armReach, 0, 0, AMBER);
+
+  // Screen reappears, showing the trade-off
+  var screenOp = ramp(u, 0.2, 0.6);
+  var screenScale = lerp(0.8, 1.0, smooth(u));
+  var screenX = CX + 200, screenY = CY - 200;
+  s += screenIcon(screenX, screenY, SCREEN_W, SCREEN_H, WHITE, screenOp);
+
+  // Trade-off visualization on screen: two paths/options
+  var pathLength = SCREEN_H * 0.4;
+  var pathY = screenY + SCREEN_H * 0.1;
+  var pathX1 = screenX - SCREEN_W * 0.15;
+  var pathX2 = screenX + SCREEN_W * 0.15;
+
+  // Cheap & Long (Amber)
+  s += line(pathX1, pathY - pathLength / 2, pathX1, pathY + pathLength / 2, AMBER, STROKE_W * 0.8, screenOp);
+  s += dot(pathX1, pathY + pathLength / 2 + 30, 10, AMBER, screenOp); // "Long" indicator
+  s += dot(pathX1, pathY - pathLength / 2 - 30, 10, AMBER, screenOp); // "Cheap" indicator (small dot)
+
+  // Expensive & Short (White/DIM)
+  s += line(pathX2, pathY + pathLength / 2, pathX2, pathY - pathLength / 2, WHITE, STROKE_W * 0.8, screenOp);
+  s += dot(pathX2, pathY - pathLength / 2 - 30, 10, DIM, screenOp); // "Expensive" indicator (small dot)
+  s += dot(pathX2, pathY + pathLength / 2 + 30, 10, DIM, screenOp); // "Short" indicator
+
+  // A balance beam or comparison line
+  var balanceY = pathY + pathLength / 2 + 60;
+  s += line(pathX1, balanceY, pathX2, balanceY, WHITE, STROKE_W * 0.6, screenOp * 0.7);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable at u=1
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() {
+  render(0);
+  window.__ready = true;
+}
+
+// Ensure boot is called. Use the same logic as the reference.
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500); // Fallback
+} else {
+  boot(); // No font support or promise, just boot immediately
+}
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

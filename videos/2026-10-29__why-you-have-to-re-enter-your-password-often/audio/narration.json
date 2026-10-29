@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You're deep into your online world, navigating an app, completely immersed. Everything flows perfectly, just as you expect. Your only desire: seamless, uninterrupted access.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "Then, abruptly, a login screen appears. \"Enter your password again.\" But you were just here! It feels like a jarring, arbitrary interruption, pulling you out of your digital flow.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "You sigh, typing your credentials, wondering why this keeps happening. Is the system broken? Forgetful? You assume it's just a poorly designed, frustrating inconvenience.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "The truth: your smooth experience is maintained by a temporary \"session token.\" This token has a built-in expiration, a digital timer ticking down from your initial login.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "Longer sessions offer convenience but increase risk if your device is compromised. Shorter sessions, while annoying, drastically reduce the window of vulnerability, safeguarding your data.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "So, you re-enter your password not because the system forgot, but because it's actively shielding you. A small hassle for a much larger layer of security.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

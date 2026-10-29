@@ -1,0 +1,490 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why You Have To Re-enter Your Password Often</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> system/security
+var AMBER = "#F2A93B";              // warm amber   -> YOU / convenience
+var CORAL = "#FF5B5B";              // coral red    -> frustration/risk
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+function hexToRgb(hex) {
+  var r = parseInt(hex.substring(1, 3), 16);
+  var g = parseInt(hex.substring(3, 5), 16);
+  var b = parseInt(hex.substring(5, 7), 16);
+  return [r, g, b];
+}
+function rgbToHex(r, g, b) {
+  return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
+}
+function lerpColor(a, b, t) {
+  var ca = hexToRgb(a), cb = hexToRgb(b);
+  var r = Math.round(lerp(ca[0], cb[0], t));
+  var g = Math.round(lerp(ca[1], cb[1], t));
+  var b = Math.round(lerp(ca[2], cb[2], t));
+  return rgbToHex(r, g, b);
+}
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom elements ---------- */
+// Stick figure: x, y is the center of the head.
+// pose: 0=neutral/interacting, 1=hands up, 2=typing, 3=annoyed, 4=thoughtful, 5=nodding
+function stickFigure(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = 24;
+  var bodyLen = 80;
+  var armLen = 60;
+  var legLen = 80;
+  var headY = y; // y is head center
+  var bodyTopY = headY + headR;
+  var bodyBotY = bodyTopY + bodyLen;
+  var legSplitY = bodyBotY;
+  var legFootY = legSplitY + legLen;
+
+  g += dot(x, headY, headR, col); // Head
+  g += line(x, bodyTopY, x, bodyBotY, col, 8); // Body
+
+  switch (pose) {
+    case 0: // Neutral / Interacting
+      g += line(x, bodyTopY + armLen * 0.3, x - armLen * 0.8, bodyTopY + armLen * 0.8, col, 8); // Left arm
+      g += line(x, bodyTopY + armLen * 0.3, x + armLen * 0.8, bodyTopY + armLen * 0.8, col, 8); // Right arm
+      g += line(x, legSplitY, x - legLen * 0.4, legFootY, col, 8); // Left leg
+      g += line(x, legSplitY, x + legLen * 0.4, legFootY, col, 8); // Right leg
+      break;
+    case 1: // Hands up
+      g += line(x, bodyTopY, x - armLen * 0.7, bodyTopY - armLen * 0.7, col, 8); // Left arm up
+      g += line(x, bodyTopY, x + armLen * 0.7, bodyTopY - armLen * 0.7, col, 8); // Right arm up
+      g += line(x, legSplitY, x - legLen * 0.4, legFootY, col, 8); // Left leg
+      g += line(x, legSplitY, x + legLen * 0.4, legFootY, col, 8); // Right leg
+      break;
+    case 2: // Typing
+      g += line(x, bodyTopY + armLen * 0.2, x - armLen * 0.7, bodyTopY + armLen * 0.6, col, 8); // Left arm bent
+      g += line(x, bodyTopY + armLen * 0.2, x + armLen * 0.7, bodyTopY + armLen * 0.6, col, 8); // Right arm bent
+      g += line(x, legSplitY, x - legLen * 0.4, legFootY, col, 8); // Left leg
+      g += line(x, legSplitY, x + legLen * 0.4, legFootY, col, 8); // Right leg
+      break;
+    case 3: // Annoyed (hands on hips, head slightly down)
+      g += line(x, bodyTopY + bodyLen * 0.6, x - armLen * 0.5, bodyTopY + bodyLen * 0.6, col, 8); // Left arm on hip
+      g += line(x, bodyTopY + bodyLen * 0.6, x + armLen * 0.5, bodyTopY + bodyLen * 0.6, col, 8); // Right arm on hip
+      g += line(x, legSplitY, x - legLen * 0.4, legFootY, col, 8); // Left leg
+      g += line(x, legSplitY, x + legLen * 0.4, legFootY, col, 8); // Right leg
+      g += line(x - headR * 0.5, headY - headR * 0.3, x + headR * 0.5, headY - headR * 0.3, col, 7); // Annoyed brow
+      break;
+    case 4: // Thoughtful (hand on chin)
+      g += line(x, bodyTopY + armLen * 0.2, x - armLen * 0.4, bodyTopY + armLen * 0.6, col, 8); // Left arm
+      g += line(x, bodyTopY + armLen * 0.2, x + armLen * 0.4, bodyTopY + armLen * 0.6, col, 8); // Right arm
+      g += line(x + armLen * 0.4, bodyTopY + armLen * 0.6, x + headR * 0.8, headY + headR * 0.8, col, 8); // Hand to chin
+      g += line(x, legSplitY, x - legLen * 0.4, legFootY, col, 8); // Left leg
+      g += line(x, legSplitY, x + legLen * 0.4, legFootY, col, 8); // Right leg
+      break;
+    case 5: // Nodding (head tilted down)
+      g += line(x, bodyTopY + armLen * 0.3, x - armLen * 0.8, bodyTopY + armLen * 0.8, col, 8); // Left arm
+      g += line(x, bodyTopY + armLen * 0.3, x + armLen * 0.8, bodyTopY + armLen * 0.8, col, 8); // Right arm
+      g += line(x, legSplitY, x - legLen * 0.4, legFootY, col, 8); // Left leg
+      g += line(x, legSplitY, x + legLen * 0.4, legFootY, col, 8); // Right leg
+      g += line(x - headR * 0.4, headY - headR * 0.1, x + headR * 0.4, headY + headR * 0.1, col, 7); // Nodding line
+      break;
+  }
+  g += '</g>';
+  return g;
+}
+
+function lockIcon(x, y, size, col, op, broken) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var bodyW = size * 0.8;
+  var bodyH = size * 0.8;
+  var shackleR = size * 0.4;
+  var shackleY = y - size * 0.4;
+
+  g += rrect(x, y + size * 0.1, bodyW, bodyH, size * 0.1, col, op); // Lock body
+
+  if (broken) {
+    g += line(x - shackleR * 0.6, shackleY, x - shackleR * 0.2, shackleY - shackleR * 0.6, col, 8);
+    g += line(x + shackleR * 0.6, shackleY, x + shackleR * 0.2, shackleY - shackleR * 0.6, col, 8);
+  } else {
+    g += pathTag("M " + (x - shackleR * 0.6) + " " + shackleY +
+                 " A " + shackleR + " " + shackleR + " 0 0 1 " + (x + shackleR * 0.6) + " " + shackleY,
+                 col, 8);
+  }
+
+  g += dot(x, y + size * 0.15, size * 0.08, col); // Keyhole
+  g += line(x, y + size * 0.15 + size * 0.08, x, y + size * 0.15 + size * 0.2, col, 7);
+  g += '</g>';
+  return g;
+}
+
+function keyIcon(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += line(x - size * 0.3, y, x + size * 0.3, y, col, 6); // Shaft
+  g += ring(x - size * 0.3, y, size * 0.15, col, 6); // Head ring
+  g += line(x + size * 0.2, y + size * 0.05, x + size * 0.3, y + size * 0.05, col, 6); // Teeth
+  g += line(x + size * 0.2, y - size * 0.05, x + size * 0.3, y - size * 0.05, col, 6); // Teeth
+  g += '</g>';
+  return g;
+}
+
+function questionMark(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var d = "M " + x + " " + (y - size * 0.5) +
+          " A " + (size * 0.3) + " " + (size * 0.3) + " 0 1 1 " + (x - size * 0.3) + " " + (y - size * 0.1) +
+          " L " + (x - size * 0.1) + " " + (y + size * 0.1) +
+          " M " + x + " " + (y + size * 0.3);
+  return pathTag(d, col, 10, op);
+}
+
+function clockIcon(x, y, size, col, time, op) { // time in [0,1) for animation
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, size * 0.4, col, 8); // Clock face
+  var angleMin = time * Math.PI * 2;
+  var angleHour = (time / 12) * Math.PI * 2; // Hour hand moves slower
+  g += line(x, y, x + Math.sin(angleMin) * size * 0.3, y - Math.cos(angleMin) * size * 0.3, col, 6); // Minute hand
+  g += line(x, y, x + Math.sin(angleHour) * size * 0.2, y - Math.cos(angleHour) * size * 0.2, col, 6); // Hour hand
+  g += dot(x, y, size * 0.05, col); // Center dot
+  g += '</g>';
+  return g;
+}
+
+function shieldIcon(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var d = "M " + (x - size * 0.4) + " " + (y - size * 0.5) +
+          " Q " + (x - size * 0.5) + " " + (y - size * 0.1) + " " + (x - size * 0.4) + " " + (y + size * 0.5) +
+          " L " + (x + size * 0.4) + " " + (y + size * 0.5) +
+          " Q " + (x + size * 0.5) + " " + (y - size * 0.1) + " " + (x + size * 0.4) + " " + (y - size * 0.5) +
+          " Z";
+  return pathTag(d, col, 10, op);
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var figX = CX, figY = CY + 200; // Stick figure base position (head center at figY-100)
+  var screenW = 800, screenH = 1200;
+  var screenY = CY - 100;
+
+  var scale = lerp(1.0, 0.9, smooth(u * 0.8));
+  var driftY = lerp(0, -60, smooth(u * 0.8));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  // Screen in background, blue glow
+  var glowOp = lerp(0.0, 0.2, smooth(u * 2));
+  s += rrect(CX, screenY, screenW, screenH, 40, BLUE, glowOp);
+  s += rrectStroke(CX, screenY, screenW, screenH, 40, BLUE, 10, lerp(0.4, 0.8, smooth(u)));
+
+  // Stick figure interacting
+  var headY = figY - 100;
+  var bodyTopY = headY + 24;
+  var armLen = 60;
+  s += stickFigure(figX, headY, AMBER, 0, 1);
+  // Custom arm animation for interaction (overrides default pose 0 arms)
+  s += line(figX, bodyTopY + armLen * 0.3, figX - armLen * 0.8 + Math.sin(u * 10) * 10, bodyTopY + armLen * 0.8, AMBER, 8);
+  s += line(figX, bodyTopY + armLen * 0.3, figX + armLen * 0.8 + Math.cos(u * 10) * 10, bodyTopY + armLen * 0.8, AMBER, 8);
+
+  // Subtle lock icon in screen corner (hero element 1)
+  var lockSize = 60;
+  var lockOp = lerp(0.0, 0.3, smooth(u * 1.5));
+  s += lockIcon(CX + screenW / 2 - lockSize, screenY - screenH / 2 + lockSize, lockSize, WHITE, lockOp, false);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var figX = CX, figY = CY + 200;
+  var screenW_start = 800, screenH_start = 1200;
+  var screenW_end = 980, screenH_end = 1500; // Larger login screen
+  var screenY = CY - 100;
+
+  var expand = smooth(ramp(u, 0.0, 0.3));
+  var screenW = lerp(screenW_start, screenW_end, expand);
+  var screenH = lerp(screenH_start, screenH_end, expand);
+
+  var recoil = Math.sin(u * Math.PI * 2) * 10 * pulse(u, 0.2, 0.1);
+  var figRecoilY = lerp(0, -40, smooth(ramp(u, 0.1, 0.4)));
+
+  s += '<g ' + camera(1.0, recoil, figRecoilY) + '>';
+
+  // Login screen
+  var screenCol = lerpColor(BLUE, CORAL, expand);
+  s += rrectStroke(CX, screenY, screenW, screenH, 40, screenCol, 12, 1);
+  s += rrect(CX, screenY, screenW, screenH, 40, "#000000", 0.9); // Dark fill for screen content
+
+  // Login field
+  var loginFieldY = screenY + 100;
+  var loginFieldW = screenW * 0.7;
+  var loginFieldH = 80;
+  var loginFieldOp = smooth(ramp(u, 0.4, 0.7));
+  s += rrectStroke(CX, loginFieldY, loginFieldW, loginFieldH, 15, WHITE, 7, loginFieldOp);
+  s += keyIcon(CX - loginFieldW / 2 + 40, loginFieldY, 40, WHITE, loginFieldOp);
+
+  // Stick figure recoils
+  s += stickFigure(figX, figY - 100 + figRecoilY, AMBER, 1, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var figX = CX, figY = CY + 200;
+  var screenW = 980, screenH = 1500;
+  var screenY = CY - 100;
+
+  var fadeScreen = lerp(1.0, 0.4, smooth(ramp(u, 0.0, 0.3)));
+  var grumblePose = ramp(u, 0.6, 1.0);
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Faded login screen
+  s += rrectStroke(CX, screenY, screenW, screenH, 40, CORAL, 12, fadeScreen);
+  s += rrect(CX, screenY, screenW, screenH, 40, "#000000", fadeScreen * 0.9);
+
+  // Keyboard
+  var keyboardW = 600, keyboardH = 200;
+  var keyboardY = figY + 100;
+  var keyboardOp = smooth(ramp(u, 0.0, 0.2));
+  s += rrectStroke(CX, keyboardY, keyboardW, keyboardH, 20, WHITE, 8, keyboardOp);
+  for (var i = 0; i < 4; i++) {
+    for (var j = 0; j < 10; j++) {
+      s += rrect(CX - keyboardW / 2 + 50 + j * 50, keyboardY - keyboardH / 2 + 40 + i * 40, 30, 20, 5, DIM, keyboardOp * 0.6);
+    }
+  }
+
+  // Stick figure typing/grumbling
+  var currentPose = 2; // Typing
+  if (grumblePose > 0) currentPose = 3; // Grumbling
+  s += stickFigure(figX, figY - 100, AMBER, currentPose, 1);
+
+  // Question marks
+  var qmOp = smooth(ramp(u, 0.3, 0.7));
+  var qmY_base = figY - 300;
+  for (var i = 0; i < 3; i++) {
+    var qmX = figX - 80 + i * 80;
+    var qmY = qmY_base - Math.sin(u * Math.PI * 3 + i) * 10;
+    s += questionMark(qmX, qmY, 60, CORAL, qmOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var screenW = 980, screenH = 1500;
+  var screenY = CY - 100;
+
+  var dissolve = smooth(ramp(u, 0.0, 0.3)); // Login screen dissolves
+  var tokenAppear = smooth(ramp(u, 0.2, 0.5)); // Token appears
+  var tokenToClock = smooth(ramp(u, 0.5, 0.8)); // Token morphs to clock
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Login screen dissolving
+  if (dissolve < 1) {
+    s += rrectStroke(CX, screenY, screenW * (1 - dissolve), screenH * (1 - dissolve), 40, CORAL, 12 * (1 - dissolve), 1 - dissolve);
+  }
+
+  // Session token (sphere)
+  if (tokenAppear > 0 && tokenToClock < 1) {
+    var tokenR = lerp(0, 60, tokenAppear);
+    s += dot(CX, CY, tokenR, BLUE, 0.9);
+    s += ring(CX, CY, tokenR + Math.sin(u * 20) * 5, BLUE, 5, 0.4); // Subtle glow
+  }
+
+  // Clock (morphed from token)
+  if (tokenToClock > 0) {
+    var clockSize = lerp(0, 200, tokenToClock);
+    var clockOp = lerp(0, 1, tokenToClock);
+    s += clockIcon(CX, CY, clockSize, BLUE, u * 3, clockOp); // Tick faster for effect
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var figX = CX - 300, figY = CY + 200;
+  var clockSize = 200;
+  var lockX = CX + 300, lockY = CY + 100;
+
+  var figShrink = smooth(ramp(u, 0.0, 0.4));
+  var brokenLockDissolve = smooth(ramp(u, 0.0, 0.4));
+  var strongLockAppear = smooth(ramp(u, 0.4, 0.8));
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Clock remains central
+  s += clockIcon(CX, CY, clockSize, BLUE, u * 3, 1);
+
+  // Stick figure (annoyed, shrinking)
+  var currentFigY = figY - 100 + lerp(0, 50, figShrink);
+  var currentFigScale = lerp(1, 0.8, figShrink);
+  s += '<g transform="translate(' + figX + ' ' + currentFigY + ') scale(' + currentFigScale + ') translate(' + (-figX) + ' ' + (-currentFigY) + ')">';
+  s += stickFigure(figX, currentFigY, AMBER, 3, 1);
+  s += '</g>';
+
+  // Broken lock dissolves
+  if (brokenLockDissolve < 1) {
+    var brokenLockSize = lerp(150, 0, brokenLockDissolve);
+    s += lockIcon(lockX, lockY, brokenLockSize, CORAL, 1 - brokenLockDissolve, true);
+  }
+
+  // Strong lock appears
+  if (strongLockAppear > 0) {
+    var strongLockSize = lerp(0, 150, strongLockAppear);
+    s += lockIcon(lockX, lockY, strongLockSize, BLUE, strongLockAppear, false);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var figX = CX, figY = CY + 200;
+  var clockSize = 200;
+  var lockSize = 150;
+
+  var dissolveElements = smooth(ramp(u, 0.0, 0.3));
+  var shieldAppear = smooth(ramp(u, 0.3, 0.7));
+  var figPoseChange = smooth(ramp(u, 0.0, 0.5)); // Thoughtful to nodding
+  var shieldGrow = smooth(ramp(u, 0.5, 1.0)); // Shield grows to surround
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Dissolve clock/lock
+  if (dissolveElements < 1) {
+    s += clockIcon(CX, CY, clockSize * (1 - dissolveElements), BLUE, u * 3, 1 - dissolveElements);
+    s += lockIcon(CX + 300, CY + 100, lockSize * (1 - dissolveElements), BLUE, 1 - dissolveElements, false);
+  }
+
+  // Shield appears and grows
+  if (shieldAppear > 0) {
+    var currentShieldSize = lerp(0, 400, shieldAppear);
+    if (shieldGrow > 0) {
+      currentShieldSize = lerp(currentShieldSize, 700, shieldGrow); // Grow larger
+    }
+    s += shieldIcon(CX, CY, currentShieldSize, BLUE, shieldAppear * 0.8);
+    s += ring(CX, CY, currentShieldSize * 0.9, BLUE, 10, shieldAppear * 0.3); // Inner glow
+  }
+
+  // Stick figure changes pose and is inside shield
+  var currentPose = 4; // Thoughtful
+  if (figPoseChange > 0.5) currentPose = 5; // Nodding
+  var figScale = lerp(0.8, 1.0, shieldGrow); // Scale up a bit as shield grows
+  var figY_offset = lerp(50, 0, shieldGrow); // Move up slightly
+  s += '<g transform="translate(' + figX + ' ' + (figY - 100 + figY_offset) + ') scale(' + figScale + ') translate(' + (-figX) + ' ' + (-(figY - 100 + figY_offset)) + ')">';
+  s += stickFigure(figX, figY - 100 + figY_offset, AMBER, currentPose, 1);
+  s += '</g>';
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

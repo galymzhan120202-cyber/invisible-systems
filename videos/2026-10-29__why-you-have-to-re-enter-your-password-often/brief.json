@@ -1,0 +1,15 @@
+{
+  "id": "why-you-have-to-re-enter-your-password-often",
+  "slug": "2026-10-29__why-you-have-to-re-enter-your-password-often",
+  "title_working": "Why You Have To Re-enter Your Password Often — Invisible Systems",
+  "system": "security protocols balancing convenience and risk",
+  "cluster": "institutions-and-bureaucracy",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "failed",
+  "created_at": "2026-10-29T12:55:10+00:00",
+  "produced_at": "2026-10-29T13:02:12+00:00",
+  "verify": "FAIL",
+  "takeaway": "Logging in repeatedly isn't a bug, but a deliberate security measure protecting your data from compromised sessions.",
+  "animation_source": "llm"
+}
