@@ -1,0 +1,15 @@
+{
+  "id": "why-games-have-a-tutorial-that-shows-the-obvious",
+  "slug": "2026-10-30__why-games-have-a-tutorial-that-shows-the-obvious",
+  "title_working": "Why Games Have Tutorials For Obvious Actions",
+  "system": "player onboarding and error prevention for new users",
+  "cluster": "platforms-and-algorithms",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-10-30T12:50:30+00:00",
+  "produced_at": "2026-10-30T12:56:59+00:00",
+  "verify": "PASS",
+  "takeaway": "You now understand that 'obvious' tutorials are a vital part of game design, ensuring every player, regardless of experience, can engage and enjoy the game.",
+  "animation_source": "llm"
+}

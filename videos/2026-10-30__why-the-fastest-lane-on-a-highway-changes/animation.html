@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why The Fastest Lane On A Highway Changes</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+var LX1 = 300, LX2 = 540, LX3 = 780; // Left, Middle, Right lane x coordinates
+var CARY = 1120;                    // "you" resting height
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> traffic waves/system
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want
+var CORAL = "#FF5B5B";              // coral red    -> frustration/slowdown
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, fillCol) {
+  var fill = fillCol ? 'fill="' + fillCol + '"' : 'fill="none"';
+  return '<path d="' + d + '" ' + fill + ' stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+/* the "you" car: wide rounded body + driver head + two wheels */
+function car(x, y, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += '<rect x="' + (x - 66) + '" y="' + (y - 34) + '" width="132" height="76" rx="22" fill="none" stroke="' + col + '" stroke-width="10"/>';
+  g += dot(x, y - 58, 17, col);                       // driver head
+  g += dot(x - 42, y + 46, 11, col);                  // wheels
+  g += dot(x + 42, y + 46, 11, col);
+  g += '</g>';
+  return g;
+}
+/* persistent faint lane tracks behind every scene (hero element, always present) */
+function guideTracks(op) {
+  op = (op == null ? 0.16 : op);
+  return rrect(LX1, (TOP + BOT) / 2, 96, BOT - TOP, 48, DIM, op) +
+         rrect(LX2, (TOP + BOT) / 2, 96, BOT - TOP, 48, DIM, op) +
+         rrect(LX3, (TOP + BOT) / 2, 96, BOT - TOP, 48, DIM, op);
+}
+/* scrolling dashed road markers down a lane — constant motion cue.
+   phase in [0,1) shifts the pattern; speed multiplies visually via phase rate. */
+function laneDashes(x, phase, col, op, dashLen, gapLen) {
+  var g = '', gap = gapLen || 150, dash = dashLen || 66;
+  var off = (phase % 1) * gap;
+  for (var y = TOP - gap + off; y < BOT; y += gap) {
+    var a = Math.max(y, TOP), b = Math.min(y + dash, BOT);
+    if (b > a) g += line(x, a, x, b, col, 8, op);
+  }
+  return g;
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+// Helper to draw multiple traffic dots in a lane
+function trafficDots(laneX, u, speedFactor, count, baseOffset, col, op) {
+  var s = '';
+  for (var i = 0; i < count; i++) {
+    var y = BOT - baseOffset - i * (BOT - TOP) / count - u * speedFactor + rnd(i) * 40;
+    while (y < TOP) y += (BOT - TOP);
+    while (y > BOT) y -= (BOT - TOP);
+    s += dot(laneX, y, 15, col, op);
+  }
+  return s;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  var wiggleX = Math.sin(u * Math.PI * 2) * 8; // Subtle lane wiggle
+  s += '<g ' + camera(scale, wiggleX, driftY) + '>';
+  s += guideTracks(0.16); // Faint background lanes
+  s += line(LX1, TOP, LX1, BOT, WHITE, 7, 0.85);
+  s += line(LX2, TOP, LX2, BOT, WHITE, 7, 0.85);
+  s += line(LX3, TOP, LX3, BOT, WHITE, 7, 0.85);
+  // Scrolling markers
+  s += laneDashes(LX1, u * 1.6, WHITE, 0.22);
+  s += laneDashes(LX2, u * 1.8, WHITE, 0.22);
+  s += laneDashes(LX3, u * 1.4, WHITE, 0.22);
+
+  // Other-lane traffic, varying speeds
+  s += trafficDots(LX1, u, 120, 6, 90, DIM, 0.9); // Left lane
+  s += trafficDots(LX2, u, 100, 5, 120, WHITE, 0.9); // Middle lane (some faster, some slower)
+  s += trafficDots(LX3, u, 140, 7, 60, DIM, 0.9); // Right lane
+
+  var bob = Math.sin(u * Math.PI * 3) * 5;
+  s += car(LX2, CARY + bob, AMBER, 1); // Amber car in middle lane
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14);
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+  s += guideTracks(0.16);
+  s += line(LX1, TOP, LX1, BOT, WHITE, 7, 0.85);
+  s += line(LX2, TOP, LX2, BOT, WHITE, 7, 0.85);
+  s += line(LX3, TOP, LX3, BOT, WHITE, 7, 0.85);
+
+  // Car shifts from LX2 to LX1
+  var hop = smooth(ramp(u, 0.10, 0.26));
+  var carX = lerp(LX2, LX1, hop);
+  var carLift = Math.sin(hop * Math.PI) * 30;
+
+  // Lane dashes: chosen lane (LX1) appears to accelerate
+  s += laneDashes(LX1, u * lerp(1.8, 3.0, easeOut(ramp(u, 0.2, 0.5))), WHITE, 0.22);
+  s += laneDashes(LX2, u * lerp(1.8, 1.2, easeIn(ramp(u, 0.2, 0.5))), WHITE, 0.22); // Previous lane slows
+  s += laneDashes(LX3, u * 1.4, WHITE, 0.22);
+
+  // Traffic in LX1 (chosen lane) appears to accelerate
+  s += trafficDots(LX1, u, lerp(120, 200, easeOut(ramp(u, 0.2, 0.5))), 6, 90, WHITE, 0.9);
+  // Traffic in LX2 (previous lane) appears to fall behind
+  s += trafficDots(LX2, u, lerp(100, 60, easeIn(ramp(u, 0.2, 0.5))), 5, 120, DIM, 0.9);
+  s += trafficDots(LX3, u, 140, 7, 60, DIM, 0.9);
+
+  s += car(carX, CARY - carLift, AMBER, 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH — Frustration as the chosen lane slows. */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += guideTracks(0.16);
+  s += line(LX1, TOP, LX1, BOT, WHITE, 7, 0.85);
+  s += line(LX2, TOP, LX2, BOT, WHITE, 7, 0.85);
+  s += line(LX3, TOP, LX3, BOT, WHITE, 7, 0.85);
+
+  // Lane dashes: chosen lane (LX1) slows, LX2 speeds up
+  s += laneDashes(LX1, u * lerp(3.0, 0.8, easeIn(ramp(u, 0.1, 0.4))), WHITE, 0.22);
+  s += laneDashes(LX2, u * lerp(1.2, 2.5, easeOut(ramp(u, 0.1, 0.4))), WHITE, 0.22);
+  s += laneDashes(LX3, u * 1.4, WHITE, 0.22);
+
+  // Traffic dots: LX1 bunches up, LX2 flows past
+  s += trafficDots(LX1, u, lerp(200, 50, easeIn(ramp(u, 0.1, 0.4))), 6, 90, WHITE, 0.9); // Chosen lane slows
+  s += trafficDots(LX2, u, lerp(60, 180, easeOut(ramp(u, 0.1, 0.4))), 5, 120, WHITE, 0.9); // Adjacent lane speeds up
+  s += trafficDots(LX3, u, 140, 7, 60, DIM, 0.9);
+
+  s += car(LX1, CARY, AMBER, 1);
+
+  // Coral red streaks around the amber car
+  var frustration = smooth(ramp(u, 0.2, 0.6)) * (1 - smooth(ramp(u, 0.8, 1.0)));
+  if (frustration > 0.02) {
+    var streakLen = lerp(0, 80, frustration);
+    var streakOp = lerp(0, 0.8, frustration);
+    var pulseEffect = Math.sin(u * Math.PI * 10) * 8 * frustration;
+    s += line(LX1 - 60 - pulseEffect, CARY - 40, LX1 - 60 - pulseEffect - streakLen, CARY - 40, CORAL, 8, streakOp);
+    s += line(LX1 - 60 - pulseEffect, CARY + 40, LX1 - 60 - pulseEffect - streakLen, CARY + 40, CORAL, 8, streakOp);
+    s += line(LX1 + 60 + pulseEffect, CARY - 40, LX1 + 60 + pulseEffect + streakLen, CARY - 40, CORAL, 8, streakOp);
+    s += line(LX1 + 60 + pulseEffect, CARY + 40, LX1 + 60 + pulseEffect + streakLen, CARY + 40, CORAL, 8, streakOp);
+  }
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND — The invisible waves of congestion are revealed. */
+function scene4(u) {
+  var s = '';
+  var waveIntro = smooth(ramp(u, 0.0, 0.3));
+  var waveOpacity = lerp(0, 0.4, waveIntro);
+  var dotOpacity = lerp(1, 0.6, waveIntro);
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += guideTracks(0.16 * (1 - waveIntro)); // Fading out static guide tracks
+
+  // Lanes become less distinct
+  s += line(LX1, TOP, LX1, BOT, WHITE, 7, 0.85 * (1 - waveIntro));
+  s += line(LX2, TOP, LX2, BOT, WHITE, 7, 0.85 * (1 - waveIntro));
+  s += line(LX3, TOP, LX3, BOT, WHITE, 7, 0.85 * (1 - waveIntro));
+
+  // Draw signal blue waves
+  var waveSpeed = 100; // Pixels per second, backward
+  var wavePhase = u * waveSpeed;
+  var numWaves = 3;
+  for (var i = 0; i < numWaves; i++) {
+    var waveY = BOT - (wavePhase + i * 400) % (BOT - TOP + 400);
+    if (waveY < TOP - 200) waveY += (BOT - TOP + 400); // Wrap around
+    if (waveY > BOT + 200) waveY -= (BOT - TOP + 400);
+
+    var waveWidth = lerp(W * 0.5, W * 0.7, Math.sin(u * Math.PI + i * 0.5) * 0.5 + 0.5);
+    var waveH = 200;
+    var waveRad = 100;
+    s += rrect(CX, waveY, waveWidth, waveH, waveRad, BLUE, waveOpacity * lerp(0.6, 1.0, Math.sin(u * 3 + i) * 0.5 + 0.5));
+  }
+
+  // Traffic dots distributed within waves, some in amber car's lane
+  var carLane = LX1; // Amber car is still in LX1
+  var dotCount = 5;
+  for (var i = 0; i < dotCount; i++) {
+    var yOffset = (i * (BOT - TOP) / dotCount + wavePhase * 0.8) % (BOT - TOP);
+    var dotY = TOP + yOffset;
+    s += dot(carLane, dotY, 15, WHITE, dotOpacity);
+    s += dot(LX2, dotY + 100, 15, DIM, dotOpacity);
+    s += dot(LX3, dotY - 100, 15, DIM, dotOpacity);
+  }
+
+  // Amber car in the dense wave
+  s += car(carLane, CARY, AMBER, 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE — Understanding the dynamic, shifting pattern. */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.8, smooth(u));
+  var cameraY = lerp(0, 90, smooth(u));
+  var waveIntro = 1; // Waves are fully present
+  var dotOpacity = lerp(0.6, 0.8, smooth(u));
+
+  s += '<g ' + camera(scale, 0, cameraY) + '>';
+  s += guideTracks(0.16 * (1 - waveIntro));
+
+  // Lanes are now secondary, almost invisible
+  s += line(LX1, TOP, LX1, BOT, WHITE, 7, 0.85 * (1 - waveIntro));
+  s += line(LX2, TOP, LX2, BOT, WHITE, 7, 0.85 * (1 - waveIntro));
+  s += line(LX3, TOP, LX3, BOT, WHITE, 7, 0.85 * (1 - waveIntro));
+
+  // Signal blue waves continue, maybe more pronounced
+  var waveSpeed = 100;
+  var wavePhase = u * waveSpeed;
+  var numWaves = 3;
+  for (var i = 0; i < numWaves; i++) {
+    var waveY = BOT - (wavePhase + i * 400) % (BOT - TOP + 400);
+    if (waveY < TOP - 200) waveY += (BOT - TOP + 400);
+    if (waveY > BOT + 200) waveY -= (BOT - TOP + 400);
+
+    var waveWidth = lerp(W * 0.7, W * 0.8, Math.sin(u * Math.PI + i * 0.5) * 0.5 + 0.5);
+    var waveH = 200;
+    var waveRad = 100;
+    s += rrect(CX, waveY, waveWidth, waveH, waveRad, BLUE, 0.4 * lerp(0.6, 1.0, Math.sin(u * 3 + i) * 0.5 + 0.5));
+  }
+
+  // Traffic dots within waves, showing the pattern
+  var carLane = LX1; // Amber car is still in LX1
+  var dotCount = 5;
+  for (var i = 0; i < dotCount; i++) {
+    var yOffset = (i * (BOT - TOP) / dotCount + wavePhase * 0.8) % (BOT - TOP);
+    var dotY = TOP + yOffset;
+    s += dot(carLane, dotY, 15, WHITE, dotOpacity);
+    s += dot(LX2, dotY + 100, 15, DIM, dotOpacity);
+    s += dot(LX3, dotY - 100, 15, DIM, dotOpacity);
+  }
+
+  s += car(carLane, CARY, AMBER, 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE — New perspective, less frustration. */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.8, 0.92, smooth(clamp(u / 0.7, 0, 1)));
+  var cameraY = lerp(90, 0, smooth(u));
+  var reform = smooth(ramp(u, 0.58, 0.86)); // Transition back to normal lanes
+
+  s += '<g ' + camera(scale, 0, cameraY) + '>';
+
+  // Waves dissipate, lanes re-emerge
+  var waveOpacity = lerp(0.4, 0, reform);
+  var waveSpeed = 100;
+  var wavePhase = u * waveSpeed;
+  var numWaves = 3;
+  for (var i = 0; i < numWaves; i++) {
+    var waveY = BOT - (wavePhase + i * 400) % (BOT - TOP + 400);
+    if (waveY < TOP - 200) waveY += (BOT - TOP + 400);
+    if (waveY > BOT + 200) waveY -= (BOT - TOP + 400);
+
+    var waveWidth = lerp(W * 0.8, W * 0.5, reform);
+    var waveH = 200;
+    var waveRad = 100;
+    s += rrect(CX, waveY, waveWidth, waveH, waveRad, BLUE, waveOpacity * lerp(0.6, 1.0, Math.sin(u * 3 + i) * 0.5 + 0.5));
+  }
+
+  s += guideTracks(0.16 * reform); // Guide tracks re-emerge
+
+  if (reform > 0.02) {
+    s += line(LX1, TOP, LX1, BOT, WHITE, 7, 0.85 * reform);
+    s += line(LX2, TOP, LX2, BOT, WHITE, 7, 0.85 * reform);
+    s += line(LX3, TOP, LX3, BOT, WHITE, 7, 0.85 * reform);
+  }
+
+  // Traffic dots return to individual movement, less dense
+  var dotOpacity = lerp(0.8, 0.9, reform);
+  s += trafficDots(LX1, u, 120, 4, 90, DIM, dotOpacity);
+  s += trafficDots(LX2, u, 100, 3, 120, WHITE, dotOpacity);
+  s += trafficDots(LX3, u, 140, 4, 60, DIM, dotOpacity);
+
+  // Amber car returns to middle lane, at peace
+  var carX = lerp(LX1, LX2, reform);
+  s += car(carX, CARY, AMBER, 1);
+
+  // A subtle "peace" indicator, maybe a gentle ring or pulse
+  var peacePulse = Math.sin(u * Math.PI * 2) * 0.5 + 0.5;
+  s += ring(carX, CARY, 80 + peacePulse * 10, AMBER, 4, 0.3 * (1 - reform));
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable at u=1
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() {
+  render(0);
+  window.__ready = true; // Set __ready AFTER initial render
+}
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

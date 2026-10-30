@@ -1,0 +1,15 @@
+{
+  "id": "why-the-fastest-lane-on-a-highway-changes",
+  "slug": "2026-10-30__why-the-fastest-lane-on-a-highway-changes",
+  "title_working": "Why The Fastest Lane On A Highway Changes",
+  "system": "dynamic traffic flow and emergent congestion patterns",
+  "cluster": "traffic-and-crowds",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-10-30T12:57:02+00:00",
+  "produced_at": "2026-10-30T13:02:03+00:00",
+  "verify": "PASS",
+  "takeaway": "The 'fastest' lane on a highway is not a fixed position, but a temporary state within dynamic traffic waves that constantly form and dissipate.",
+  "animation_source": "llm"
+}

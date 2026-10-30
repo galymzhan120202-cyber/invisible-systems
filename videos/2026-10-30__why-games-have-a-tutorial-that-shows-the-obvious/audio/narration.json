@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You just started a new game, ready for action. The tutorial pops up: \"Press 'A' to jump.\" Seriously? You've gamed for years, this is so obvious!",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "Your brain processes movements instantly. To you, it's not learning, just a delay before fun. It just feels frustrating.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "Developers don't design just for experts. They build games for *everyone*, from pros to first-time controller users.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "Without guidance, new players might struggle, get frustrated, and quit quickly. That's a huge loss for the game.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "So, the \"obvious\" tutorial isn't for you. It's a small investment to onboard everyone, ensuring they grasp basics and stay for the experience.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "Next time a game says \"Press 'A' to jump,\" you might still roll your eyes. But now, you'll see the invisible system welcoming *every* player.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

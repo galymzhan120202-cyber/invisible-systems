@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Games Have Tutorials For Obvious Actions</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary elements
+var BLUE  = "#4C86F0";              // signal blue  -> system / guidance / new player
+var AMBER = "#F2A93B";              // warm amber   -> YOU / experienced player
+var CORAL = "#FF5B5B";              // coral red    -> frustration / error / cost
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function chevron(x, y, size, col, op) {
+  var d = "M " + (x - size) + " " + (y + size * 0.55) + " L " + x + " " + (y - size * 0.55) + " L " + (x + size) + " " + (y + size * 0.55);
+  return pathTag(d, col, 14, op);
+}
+
+/* stick figure: y is the approximate center of the figure */
+function stickFigure(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var sw = 8;
+  var headR = 20;
+  var bodyH = 80;
+  var armL = 50;
+  var legL = 60;
+  var handR = 8;
+  var footR = 10;
+
+  var headCenterY = y - (bodyH / 2 + headR);
+  var bodyTopY = y - bodyH / 2;
+  var bodyBottomY = y + bodyH / 2;
+  var armY = bodyTopY + bodyH / 4;
+  var armXOffset = 20;
+  var handYOffset = 10;
+  var legXOffset = 20;
+  var footYOffset = 10;
+
+  var g = '<g opacity="' + op + '">';
+  // Head
+  g += dot(x, headCenterY, headR, col);
+
+  // Body
+  g += line(x, bodyTopY, x, bodyBottomY, col, sw);
+
+  // Arms
+  if (pose === 'shrug') {
+    g += line(x - armXOffset, armY, x - armXOffset - armL * 0.6, armY - armL * 0.3, col, sw);
+    g += dot(x - armXOffset - armL * 0.6, armY - armL * 0.3 + handYOffset, handR, col);
+    g += line(x + armXOffset, armY, x + armXOffset + armL * 0.6, armY - armL * 0.3, col, sw);
+    g += dot(x + armXOffset + armL * 0.6, armY - armL * 0.3 + handYOffset, handR, col);
+  } else if (pose === 'controller') {
+    var controllerW = 70, controllerH = 40;
+    var controllerY = bodyBottomY - 10;
+    var controllerX = x;
+    g += rrect(controllerX, controllerY, controllerW, controllerH, 10, col, 0.8);
+    g += dot(controllerX - controllerW / 4, controllerY, 5, WHITE); // Left button
+    g += dot(controllerX + controllerW / 4, controllerY, 5, WHITE); // Right button
+    g += line(x - 20, armY + 20, controllerX - controllerW / 2 + 10, controllerY, col, sw);
+    g += line(x + 20, armY + 20, controllerX + controllerW / 2 - 10, controllerY, col, sw);
+  } else if (pose === 'point') {
+    g += line(x - armXOffset, armY, x - armXOffset - armL * 0.4, armY + armL * 0.2, col, sw);
+    g += dot(x - armXOffset - armL * 0.4, armY + armL * 0.2 + handYOffset, handR, col);
+    g += line(x + armXOffset, armY, x + armXOffset + armL, armY - armL * 0.2, col, sw);
+    g += dot(x + armXOffset + armL, armY - armL * 0.2 + handYOffset, handR, col);
+  } else if (pose === 'stumble') {
+    g += line(x - armXOffset, armY, x - armXOffset - armL * 0.5, armY + armL * 0.5, col, sw);
+    g += dot(x - armXOffset - armL * 0.5, armY + armL * 0.5 + handYOffset, handR, col);
+    g += line(x + armXOffset, armY, x + armXOffset + armL * 0.5, armY + armL * 0.5, col, sw);
+    g += dot(x + armXOffset + armL * 0.5, armY + armL * 0.5 + handYOffset, handR, col);
+    g += line(x, bodyBottomY, x - legL * 0.6, bodyBottomY + legL * 0.8, col, sw);
+    g += dot(x - legL * 0.6, bodyBottomY + legL * 0.8 + 5, footR, col);
+    g += line(x, bodyBottomY, x + legL * 0.3, bodyBottomY + legL * 0.2, col, sw);
+    g += dot(x + legL * 0.3, bodyBottomY + legL * 0.2 + 5, footR, col);
+  } else if (pose === 'play') {
+    g += line(x - armXOffset, armY, x - armXOffset - armL * 0.4, armY + armL * 0.2, col, sw);
+    g += dot(x - armXOffset - armL * 0.4, armY + armL * 0.2 + handYOffset, handR, col);
+    g += line(x + armXOffset, armY, x + armXOffset + armL * 0.4, armY + armL * 0.2, col, sw);
+    g += dot(x + armXOffset + armL * 0.4, armY + armL * 0.2 + handYOffset, handR, col);
+  }
+  else { // default relaxed pose
+    g += line(x - armXOffset, armY, x - armXOffset, armY + armL, col, sw);
+    g += dot(x - armXOffset, armY + armL + handYOffset, handR, col);
+    g += line(x + armXOffset, armY, x + armXOffset, armY + armL, col, sw);
+    g += dot(x + armXOffset, armY + armL + handYOffset, handR, col);
+  }
+
+  // Legs
+  if (pose === 'stumble') {
+    // Legs handled above for stumble
+  } else {
+    g += line(x - legXOffset, bodyBottomY, x - legXOffset, bodyBottomY + legL, col, sw);
+    g += dot(x - legXOffset, bodyBottomY + legL + footYOffset, footR, col);
+    g += line(x + legXOffset, bodyBottomY, x + legXOffset, bodyBottomY + legL, col, sw);
+    g += dot(x + legXOffset, bodyBottomY + legL + footYOffset, footR, col);
+  }
+
+  g += '</g>';
+  return g;
+}
+
+/* game screen: a large rectangle with dynamic content */
+function gameScreen(x, y, w, h, content, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, 20, WHITE, 10, op);
+  g += content; // Insert dynamic content here
+  g += '</g>';
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var playerX = CX - 200, playerY = CY + 100;
+  var screenX = CX + 200, screenY = CY - 100;
+  var screenW = 400, screenH = 600;
+
+  var shrug = ramp(u, 0.4, 0.8);
+  var playerPose = shrug > 0.5 ? 'shrug' : 'controller';
+  s += stickFigure(playerX, playerY, AMBER, playerPose);
+
+  var arrowGlow = pulse(u, 0.5, 0.3) + pulse(u, 0.7, 0.2);
+  var arrowOp = lerp(0.8, 1, arrowGlow);
+
+  var screenContent = '';
+  screenContent += line(screenX, screenY - 100, screenX, screenY + 100, WHITE, 8, arrowOp); // Arrow body
+  screenContent += line(screenX - 40, screenY + 60, screenX, screenY + 100, WHITE, 8, arrowOp); // Arrow head left
+  screenContent += line(screenX + 40, screenY + 60, screenX, screenY + 100, WHITE, 8, arrowOp); // Arrow head right
+  screenContent += rrect(screenX, screenY + 200, 80, 80, 10, WHITE, arrowOp); // 'A' button icon
+  screenContent += dot(screenX, screenY + 200, 20, AMBER, arrowOp); // 'A' button dot
+
+  s += gameScreen(screenX, screenY, screenW, screenH, screenContent);
+
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var playerX = CX - 200, playerY = CY + 100;
+  var screenX = CX + 200, screenY = CY - 100;
+  var screenW = 400, screenH = 600;
+
+  var headShake = Math.sin(u * Math.PI * 8) * 10 * ramp(u, 0.1, 0.5);
+  s += '<g transform="translate(' + headShake + ' 0)">';
+  s += stickFigure(playerX, playerY, AMBER, 'controller');
+  s += '</g>';
+
+  var frustrationOp = ramp(u, 0.6, 0.9);
+  var frustrationBounce = Math.sin(ramp(u, 0.6, 0.9) * Math.PI) * 20;
+  if (frustrationOp > 0.02) {
+    s += rrect(playerX, playerY - 180 - frustrationBounce, 60, 60, 10, CORAL, frustrationOp); // Frustration icon base
+    s += line(playerX - 20, playerY - 180 - frustrationBounce - 20, playerX + 20, playerY - 180 - frustrationBounce + 20, WHITE, 8, frustrationOp);
+    s += line(playerX - 20, playerY - 180 - frustrationBounce + 20, playerX + 20, playerY - 180 - frustrationBounce - 20, WHITE, 8, frustrationOp);
+  }
+
+  // Abstract icons around the player
+  var iconCount = 4;
+  for (var i = 0; i < iconCount; i++) {
+    var phase = (u * 1.5 + i / iconCount) % 1;
+    if (phase < 0.8) {
+      var iconOp = smooth(1 - phase / 0.8);
+      var iconY = lerp(playerY - 100, playerY - 300, phase);
+      var iconX = playerX + lerp(80, 150, phase) * (i % 2 === 0 ? 1 : -1);
+      var iconSize = lerp(20, 40, phase);
+      if (iconOp > 0.02) {
+        if (i === 0) { // Controller icon
+          s += rrect(iconX, iconY, iconSize * 2, iconSize * 1.2, iconSize / 4, WHITE, iconOp * 0.7);
+        } else if (i === 1) { // Arrow icon
+          s += chevron(iconX, iconY, iconSize, WHITE, iconOp * 0.7);
+        } else if (i === 2) { // Action dot
+          s += dot(iconX, iconY, iconSize * 0.8, WHITE, iconOp * 0.7);
+        } else { // Another action icon
+          s += line(iconX - iconSize, iconY, iconX + iconSize, iconY, WHITE, 8, iconOp * 0.7);
+          s += line(iconX, iconY - iconSize, iconX, iconY + iconSize, WHITE, 8, iconOp * 0.7);
+        }
+      }
+    }
+  }
+
+  s += gameScreen(screenX, screenY, screenW, screenH, '', 0.2); // Faint game screen outline
+
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var playerAmberX = lerp(CX - 200, CX - 400, smooth(u));
+  var playerAmberY = CY + 100;
+  var playerAmberOp = 1 - ramp(u, 0.8, 1.0);
+  s += stickFigure(playerAmberX, playerAmberY, AMBER, 'controller', playerAmberOp);
+
+  var playerBlueX = lerp(CX + 400, CX - 100, smooth(ramp(u, 0.1, 0.5)));
+  var playerBlueY = CY + 100;
+  var playerBlueOp = ramp(u, 0.1, 0.5);
+  s += stickFigure(playerBlueX, playerBlueY, BLUE, 'controller', playerBlueOp);
+
+  var questionMarkOp = ramp(u, 0.3, 0.7);
+  var questionMarkBounce = Math.sin(u * Math.PI * 4) * 8 * questionMarkOp;
+  if (questionMarkOp > 0.02) {
+    s += ring(playerBlueX, playerBlueY - 180 - questionMarkBounce, 30, BLUE, 8, questionMarkOp);
+    s += dot(playerBlueX, playerBlueY - 180 - questionMarkBounce + 60, 8, BLUE, questionMarkOp);
+  }
+
+  var devX = lerp(CX, CX + 300, smooth(ramp(u, 0.4, 0.8)));
+  var devY = CY + 100;
+  var devOp = ramp(u, 0.4, 0.8);
+  s += stickFigure(devX, devY, BLUE, 'point', devOp);
+
+  var screenX = CX + 200, screenY = CY - 100;
+  var screenW = 400, screenH = 600;
+  s += gameScreen(screenX, screenY, screenW, screenH, '', 0.4); // Generic game screen
+
+  var devLineOp = ramp(u, 0.5, 0.9);
+  if (devLineOp > 0.02) {
+    s += line(devX - 50, devY - 50, screenX, screenY, BLUE, 4, devLineOp);
+    s += line(devX - 50, devY - 50, playerBlueX + 50, playerBlueY - 50, BLUE, 4, devLineOp);
+  }
+
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var playerBlueX = CX - 100, playerBlueY = CY + 100;
+  var screenX = CX + 200, screenY = CY - 100;
+  var screenW = 400, screenH = 600;
+
+  var stumblePhase = ramp(u, 0.0, 0.2);
+  var successPhase = ramp(u, 0.5, 0.8);
+
+  var currentBlueX = playerBlueX;
+  var currentBlueY = playerBlueY;
+  var bluePose = 'controller';
+  var blueOp = 1;
+
+  if (stumblePhase > 0 && stumblePhase < 1) {
+    bluePose = 'stumble';
+    currentBlueX = lerp(playerBlueX, playerBlueX - 30, smooth(stumblePhase));
+    currentBlueY = lerp(playerBlueY, playerBlueY + 20, smooth(stumblePhase));
+  } else if (stumblePhase >= 1 && successPhase === 0) {
+    bluePose = 'stumble'; // Stumbled and holding
+  } else if (successPhase > 0) {
+    bluePose = 'play';
+    currentBlueX = lerp(playerBlueX - 30, playerBlueX + 100, smooth(successPhase));
+    currentBlueY = lerp(playerBlueY + 20, playerBlueY - 50, smooth(successPhase));
+  }
+
+  s += stickFigure(currentBlueX, currentBlueY, BLUE, bluePose, blueOp);
+
+  var redXOp = pulse(u, 0.2, 0.1);
+  if (redXOp > 0.02) {
+    s += rrect(playerBlueX, playerBlueY - 180, 60, 60, 10, CORAL, redXOp);
+    s += line(playerBlueX - 20, playerBlueY - 180 - 20, playerBlueX + 20, playerBlueY - 180 + 20, WHITE, 8, redXOp);
+    s += line(playerBlueX - 20, playerBlueY - 180 + 20, playerBlueX + 20, playerBlueY - 180 - 20, WHITE, 8, redXOp);
+  }
+
+  var pathContent = '';
+  var pathOp = ramp(u, 0.3, 0.6);
+  if (pathOp > 0.02) {
+    var pathStartY = screenY + screenH / 2 - 100;
+    var pathEndY = screenY - screenH / 2 + 100;
+    var pathMidX = screenX + 50;
+    var pathMidY = screenY;
+    var pathD = "M " + (screenX - 100) + " " + pathStartY +
+                " C " + (screenX - 100) + " " + (pathMidY + 100) +
+                " " + (pathMidX) + " " + (pathMidY + 100) +
+                " " + pathMidX + " " + pathMidY +
+                " C " + pathMidX + " " + (pathMidY - 100) +
+                " " + (screenX + 100) + " " + (pathMidY - 100) +
+                " " + (screenX + 100) + " " + pathEndY;
+    pathContent += pathTag(pathD, BLUE, 10, pathOp);
+
+    // Animate a dot along the path
+    var pathProgress = ramp(u, 0.5, 0.9);
+    if (pathProgress > 0 && pathProgress < 1) {
+      // Simple linear approximation for path dot, not exact but visually okay
+      var dotX, dotY;
+      if (pathProgress < 0.33) {
+        dotX = lerp(screenX - 100, pathMidX, pathProgress * 3);
+        dotY = lerp(pathStartY, pathMidY + 100, pathProgress * 3);
+      } else if (pathProgress < 0.66) {
+        dotX = lerp(pathMidX, pathMidX, (pathProgress - 0.33) * 3);
+        dotY = lerp(pathMidY + 100, pathMidY, (pathProgress - 0.33) * 3);
+      } else {
+        dotX = lerp(pathMidX, screenX + 100, (pathProgress - 0.66) * 3);
+        dotY = lerp(pathMidY, pathEndY, (pathProgress - 0.66) * 3);
+      }
+      pathContent += dot(dotX, dotY, 15, BLUE, 1);
+    }
+  }
+
+  var checkmarkOp = ramp(u, 0.8, 1.0);
+  if (checkmarkOp > 0.02) {
+    s += rrect(screenX + 100, screenY - screenH / 2 + 100, 60, 60, 10, BLUE, checkmarkOp);
+    s += line(screenX + 100 - 20, screenY - screenH / 2 + 100 + 10, screenX + 100, screenY - screenH / 2 + 100 + 30, WHITE, 8, checkmarkOp);
+    s += line(screenX + 100, screenY - screenH / 2 + 100 + 30, screenX + 100 + 30, screenY - screenH / 2 + 100 - 20, WHITE, 8, checkmarkOp);
+  }
+
+  s += gameScreen(screenX, screenY, screenW, screenH, pathContent);
+
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var playerAmberX = CX - 300, playerAmberY = CY + 100;
+  var playerBlueX = CX + 300, playerBlueY = CY + 100;
+
+  var amberAnnoyance = lerp(1, 0.3, smooth(u)); // Less annoyed
+  s += stickFigure(playerAmberX, playerAmberY, AMBER, 'controller', amberAnnoyance);
+
+  s += stickFigure(playerBlueX, playerBlueY, BLUE, 'play', 1); // Happy playing
+
+  var coinX = CX - 100, coinY = CY - 100;
+  var coinOp = ramp(u, 0.1, 0.3);
+  if (coinOp > 0.02) {
+    s += ring(coinX, coinY, 20, CORAL, 6, coinOp);
+    s += line(coinX, coinY - 10, coinX, coinY + 10, CORAL, 6, coinOp); // Small bar for "cost"
+  }
+
+  var communityX = CX + 100, communityY = CY - 100;
+  var communityScale = ramp(u, 0.3, 0.8);
+  var communityOp = ramp(u, 0.3, 0.8);
+  if (communityOp > 0.02) {
+    var baseSize = 80;
+    var numFigures = 5;
+    for (var i = 0; i < numFigures; i++) {
+      var figX = communityX + Math.sin(i * Math.PI * 2 / numFigures + u * Math.PI) * baseSize * communityScale;
+      var figY = communityY + Math.cos(i * Math.PI * 2 / numFigures + u * Math.PI) * baseSize * communityScale;
+      s += stickFigure(figX, figY, BLUE, 'play', communityOp * 0.8);
+    }
+    s += ring(communityX, communityY, baseSize * communityScale * 1.2, BLUE, 10, communityOp * 0.5);
+  }
+
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var playerAmberX = lerp(CX - 300, CX - 150, smooth(u));
+  var playerAmberY = lerp(CY + 100, CY + 50, smooth(u));
+  var playerBlueX = lerp(CX + 300, CX + 150, smooth(u));
+  var playerBlueY = lerp(CY + 100, CY + 50, smooth(u));
+
+  s += stickFigure(playerAmberX, playerAmberY, AMBER, 'controller', 1);
+  s += stickFigure(playerBlueX, playerBlueY, BLUE, 'play', 1);
+
+  var insightOp = ramp(u, 0.1, 0.5);
+  var insightPulse = Math.sin(u * Math.PI * 6) * 5 * insightOp;
+  if (insightOp > 0.02) {
+    s += ring(playerAmberX, playerAmberY - 180 + insightPulse, 30, BLUE, 8, insightOp);
+    s += line(playerAmberX, playerAmberY - 180 + insightPulse + 30, playerBlueX, playerBlueY - 180 + insightPulse + 30, BLUE, 4, insightOp * 0.7);
+  }
+
+  var gameWorldOp = ramp(u, 0.4, 0.9);
+  if (gameWorldOp > 0.02) {
+    var worldScale = lerp(0.8, 1.0, smooth(u));
+    var worldY = lerp(CY - 100, CY, smooth(u));
+    var worldW = 800 * worldScale, worldH = 1200 * worldScale;
+    s += rrectStroke(CX, worldY, worldW, worldH, 40, WHITE, 10, gameWorldOp * 0.6);
+
+    // Simple game elements in the shared world
+    var elementCount = 5;
+    for (var i = 0; i < elementCount; i++) {
+      var elX = CX + Math.sin(i * 0.7 + u * 0.5) * worldW * 0.3;
+      var elY = worldY + Math.cos(i * 0.9 + u * 0.4) * worldH * 0.3;
+      s += dot(elX, elY, 15 * worldScale, DIM, gameWorldOp * 0.4);
+    }
+  }
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
