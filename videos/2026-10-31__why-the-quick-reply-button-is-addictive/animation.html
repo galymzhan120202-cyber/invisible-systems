@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why The Quick Reply Button Is So Addictive</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = W / 2, CY = H / 2;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> system/algorithm
+var AMBER = "#F2A93B";              // warm amber   -> user/desire
+var CORAL = "#FF5B5B";              // coral red    -> naive expectation/frustration
+
+var DUR = 60;
+window.__duration = DUR;
+
+// Phone dimensions and position
+var PHONE_W = 680;
+var PHONE_H = 1200;
+var PHONE_X = CX;
+var PHONE_Y = CY + 40; // Slightly lower to accommodate hand above
+var PHONE_RAD = 60;
+var SCREEN_INSET = 40;
+var SCREEN_X = PHONE_X;
+var SCREEN_Y = PHONE_Y;
+var SCREEN_W = PHONE_W - SCREEN_INSET * 2;
+var SCREEN_H = PHONE_H - SCREEN_INSET * 2;
+var SCREEN_RAD = PHONE_RAD - SCREEN_INSET;
+
+// Quick Reply Button dimensions and position
+var QR_BUTTON_W = 280;
+var QR_BUTTON_H = 80;
+var QR_BUTTON_X = SCREEN_X;
+var QR_BUTTON_Y = PHONE_Y + PHONE_H / 2 - SCREEN_INSET - QR_BUTTON_H / 2 - 40; // Near bottom of screen
+var QR_BUTTON_RAD = 20;
+
+// Hand dimensions
+var HAND_SIZE = 120;
+var HAND_X_REST = PHONE_X + PHONE_W / 2 + 100;
+var HAND_Y_REST = QR_BUTTON_Y - 20; // Above the button
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, fill) {
+  return '<path d="' + d + '" fill="' + (fill || 'none') + '" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+/* Specific elements for this animation */
+function phoneBody(x, y, w, h, rad, col, sw, op) {
+  return rrectStroke(x, y, w, h, rad, col, sw, op);
+}
+function screen(x, y, w, h, rad, col, op) {
+  return rrect(x, y, w, h, rad, col, op);
+}
+function quickReplyButton(x, y, w, h, rad, col, sw, op, fillCol) {
+  var s = '';
+  if (fillCol) s += rrect(x, y, w, h, rad, fillCol, op);
+  s += rrectStroke(x, y, w, h, rad, col, sw, op);
+  return s;
+}
+
+// Stick figure hand with a tapping finger
+function hand(x, y, size, col, op, fingerBend) {
+  op = (op == null ? 1 : op);
+  fingerBend = clamp(fingerBend, 0, 1); // 0 = straight, 1 = fully bent (tapping)
+  var g = '<g opacity="' + op + '">';
+  // Palm
+  g += line(x, y, x + size * 0.6, y + size * 0.2, col, 10);
+  g += line(x, y, x + size * 0.6, y - size * 0.2, col, 10);
+  // Thumb
+  g += line(x + size * 0.3, y - size * 0.4, x + size * 0.7, y - size * 0.5, col, 10);
+  // Fingers
+  var fingerY = y + size * 0.1;
+  var fingerX = x + size * 0.6;
+  var bendOffset = fingerBend * size * 0.2; // How much the finger bends
+  g += line(fingerX, fingerY, fingerX + size * 0.4 - bendOffset, fingerY + size * 0.1 + bendOffset, col, 10); // Pinky
+  g += line(fingerX, fingerY - size * 0.15, fingerX + size * 0.5 - bendOffset, fingerY - size * 0.05 + bendOffset, col, 10); // Ring
+  g += line(fingerX, fingerY - size * 0.3, fingerX + size * 0.55 - bendOffset, fingerY - size * 0.2 + bendOffset, col, 10); // Middle
+  g += line(fingerX, fingerY - size * 0.45, fingerX + size * 0.5 - bendOffset, fingerY - size * 0.35 + bendOffset, col, 10); // Index (tapping finger)
+  g += '</g>';
+  return g;
+}
+
+// Generic message bubble
+function messageBubble(x, y, w, h, rad, col, op, tailDir) {
+  var s = '';
+  s += rrect(x, y, w, h, rad, col, op);
+  // Add a small tail for chat bubble effect
+  var tailSize = 12;
+  var tailX = x + w / 2 - tailSize;
+  var tailY = y + h / 2;
+  if (tailDir === 'left') {
+    tailX = x - w / 2 + tailSize;
+    s += pathTag("M " + tailX + " " + tailY + " L " + (tailX - tailSize) + " " + (tailY + tailSize) + " L " + (tailX + tailSize) + " " + (tailY + tailSize) + " Z", col, 0, op, col);
+  } else if (tailDir === 'right') {
+    s += pathTag("M " + tailX + " " + tailY + " L " + (tailX + tailSize) + " " + (tailY + tailSize) + " L " + (tailX - tailSize) + " " + (tailY + tailSize) + " Z", col, 0, op, col);
+  }
+  return s;
+}
+
+// Camera transform helper (from reference)
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  // Phone body and screen
+  s += phoneBody(PHONE_X, PHONE_Y, PHONE_W, PHONE_H, PHONE_RAD, WHITE, 10, 0.9);
+  s += screen(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, SCREEN_RAD, "#111111", 1);
+
+  // Incoming message (grey)
+  var msgY = SCREEN_Y - SCREEN_H / 2 + 180;
+  s += messageBubble(SCREEN_X - 60, msgY, 320, 100, 20, DIM, 0.9, 'left');
+  s += line(SCREEN_X - 160, msgY - 20, SCREEN_X - 120, msgY - 20, WHITE, 8, 0.6); // Abstract message lines
+  s += line(SCREEN_X - 160, msgY + 20, SCREEN_X - 80, msgY + 20, WHITE, 8, 0.6);
+
+  // Quick Reply Button (fades in)
+  var qrOp = ramp(u, 0.4, 0.8);
+  s += quickReplyButton(QR_BUTTON_X, QR_BUTTON_Y, QR_BUTTON_W, QR_BUTTON_H, QR_BUTTON_RAD, BLUE, 8, qrOp, BLUE);
+  s += line(QR_BUTTON_X - 60, QR_BUTTON_Y, QR_BUTTON_X + 60, QR_BUTTON_Y, WHITE, 8, qrOp * 0.8); // Abstract glyph (bar)
+
+  // Hand hovering, moving towards button
+  var handX = lerp(HAND_X_REST + 80, HAND_X_REST, easeOut(ramp(u, 0.2, 0.9)));
+  var handY = lerp(HAND_Y_REST - 40, HAND_Y_REST, easeOut(ramp(u, 0.2, 0.9)));
+  s += hand(handX, handY, HAND_SIZE, AMBER, 1, 0);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO (The Tap & Immediate Response) */
+function scene2(u) {
+  var s = '';
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14); // Slight shake on tap
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+
+  // Phone body and screen
+  s += phoneBody(PHONE_X, PHONE_Y, PHONE_W, PHONE_H, PHONE_RAD, WHITE, 10, 0.9);
+  s += screen(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, SCREEN_RAD, "#111111", 1);
+
+  // Incoming message (fades out)
+  var msgY = SCREEN_Y - SCREEN_H / 2 + 180;
+  var msgOp = 1 - ramp(u, 0.0, 0.3);
+  s += messageBubble(SCREEN_X - 60, msgY, 320, 100, 20, DIM, msgOp, 'left');
+  s += line(SCREEN_X - 160, msgY - 20, SCREEN_X - 120, msgY - 20, WHITE, 8, msgOp * 0.6);
+  s += line(SCREEN_X - 160, msgY + 20, SCREEN_X - 80, msgY + 20, WHITE, 8, msgOp * 0.6);
+
+  // Quick Reply Button
+  var tapPhase = pulse(u, 0.15, 0.1); // Tap animation
+  var buttonScale = lerp(1, 0.9, tapPhase);
+  var buttonOp = lerp(1, 0.7, tapPhase);
+  s += '<g transform="translate(' + QR_BUTTON_X + ' ' + QR_BUTTON_Y + ') scale(' + buttonScale + ') translate(' + (-QR_BUTTON_X) + ' ' + (-QR_BUTTON_Y) + ')">';
+  s += quickReplyButton(QR_BUTTON_X, QR_BUTTON_Y, QR_BUTTON_W, QR_BUTTON_H, QR_BUTTON_RAD, BLUE, 8, buttonOp, BLUE);
+  s += line(QR_BUTTON_X - 60, QR_BUTTON_Y, QR_BUTTON_X + 60, QR_BUTTON_Y, WHITE, 8, buttonOp * 0.8);
+  s += '</g>';
+
+  // Hand tapping
+  var fingerBend = ramp(u, 0.05, 0.25) * (1 - ramp(u, 0.25, 0.45));
+  s += hand(HAND_X_REST, HAND_Y_REST, HAND_SIZE, AMBER, 1, fingerBend);
+
+  // Immediate Amber Response
+  var responseOp = ramp(u, 0.2, 0.4) * (1 - ramp(u, 0.6, 0.8));
+  var responseY = lerp(QR_BUTTON_Y - 40, QR_BUTTON_Y - 140, easeOut(ramp(u, 0.2, 0.6)));
+  s += dot(QR_BUTTON_X + 100, responseY, 20, AMBER, responseOp);
+  s += dot(QR_BUTTON_X - 100, responseY + 20, 15, AMBER, responseOp * 0.8);
+  s += dot(QR_BUTTON_X, responseY + 50, 18, AMBER, responseOp * 0.9);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH (Waiting, Intermittent Reinforcement) */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Phone body and screen
+  s += phoneBody(PHONE_X, PHONE_Y, PHONE_W, PHONE_H, PHONE_RAD, WHITE, 10, 0.9);
+  s += screen(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, SCREEN_RAD, "#111111", 1);
+
+  // Quick Reply Button
+  s += quickReplyButton(QR_BUTTON_X, QR_BUTTON_Y, QR_BUTTON_W, QR_BUTTON_H, QR_BUTTON_RAD, BLUE, 8, 1, BLUE);
+  s += line(QR_BUTTON_X - 60, QR_BUTTON_Y, QR_BUTTON_X + 60, QR_BUTTON_Y, WHITE, 8, 0.8);
+
+  // Hand tapping repeatedly
+  var tapCount = 3;
+  var currentTap = Math.floor(u * tapCount);
+  var tapU = (u * tapCount) % 1; // Local time for each tap cycle
+
+  var fingerBend = 0;
+  var buttonScale = 1;
+  var responseOp = 0;
+  var coralOp = 0;
+
+  var tapDuration = 0.2; // Duration of a single tap animation within tapU
+  var responseDelay = 0.5; // Response appears after this delay in tapU
+  var coralStart = 0.6; // Coral frustration starts
+
+  if (tapU < tapDuration) { // Tap down
+    fingerBend = ramp(tapU, 0, tapDuration);
+    buttonScale = lerp(1, 0.9, fingerBend);
+  } else if (tapU < tapDuration * 2) { // Tap up
+    fingerBend = 1 - ramp(tapU, tapDuration, tapDuration * 2);
+    buttonScale = lerp(0.9, 1, ramp(tapU, tapDuration, tapDuration * 2));
+  } else { // Rest
+    fingerBend = 0;
+    buttonScale = 1;
+  }
+
+  // Intermittent reinforcement logic
+  if (currentTap === 0) { // First tap: immediate response
+    if (tapU > responseDelay && tapU < responseDelay + 0.2) {
+      responseOp = ramp(tapU, responseDelay, responseDelay + 0.1) * (1 - ramp(tapU, responseDelay + 0.1, responseDelay + 0.2));
+    }
+  } else if (currentTap === 1) { // Second tap: delayed response, then frustration
+    if (tapU > responseDelay + 0.3 && tapU < responseDelay + 0.5) { // Longer delay
+      responseOp = ramp(tapU, responseDelay + 0.3, responseDelay + 0.4) * (1 - ramp(tapU, responseDelay + 0.4, responseDelay + 0.5));
+    }
+    if (tapU > coralStart) {
+      coralOp = ramp(tapU, coralStart, 0.9);
+    }
+  } else if (currentTap === 2) { // Third tap: no response, more frustration
+    if (tapU > coralStart) {
+      coralOp = ramp(tapU, coralStart, 0.9);
+    }
+  }
+
+  s += '<g transform="translate(' + QR_BUTTON_X + ' ' + QR_BUTTON_Y + ') scale(' + buttonScale + ') translate(' + (-QR_BUTTON_X) + ' ' + (-QR_BUTTON_Y) + ')">';
+  s += quickReplyButton(QR_BUTTON_X, QR_BUTTON_Y, QR_BUTTON_W, QR_BUTTON_H, QR_BUTTON_RAD, BLUE, 8, 1, BLUE);
+  s += line(QR_BUTTON_X - 60, QR_BUTTON_Y, QR_BUTTON_X + 60, QR_BUTTON_Y, WHITE, 8, 0.8);
+  s += '</g>';
+
+  s += hand(HAND_X_REST, HAND_Y_REST, HAND_SIZE, AMBER, 1, fingerBend);
+
+  // Amber response
+  if (responseOp > 0.02) {
+    s += dot(QR_BUTTON_X + 100, QR_BUTTON_Y - 100, 20, AMBER, responseOp);
+  }
+
+  // Coral frustration elements
+  if (coralOp > 0.02) {
+    s += line(HAND_X_REST - 40, HAND_Y_REST - 80, HAND_X_REST - 80, HAND_Y_REST - 120, CORAL, 7, coralOp * 0.8);
+    s += line(HAND_X_REST + 40, HAND_Y_REST - 80, HAND_X_REST + 80, HAND_Y_REST - 120, CORAL, 7, coralOp * 0.8);
+    s += ring(HAND_X_REST, HAND_Y_REST - 150, 20, CORAL, 5, coralOp); // Abstract "thought bubble" of frustration
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND (The Algorithm's Pattern) */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Phone body and screen
+  s += phoneBody(PHONE_X, PHONE_Y, PHONE_W, PHONE_H, PHONE_RAD, WHITE, 10, 0.9);
+  s += screen(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, SCREEN_RAD, "#111111", 1);
+
+  // Quick Reply Button
+  s += quickReplyButton(QR_BUTTON_X, QR_BUTTON_Y, QR_BUTTON_W, QR_BUTTON_H, QR_BUTTON_RAD, BLUE, 8, 1, BLUE);
+  s += line(QR_BUTTON_X - 60, QR_BUTTON_Y, QR_BUTTON_X + 60, QR_BUTTON_Y, WHITE, 8, 0.8);
+
+  // Hand tapping (regularly, but not always rewarded)
+  var tapPhase = Math.sin(u * Math.PI * 4); // Continuous tapping motion
+  var fingerBend = clamp(tapPhase * 2, 0, 1);
+  s += hand(HAND_X_REST, HAND_Y_REST, HAND_SIZE, AMBER, 1, fingerBend);
+
+  // Blue algorithm pattern on screen
+  var patternY_start = SCREEN_Y - SCREEN_H / 2 + 100;
+  var patternY_end = QR_BUTTON_Y - QR_BUTTON_H / 2 - 40;
+  var patternH = patternY_end - patternY_start;
+  var waveOffset = u * 120; // Scrolling wave
+
+  for (var i = 0; i < 4; i++) {
+    var waveY = patternY_start + i * (patternH / 3) + waveOffset % (patternH / 3);
+    var waveOp = 0.4 + 0.3 * Math.sin(u * Math.PI * 2 + i);
+    var waveAmp = 50 + 20 * Math.sin(u * Math.PI * 3 + i * 0.5);
+    var d = "M " + (SCREEN_X - SCREEN_W / 2 + 30) + " " + waveY +
+            " Q " + (SCREEN_X - waveAmp) + " " + (waveY + 30) + " " + SCREEN_X + " " + (waveY + 60) +
+            " Q " + (SCREEN_X + waveAmp) + " " + (waveY + 90) + " " + (SCREEN_X + SCREEN_W / 2 - 30) + " " + (waveY + 120);
+    s += pathTag(d, BLUE, 10, waveOp);
+  }
+
+  // Amber response appears only when the blue pattern is "active" at the button level
+  var responsePulse = pulse(u, 0.2, 0.1) + pulse(u, 0.6, 0.1); // Two distinct reward moments
+  if (responsePulse > 0.02) {
+    s += dot(QR_BUTTON_X + 100, QR_BUTTON_Y - 100, 20, AMBER, responsePulse);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE (Addiction & Escalation) */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.9, smooth(u));
+  var driftY = lerp(0, -60, smooth(u));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  // Phone body and screen
+  s += phoneBody(PHONE_X, PHONE_Y, PHONE_W, PHONE_H, PHONE_RAD, WHITE, 10, 0.9);
+  s += screen(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, SCREEN_RAD, "#111111", 1);
+
+  // Quick Reply Button (more subtle, less prominent)
+  s += quickReplyButton(QR_BUTTON_X, QR_BUTTON_Y, QR_BUTTON_W, QR_BUTTON_H, QR_BUTTON_RAD, BLUE, 8, 0.6, BLUE);
+  s += line(QR_BUTTON_X - 60, QR_BUTTON_Y, QR_BUTTON_X + 60, QR_BUTTON_Y, WHITE, 8, 0.4);
+
+  // Hand tapping frantically
+  var tapSpeed = 10; // Faster tapping
+  var fingerBend = clamp(Math.sin(u * Math.PI * tapSpeed) * 2, 0, 1);
+  s += hand(HAND_X_REST, HAND_Y_REST, HAND_SIZE, AMBER, 1, fingerBend);
+
+  // Coral frustration building up around the hand
+  var coralIntensity = ramp(u, 0.0, 0.8);
+  for (var i = 0; i < 5; i++) {
+    var angle = (u * 2 + i / 5) * Math.PI * 2;
+    var radius = lerp(40, 120, easeOut(coralIntensity));
+    var x1 = HAND_X_REST + Math.cos(angle) * (radius - 20);
+    var y1 = HAND_Y_REST + Math.sin(angle) * (radius - 20);
+    var x2 = HAND_X_REST + Math.cos(angle) * radius;
+    var y2 = HAND_Y_REST + Math.sin(angle) * radius;
+    s += line(x1, y1, x2, y2, CORAL, 8, coralIntensity * 0.7);
+  }
+  s += ring(HAND_X_REST, HAND_Y_REST, lerp(50, 100, smooth(coralIntensity)), CORAL, 6, coralIntensity * 0.5);
+
+  // Rare Amber responses
+  var amberFlash = pulse(u, 0.3, 0.05) + pulse(u, 0.7, 0.05);
+  if (amberFlash > 0.02) {
+    s += dot(QR_BUTTON_X + 100, QR_BUTTON_Y - 100, 25, AMBER, amberFlash);
+    s += ring(QR_BUTTON_X + 100, QR_BUTTON_Y - 100, 30 + amberFlash * 20, AMBER, 4, amberFlash * 0.8);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE (Realization/Cycle Continues) */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.9, 1.0, smooth(clamp(u / 0.7, 0, 1)));
+  var driftY = lerp(-60, 0, smooth(clamp(u / 0.7, 0, 1)));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  // Phone body and screen
+  s += phoneBody(PHONE_X, PHONE_Y, PHONE_W, PHONE_H, PHONE_RAD, WHITE, 10, 0.9);
+  s += screen(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, SCREEN_RAD, "#111111", 1);
+
+  // Coral frustration dissipates
+  var coralFade = 1 - ramp(u, 0.0, 0.4);
+  if (coralFade > 0.02) {
+    for (var i = 0; i < 5; i++) {
+      var angle = (u * 2 + i / 5) * Math.PI * 2;
+      var radius = lerp(120, 180, easeOut(1 - coralFade));
+      var x1 = HAND_X_REST + Math.cos(angle) * (radius - 20);
+      var y1 = HAND_Y_REST + Math.sin(angle) * (radius - 20);
+      var x2 = HAND_X_REST + Math.cos(angle) * radius;
+      var y2 = HAND_Y_REST + Math.sin(angle) * radius;
+      s += line(x1, y1, x2, y2, CORAL, 8, coralFade * 0.7);
+    }
+    s += ring(HAND_X_REST, HAND_Y_REST, lerp(100, 150, smooth(1 - coralFade)), CORAL, 6, coralFade * 0.5);
+  }
+
+  // Hand returns to hover state
+  var handX = lerp(HAND_X_REST, HAND_X_REST + 80, easeOut(ramp(u, 0.3, 0.8)));
+  var handY = lerp(HAND_Y_REST, HAND_Y_REST - 40, easeOut(ramp(u, 0.3, 0.8)));
+  var fingerBend = lerp(1, 0, ramp(u, 0.1, 0.5));
+  s += hand(handX, handY, HAND_SIZE, AMBER, 1, fingerBend);
+
+  // Quick Reply Button remains, subtly pulsing blue
+  var pulseOp = 0.5 + 0.5 * Math.sin(u * Math.PI * 2);
+  var qrOp = lerp(0.6, 1.0, smooth(ramp(u, 0.5, 0.9)));
+  s += quickReplyButton(QR_BUTTON_X, QR_BUTTON_Y, QR_BUTTON_W, QR_BUTTON_H, QR_BUTTON_RAD, BLUE, 8, qrOp, BLUE);
+  s += line(QR_BUTTON_X - 60, QR_BUTTON_Y, QR_BUTTON_X + 60, QR_BUTTON_Y, WHITE, 8, qrOp * 0.8);
+  s += ring(QR_BUTTON_X, QR_BUTTON_Y, QR_BUTTON_W / 2 * 0.8, BLUE, 6, pulseOp * 0.3); // Subtle blue pulse
+
+  // New incoming message might appear, restarting the cycle
+  var newMsgOp = ramp(u, 0.7, 0.9);
+  var newMsgY = SCREEN_Y - SCREEN_H / 2 + 180;
+  s += messageBubble(SCREEN_X - 60, newMsgY, 320, 100, 20, DIM, newMsgOp, 'left');
+  s += line(SCREEN_X - 160, newMsgY - 20, SCREEN_X - 120, newMsgY - 20, WHITE, 8, newMsgOp * 0.6);
+  s += line(SCREEN_X - 160, newMsgY + 20, SCREEN_X - 80, newMsgY + 20, WHITE, 8, newMsgOp * 0.6);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500); // Fallback
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

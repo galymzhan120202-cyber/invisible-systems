@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You walk into the supermarket, just needing a few essentials. You grab a cart, not thinking about its size, just a tool for your quick trip.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "But as you push it through the aisles, you notice something. The cart feels… massive. Mostly empty, just a few items rattling inside.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "You might feel a subtle urge. Is this all I need? Maybe I should pick up a few more things to fill this huge space? It feels incomplete.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "That feeling is no accident. Supermarket designers know an empty cart is a powerful psychological trigger. It silently signals \"room to buy more.\"",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "So you start adding. That extra snack, another impulse buy, just to make the cart feel less cavernous. You are filling the void, literally.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "You leave with a much fuller cart than planned, subtly guided by the oversized design. Now you know: the cart isn't just transport, it's a silent salesperson.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]
