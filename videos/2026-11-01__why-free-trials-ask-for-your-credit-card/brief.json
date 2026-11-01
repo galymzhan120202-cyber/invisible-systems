@@ -1,0 +1,15 @@
+{
+  "id": "why-free-trials-ask-for-your-credit-card",
+  "slug": "2026-11-01__why-free-trials-ask-for-your-credit-card",
+  "title_working": "Why Free Trials Ask For Your Credit Card",
+  "system": "friction to prevent churn and automatic conversion",
+  "cluster": "pricing-and-incentives",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-11-01T13:14:45+00:00",
+  "produced_at": "2026-11-01T13:18:21+00:00",
+  "verify": "PASS",
+  "takeaway": "You now understand why 'free' trials request your credit card: it’s a system designed to reduce future cancellation friction and leverage human inertia for automatic conversion.",
+  "animation_source": "llm"
+}

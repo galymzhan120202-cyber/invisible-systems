@@ -1,0 +1,15 @@
+{
+  "id": "why-software-updates-are-so-large",
+  "slug": "2026-11-01__why-software-updates-are-so-large",
+  "title_working": "Why Software Updates Are So Large",
+  "system": "incremental development and version control overhead",
+  "cluster": "platforms-and-algorithms",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-11-01T13:10:00+00:00",
+  "produced_at": "2026-11-01T13:14:41+00:00",
+  "verify": "PASS",
+  "takeaway": "You now understand that large software updates are a necessary trade-off for reliability and faster installation, not developer laziness.",
+  "animation_source": "llm"
+}

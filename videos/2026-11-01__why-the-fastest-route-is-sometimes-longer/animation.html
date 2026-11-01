@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why the Fastest Route Isn't Always the Shortest</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> system / app route
+var AMBER = "#F2A93B";              // warm amber   -> user's car
+var CORAL = "#FF5B5B";              // coral red    -> naive / slower path
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rect(x, y, w, h, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rectStroke(x, y, w, h, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function chevron(x, y, size, col, op) {
+  var d = "M " + (x - size) + " " + (y + size * 0.55) + " L " + x + " " + (y - size * 0.55) + " L " + (x + size) + " " + (y + size * 0.55);
+  return pathTag(d, col, 14, op);
+}
+/* the "you" car: wide rounded body + driver head + two wheels */
+function car(x, y, col, lookBack, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += '<rect x="' + (x - 66) + '" y="' + (y - 34) + '" width="132" height="76" rx="22" fill="none" stroke="' + col + '" stroke-width="10"/>';
+  g += dot(x, y - 58, 17, col);                       // driver head
+  g += dot(x - 42, y + 46, 11, col);                  // wheels
+  g += dot(x + 42, y + 46, 11, col);
+  if (lookBack) g += line(x, y - 58, x - 26, y - 44, WHITE, 7);
+  g += '</g>';
+  return g;
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+// Custom glyphs for this animation
+function questionMark(x, y, size, col, sw, op) {
+  var d = "M " + x + " " + (y - size * 0.8) +
+          " A " + (size * 0.4) + " " + (size * 0.4) + " 0 1 1 " + (x + size * 0.4) + " " + (y - size * 0.4) +
+          " L " + (x + size * 0.1) + " " + (y + size * 0.1) +
+          " M " + x + " " + (y + size * 0.4);
+  return pathTag(d, col, sw, op);
+}
+function trafficLight(x, y, size, phase, op) { // phase: 0=red, 1=green, 0.5=yellow
+  var g = '<g opacity="' + (op == null ? 1 : op) + '">';
+  g += rect(x, y, size * 0.4, size * 1.2, DIM, 0.8); // Pole
+  var rY = y - size * 0.4;
+  var gY = y + size * 0.4;
+  var yY = y;
+  g += dot(x, rY, size * 0.15, phase < 0.33 ? CORAL : DIM, phase < 0.33 ? 1 : 0.3); // Red
+  g += dot(x, yY, size * 0.15, phase > 0.33 && phase < 0.66 ? AMBER : DIM, phase > 0.33 && phase < 0.66 ? 1 : 0.3); // Yellow
+  g += dot(x, gY, size * 0.15, phase > 0.66 ? BLUE : DIM, phase > 0.66 ? 1 : 0.3); // Green
+  g += '</g>';
+  return g;
+}
+function simpleCar(x, y, col, op) { // A smaller, simpler car for traffic
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rect(x, y, 40, 60, col, 0.9);
+  g += dot(x, y + 30, 8, DIM, 0.8); // wheel
+  g += dot(x, y - 30, 8, DIM, 0.8); // wheel
+  g += '</g>';
+  return g;
+}
+function clock(x, y, size, col, sw, op) {
+  var g = '<g opacity="' + (op == null ? 1 : op) + '">';
+  g += ring(x, y, size, col, sw, 1);
+  // Hands pointing roughly to 3 o'clock (less time)
+  var hAngle = Math.PI * 0.5; // Hour hand at 3
+  var mAngle = Math.PI * 0.4; // Minute hand slightly before 3
+  g += line(x, y, x + size * 0.6 * Math.cos(hAngle), y + size * 0.6 * Math.sin(hAngle), col, sw * 0.8, 1); // hour hand
+  g += line(x, y, x + size * 0.9 * Math.cos(mAngle), y + size * 0.9 * Math.sin(mAngle), col, sw * 0.5, 1); // minute hand
+  g += dot(x, y, sw * 0.5, col, 1);
+  g += '</g>';
+  return g;
+}
+
+/* ---------- global path definitions ---------- */
+var GRID_X = [CX - 300, CX - 100, CX + 100, CX + 300];
+var GRID_Y = [TOP + 100, CY - 200, CY, CY + 200, BOT - 100];
+var START_PT = {x: CX - 200, y: BOT - 100};
+var END_PT = {x: CX + 200, y: TOP + 100};
+
+var CORAL_PATH_D = "M " + START_PT.x + " " + START_PT.y + " L " + END_PT.x + " " + END_PT.y;
+
+// Blue path points for segmented movement
+var BP_POINTS = [
+  START_PT,
+  {x: CX - 200, y: CY + 100},
+  {x: CX + 100, y: CY + 100},
+  {x: CX + 100, y: TOP + 100},
+  END_PT
+];
+// Blue path for drawing (smooth curves)
+var BLUE_PATH_D = "M " + BP_POINTS[0].x + " " + BP_POINTS[0].y +
+                  " Q " + BP_POINTS[0].x + " " + (BP_POINTS[1].y + 50) + ", " + BP_POINTS[1].x + " " + BP_POINTS[1].y +
+                  " Q " + (BP_POINTS[2].x - 50) + " " + BP_POINTS[1].y + ", " + BP_POINTS[2].x + " " + BP_POINTS[2].y +
+                  " Q " + BP_POINTS[2].x + " " + (BP_POINTS[3].y + 50) + ", " + BP_POINTS[3].x + " " + BP_POINTS[3].y +
+                  " Q " + (BP_POINTS[4].x - 50) + " " + BP_POINTS[3].y + ", " + BP_POINTS[4].x + " " + BP_POINTS[4].y;
+
+// Helper to draw the grid
+function drawGrid(op) {
+  var s = '';
+  for (var i = 0; i < GRID_X.length; i++) {
+    s += line(GRID_X[i], TOP, GRID_X[i], BOT, WHITE, 2, op);
+  }
+  for (var i = 0; i < GRID_Y.length; i++) {
+    s += line(0, GRID_Y[i], W, GRID_Y[i], WHITE, 2, op);
+  }
+  return s;
+}
+
+// Helper to get a point along the segmented blue path
+function getPointOnSegmentedPath(points, t) {
+  t = clamp(t, 0, 1);
+  var numSegments = points.length - 1;
+  var segmentIdx = Math.floor(t * numSegments);
+  var localT = (t * numSegments) - segmentIdx;
+  
+  if (segmentIdx >= numSegments) segmentIdx = numSegments - 1; 
+  
+  var p1 = points[segmentIdx];
+  var p2 = points[segmentIdx + 1];
+  
+  return {
+    x: lerp(p1.x, p2.x, smooth(localT)),
+    y: lerp(p1.y, p2.y, smooth(localT))
+  };
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): INTRO - Why the Fastest Route Isn't Always the Shortest */
+function scene1(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  var gridOp = lerp(0.05, 0.15, smooth(ramp(u, 0.0, 0.3)));
+  s += drawGrid(gridOp);
+  
+  var pathOp = lerp(0.1, 0.5, smooth(ramp(u, 0.2, 0.6)));
+  s += pathTag(CORAL_PATH_D, CORAL, 8, pathOp);
+  s += pathTag(BLUE_PATH_D, BLUE, 8, pathOp);
+
+  s += car(START_PT.x, START_PT.y, AMBER, false, 1);
+
+  var qmOp = ramp(u, 0.6, 0.9);
+  if (qmOp > 0.02) {
+    s += questionMark(START_PT.x + 100, START_PT.y - 120, 60, WHITE, 8, qmOp);
+  }
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO - Your little amber car sets off... */
+function scene2(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += drawGrid(0.15);
+  
+  s += pathTag(CORAL_PATH_D, CORAL, 8, 0.5);
+  s += pathTag(BLUE_PATH_D, BLUE, 12, 0.8);
+
+  var carPos = getPointOnSegmentedPath(BP_POINTS, u);
+  s += car(carPos.x, carPos.y, AMBER, false, 1);
+
+  var flashOp = pulse(u, 0.4, 0.1); // Flash around u=0.4
+  s += pathTag(CORAL_PATH_D, CORAL, 12, flashOp * 0.8);
+
+  s += ring(END_PT.x, END_PT.y, 40, WHITE, 6, 0.6);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH - It's tempting to think your app just picks a path. */
+function scene3(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.9, smooth(u));
+  var panY = lerp(0, -100, smooth(u)); // Zoom out and pan up slightly
+  s += '<g ' + camera(scale, 0, panY) + '>';
+  
+  s += drawGrid(0.15);
+  
+  s += pathTag(BLUE_PATH_D, BLUE, 8, 0.4);
+  s += pathTag(CORAL_PATH_D, CORAL, 12, 0.9);
+  
+  var numBlocks = 10;
+  for (var i = 0; i < numBlocks; i++) {
+    var p = i / (numBlocks - 1);
+    var x = lerp(START_PT.x, END_PT.x, p);
+    var y = lerp(START_PT.y, END_PT.y, p);
+    var blockOp = ramp(u, 0.2, 0.7);
+    s += rect(x + rnd(i)*20 - 10, y + rnd(i+1)*20 - 10, 30, 30, CORAL, blockOp * 0.7);
+  }
+
+  s += car(START_PT.x, START_PT.y, AMBER, false, 1);
+  var headTilt = Math.sin(u * Math.PI * 2) * 10; // Gaze left/right for confusion
+  s += line(START_PT.x, START_PT.y - 58, START_PT.x + headTilt, START_PT.y - 44, WHITE, 7, 0.9);
+  
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND - It's not about distance, it's about time. */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += drawGrid(0.15);
+  
+  s += pathTag(BLUE_PATH_D, BLUE, 10, 0.8);
+  
+  var carPos = getPointOnSegmentedPath(BP_POINTS, u * 0.8); // Slower movement
+  s += car(carPos.x, carPos.y, AMBER, false, 1);
+
+  s += pathTag(CORAL_PATH_D, CORAL, 10, 0.4);
+  
+  var numLights = 3;
+  for (var i = 0; i < numLights; i++) {
+    var p = (i / numLights) + 0.1;
+    var x = lerp(START_PT.x, END_PT.x, p);
+    var y = lerp(START_PT.y, END_PT.y, p);
+    var phase = (u * 3 + i * 0.7) % 1; // Rapid cycling
+    s += trafficLight(x + rnd(i)*20 - 10, y + rnd(i+1)*20 - 10, 60, phase, 1);
+  }
+  
+  var numTrafficDots = 8;
+  for (var i = 0; i < numTrafficDots; i++) {
+    var p = (u * 0.6 + rnd(i) * 0.8 + i * 0.1) % 1; // Moving dots
+    var x = lerp(START_PT.x, END_PT.x, p);
+    var y = lerp(START_PT.y, END_PT.y, p);
+    s += simpleCar(x + rnd(i+2)*30 - 15, y + rnd(i+3)*30 - 15, CORAL, 0.8);
+  }
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE - The algorithm is constantly calculating... */
+function scene5(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += drawGrid(0.15); // Base grid
+  var flowOp = Math.sin(u * Math.PI * 4) * 0.05 + 0.1;
+  for (var i = 0; i < GRID_X.length; i++) {
+    s += line(GRID_X[i], TOP, GRID_X[i], BOT, BLUE, 2, flowOp);
+  }
+  for (var i = 0; i < GRID_Y.length; i++) {
+    s += line(0, GRID_Y[i], W, GRID_Y[i], BLUE, 2, flowOp);
+  }
+
+  var bluePulse = 10 + Math.sin(u * Math.PI * 6) * 2;
+  s += pathTag(BLUE_PATH_D, BLUE, bluePulse, 0.9);
+  
+  var carPos = getPointOnSegmentedPath(BP_POINTS, 0.8 + u * 0.2); // Finishing the path
+  s += car(carPos.x, carPos.y, AMBER, false, 1);
+
+  s += pathTag(CORAL_PATH_D, CORAL, 10, 0.4);
+  var numLights = 3;
+  for (var i = 0; i < numLights; i++) {
+    var p = (i / numLights) + 0.1;
+    var x = lerp(START_PT.x, END_PT.x, p);
+    var y = lerp(START_PT.y, END_PT.y, p);
+    var phase = (u * 2 + i * 0.5) % 1; // Slower cycling for delays
+    s += trafficLight(x + rnd(i)*20 - 10, y + rnd(i+1)*20 - 10, 60, phase, 1);
+    
+    if (phase < 0.33) { // If light is red, show queued cars
+      for (var j = 0; j < 3; j++) {
+        s += simpleCar(x + rnd(i+j)*20 - 10, y + 60 + j * 70, CORAL, 0.8);
+      }
+    }
+  }
+
+  // Small 'brain' or 'CPU' icon near blue path
+  var brainOp = ramp(u, 0.2, 0.8);
+  var brainX = CX - 300, brainY = CY - 300;
+  if (brainOp > 0.02) {
+    s += ring(brainX, brainY, 40, BLUE, 8, brainOp);
+    s += dot(brainX - 20, brainY - 10, 10, BLUE, brainOp);
+    s += dot(brainX + 20, brainY - 10, 10, BLUE, brainOp);
+    s += line(brainX - 20, brainY + 10, brainX + 20, brainY + 10, BLUE, 8, brainOp);
+  }
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE - So the next time your map takes you on a detour... */
+function scene6(u) {
+  var s = '';
+  var reform = smooth(ramp(u, 0.5, 0.9)); // Transition back to simple view
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  
+  s += drawGrid(0.15 * (1 - reform)); // Grid fades out slightly
+
+  var carPos = getPointOnSegmentedPath(BP_POINTS, 0.95 + u * 0.05); // Final approach
+  s += car(carPos.x, carPos.y, AMBER, false, 1);
+
+  s += pathTag(BLUE_PATH_D, BLUE, 12, 0.9);
+  s += ring(END_PT.x, END_PT.y, 40, BLUE, 6, 0.8); // Destination reached marker
+
+  s += pathTag(CORAL_PATH_D, CORAL, 10, 0.4 * (1 - reform));
+  var numLights = 3;
+  for (var i = 0; i < numLights; i++) {
+    var p = (i / numLights) + 0.1;
+    var x = lerp(START_PT.x, END_PT.x, p);
+    var y = lerp(START_PT.y, END_PT.y, p);
+    s += trafficLight(x + rnd(i)*20 - 10, y + rnd(i+1)*20 - 10, 60, 0, (1 - reform)); // All red, then fades
+    if (1 - reform > 0.1) {
+      for (var j = 0; j < 3; j++) {
+        s += simpleCar(x + rnd(i+j)*20 - 10, y + 60 + j * 70, CORAL, (1 - reform) * 0.8);
+      }
+    }
+  }
+
+  var clockOp = ramp(u, 0.3, 0.7);
+  var clockX = CX + 300, clockY = CY + 300;
+  if (clockOp > 0.02) {
+    s += clock(clockX, clockY, 60, WHITE, 8, clockOp);
+  }
+  
+  if (reform > 0.5) {
+    s += chevron(carPos.x, carPos.y - 100, 30, AMBER, reform * 0.7);
+  }
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

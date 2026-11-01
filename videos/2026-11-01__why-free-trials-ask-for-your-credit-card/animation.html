@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Free Trials Ask For Your Credit Card</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = W / 2, CY = H / 2;
+var TOP = 160, BOT = 1760;
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary elements
+var BLUE  = "#4C86F0";              // signal blue  -> system / mechanism
+var AMBER = "#F2A93B";              // warm amber   -> YOU / user
+var CORAL = "#FF5B5B";              // coral red    -> frustration / wrong assumption
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, fill) {
+  return '<path d="' + d + '" fill="' + (fill || 'none') + '" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+// Custom glyphs (NO TEXT)
+function plusGlyph(x, y, size, col, sw, op) {
+  return line(x - size/2, y, x + size/2, y, col, sw, op) +
+         line(x, y - size/2, x, y + size/2, col, sw, op);
+}
+function cardSlotGlyph(x, y, w, h, col, sw, op) {
+  var d = "M " + (x - w/2) + " " + (y - h/2) + " H " + (x + w/2) + " V " + (y + h/2) + " H " + (x - w/2) + " Z"; // Outer rectangle
+  d += " M " + (x - w/2 + sw) + " " + (y - h/4) + " H " + (x + w/2 - sw); // Slot line
+  return pathTag(d, col, sw, op);
+}
+function questionMarkGlyph(x, y, size, col, sw, op) {
+  var d = "M " + x + " " + (y - size/2) +
+          " A " + (size/4) + " " + (size/4) + " 0 1 1 " + (x - size/4) + " " + (y - size/4) +
+          " L " + (x - size/4) + " " + (y + size/8) +
+          " M " + x + " " + (y + size/2 - sw/2) + " h 0.1"; // dot
+  return pathTag(d, col, sw, op);
+}
+function gearsGlyph(x, y, r, col, sw, op) {
+  var s = '';
+  s += ring(x, y, r, col, sw, op);
+  for (var i = 0; i < 6; i++) {
+    var angle = i * Math.PI / 3;
+    var x1 = x + r * Math.cos(angle);
+    var y1 = y + r * Math.sin(angle);
+    var x2 = x + (r + sw * 0.8) * Math.cos(angle);
+    var y2 = y + (r + sw * 0.8) * Math.sin(angle);
+    s += line(x1, y1, x2, y2, col, sw, op);
+  }
+  return s;
+}
+function arrowGlyph(x, y, size, col, sw, op) {
+  var d = "M " + (x - size/2) + " " + y + " H " + (x + size/2) + " M " + (x + size/4) + " " + (y - size/4) + " L " + (x + size/2) + " " + y + " L " + (x + size/4) + " " + (y + size/4);
+  return pathTag(d, col, sw, op);
+}
+function loopArrowGlyph(x, y, r, col, sw, op) {
+  var d = "M " + (x - r) + " " + y +
+          " A " + r + " " + r + " 0 1 1 " + (x + r) + " " + y +
+          " M " + (x + r - r/4) + " " + (y - r/4) + " L " + (x + r) + " " + y + " L " + (x + r - r/4) + " " + (y + r/4);
+  return pathTag(d, col, sw, op);
+}
+
+
+/* ---------- complex elements ---------- */
+
+// Stick figure
+function stickFigure(x, base_y, col, expression, armPose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var sw = 8;
+  var headR = 30;
+  var bodyLen = 80;
+  var armLen = 60;
+  var legLen = 80;
+
+  var bodyTopY = base_y - legLen - bodyLen;
+  var bodyBottomY = base_y - legLen;
+  var headCenterY = bodyTopY - headR;
+
+  // Head
+  g += dot(x, headCenterY, headR, col);
+
+  // Body
+  g += line(x, bodyTopY, x, bodyBottomY, col, sw);
+
+  // Arms
+  var armAttachY = bodyTopY + 20;
+  if (armPose === 'down') {
+    g += line(x - 30, armAttachY, x - 30, armAttachY + armLen, col, sw);
+    g += line(x + 30, armAttachY, x + 30, armAttachY + armLen, col, sw);
+  } else if (armPose === 'reach') {
+    g += line(x - 20, armAttachY, x - 60, armAttachY - 30, col, sw);
+    g += line(x + 20, armAttachY, x + 60, armAttachY - 30, col, sw);
+  } else if (armPose === 'crossed') {
+    g += line(x - 30, armAttachY + 20, x + 30, armAttachY + 50, col, sw);
+    g += line(x + 30, armAttachY + 20, x - 30, armAttachY + 50, col, sw);
+  }
+
+  // Legs
+  g += line(x, bodyBottomY, x - 30, base_y, col, sw);
+  g += line(x, bodyBottomY, x + 30, base_y, col, sw);
+
+  // Expression (eyes and mouth)
+  var eyeY = headCenterY - 10;
+  var mouthY = headCenterY + 10;
+  var eyeSize = 4;
+  var mouthWidth = 20;
+
+  if (expression === 'smile') {
+    g += dot(x - 10, eyeY, eyeSize, WHITE);
+    g += dot(x + 10, eyeY, eyeSize, WHITE);
+    g += pathTag("M " + (x - mouthWidth/2) + " " + mouthY + " Q " + x + " " + (mouthY + 10) + " " + (x + mouthWidth/2) + " " + mouthY, WHITE, sw/2);
+  } else if (expression === 'question') {
+    g += dot(x - 10, eyeY, eyeSize, WHITE);
+    g += dot(x + 10, eyeY, eyeSize, WHITE);
+    g += line(x - mouthWidth/2, mouthY + 5, x + mouthWidth/2, mouthY + 5, WHITE, sw/2); // straight line mouth
+  } else if (expression === 'perplexed') {
+    g += line(x - 10, eyeY - 5, x - 5, eyeY + 5, WHITE, sw/2); // furrowed brows
+    g += line(x + 5, eyeY + 5, x + 10, eyeY - 5, WHITE, sw/2);
+    g += line(x - mouthWidth/2, mouthY + 5, x + mouthWidth/2, mouthY + 5, WHITE, sw/2); // straight line mouth
+  } else if (expression === 'resigned') {
+    g += dot(x - 10, eyeY, eyeSize, WHITE);
+    g += dot(x + 10, eyeY, eyeSize, WHITE);
+    g += pathTag("M " + (x - mouthWidth/2) + " " + (mouthY + 10) + " Q " + x + " " + mouthY + " " + (x + mouthWidth/2) + " " + (mouthY + 10), WHITE, sw/2); // slight frown
+  } else if (expression === 'knowing') {
+    g += dot(x - 10, eyeY, eyeSize, WHITE);
+    g += dot(x + 10, eyeY, eyeSize, WHITE);
+    g += pathTag("M " + (x - mouthWidth/2) + " " + mouthY + " Q " + x + " " + (mouthY + 5) + " " + (x + mouthWidth/2) + " " + mouthY, WHITE, sw/2); // subtle smile
+  }
+
+  g += '</g>';
+  return g;
+}
+
+// Service Box hero element
+function serviceBox(x, y, w, h, state, u, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var sw = 10;
+  var rad = 30;
+
+  var boxCol = BLUE;
+
+  if (state === 'free') {
+    g += rrectStroke(x, y, w, h, rad, boxCol, sw, 1);
+    // 'FREE' icon (plus glyph)
+    var plusSize = w * 0.3;
+    g += plusGlyph(x, y, plusSize, boxCol, sw, 0.8 + Math.sin(u * Math.PI * 4) * 0.2); // pulsing
+  } else if (state === 'card') {
+    g += rrectStroke(x, y, w, h, rad, boxCol, sw, 1);
+    // Credit card slot
+    var slotW = w * 0.6, slotH = h * 0.2;
+    g += cardSlotGlyph(x, y + h * 0.2, slotW, slotH, CORAL, sw, 1);
+    // 'CARD REQUIRED' icon (simple card shape with dot)
+    g += rrectStroke(x, y - h * 0.25, w * 0.4, h * 0.15, 8, CORAL, sw/2, 1);
+    g += dot(x + w * 0.1, y - h * 0.25, 4, CORAL, 1); // small dot for card chip
+  } else if (state === 'card_flash') {
+    g += rrectStroke(x, y, w, h, rad, CORAL, sw, 1); // Box flashes coral
+    var slotW = w * 0.6, slotH = h * 0.2;
+    g += cardSlotGlyph(x, y + h * 0.2, slotW, slotH, CORAL, sw, 1);
+    g += rrectStroke(x, y - h * 0.25, w * 0.4, h * 0.15, 8, CORAL, sw/2, 1);
+    g += dot(x + w * 0.1, y - h * 0.25, 4, CORAL, 1);
+  } else if (state === 'gears') {
+    g += rrectStroke(x, y, w, h, rad, boxCol, sw, 1);
+    // Gears and arrow inside (transparent box effect)
+    var gearR = w * 0.2;
+    g += gearsGlyph(x - w * 0.15, y - h * 0.1, gearR, boxCol, sw/2, 0.8);
+    g += gearsGlyph(x + w * 0.15, y + h * 0.1, gearR, boxCol, sw/2, 0.8);
+    // Arrow showing flow
+    var arrowSize = w * 0.4;
+    g += arrowGlyph(x, y, arrowSize, boxCol, sw/2, 0.9);
+    // Card slot still visible, but integrated
+    var slotW = w * 0.6, slotH = h * 0.2;
+    g += cardSlotGlyph(x, y + h * 0.3, slotW, slotH, DIM, sw/2, 0.4);
+  } else if (state === 'subscription') {
+    g += rrectStroke(x, y, w, h, rad, boxCol, sw, 1);
+    // 'SUBSCRIPTION' icon (loop arrow)
+    var loopR = w * 0.2;
+    g += loopArrowGlyph(x, y - h * 0.2, loopR, boxCol, sw, 0.9);
+    // Payment animation from slot
+    var slotW = w * 0.6, slotH = h * 0.2;
+    g += cardSlotGlyph(x, y + h * 0.2, slotW, slotH, DIM, sw/2, 0.6);
+    // Flowing payment dots
+    for (var i = 0; i < 3; i++) {
+      var p = (u * 1.5 + i / 3) % 1;
+      var dotY = y + h * 0.2 + slotH/2 + p * (h * 0.3);
+      g += dot(x, dotY, 8, BLUE, (1 - p) * 0.8);
+    }
+  } else if (state === 'clear') {
+    g += rrectStroke(x, y, w, h, rad, boxCol, sw, 1);
+    // Internal mechanism visible, simplified
+    var gearR = w * 0.2;
+    g += gearsGlyph(x - w * 0.15, y - h * 0.1, gearR, boxCol, sw/2, 0.6);
+    g += gearsGlyph(x + w * 0.15, y + h * 0.1, gearR, boxCol, sw/2, 0.6);
+    g += arrowGlyph(x, y, w * 0.4, boxCol, sw/2, 0.7);
+  }
+
+  g += '</g>';
+  return g;
+}
+
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+var SF_X = CX - 200; // Stick figure X position
+var SF_BASE_Y = BOT - 100; // Stick figure base Y position
+var BOX_X = CX + 200; // Service Box X position
+var BOX_Y = TOP + (BOT - TOP) * 0.35; // Service Box center Y position
+var BOX_W = 280;
+var BOX_H = 360;
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var sfY = SF_BASE_Y + Math.sin(u * Math.PI * 2) * 8; // Gentle bobbing
+  s += stickFigure(SF_X, sfY, AMBER, 'smile', 'down', 1);
+
+  var boxPulse = 1 + Math.sin(u * Math.PI * 4) * 0.02; // Gentle pulse
+  s += serviceBox(BOX_X, BOX_Y, BOX_W * boxPulse, BOX_H * boxPulse, 'free', u, 1);
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var sfY = SF_BASE_Y;
+  var boxW = BOX_W;
+  var boxH = BOX_H;
+
+  // Stick figure reaches
+  var reachT = ramp(u, 0.1, 0.3);
+  var armPose = reachT > 0.1 ? 'reach' : 'down';
+  var expression = u < 0.5 ? 'smile' : 'question';
+  s += stickFigure(SF_X, sfY, AMBER, expression, armPose, 1);
+
+  // Box transforms
+  var cardTransT = ramp(u, 0.2, 0.6);
+  var currentBoxState = cardTransT < 0.99 ? 'free' : 'card';
+  
+  // Camera zoom on card slot
+  var zoom = lerp(1.0, 1.08, smooth(ramp(u, 0.4, 0.8)));
+  var camTx = lerp(0, 40, smooth(ramp(u, 0.4, 0.8)));
+  var camTy = lerp(0, 80, smooth(ramp(u, 0.4, 0.8)));
+
+  s += '<g ' + camera(zoom, camTx, camTy) + '>';
+  s += serviceBox(BOX_X, BOX_Y, boxW, boxH, currentBoxState, u, 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var sfY = SF_BASE_Y;
+  var boxW = BOX_W;
+  var boxH = BOX_H;
+
+  s += stickFigure(SF_X, sfY, AMBER, 'perplexed', 'crossed', 1);
+
+  // Box flashes coral red
+  var flashT = pulse(u, 0.2, 0.1); // Flash around u=0.2
+  var currentBoxState = flashT > 0.1 ? 'card_flash' : 'card';
+  s += serviceBox(BOX_X, BOX_Y, boxW, boxH, currentBoxState, u, 1);
+
+  // Thought bubble with question mark
+  var bubbleOp = ramp(u, 0.1, 0.4) * (1 - ramp(u, 0.7, 0.9));
+  if (bubbleOp > 0.02) {
+    var headCenterY = SF_BASE_Y - 80 - 80 - 30; // Calculated head center Y for stick figure
+    var bubbleX = SF_X + 100, bubbleY = headCenterY - 100;
+    var bubbleR = 60;
+    s += ring(bubbleX, bubbleY, bubbleR, CORAL, 6, bubbleOp);
+    s += questionMarkGlyph(bubbleX, bubbleY, bubbleR * 0.8, CORAL, 8, bubbleOp);
+  }
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var sfY = SF_BASE_Y;
+  var boxW = BOX_W;
+  var boxH = BOX_H;
+
+  s += stickFigure(SF_X, sfY, AMBER, 'question', 'down', 1); // Still questioning, but less perplexed
+
+  // Box transforms, revealing internal mechanisms
+  var transformT = ramp(u, 0.1, 0.6); // Morph from 'card' to 'gears'
+  var boxState = transformT < 0.99 ? 'card' : 'gears';
+  // Subtle rotation
+  var rotate = lerp(0, 5, smooth(ramp(u, 0.2, 0.8)));
+  s += '<g transform="rotate(' + rotate + ' ' + CX + ' ' + CY + ')">';
+  s += serviceBox(BOX_X, BOX_Y, boxW, boxH, boxState, u, 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var sfY = SF_BASE_Y;
+  var boxW = BOX_W;
+  var boxH = BOX_H;
+
+  s += stickFigure(SF_X, sfY, AMBER, 'resigned', 'down', 1);
+
+  // Box shows 'SUBSCRIPTION' icon and payment animation
+  var transformT = ramp(u, 0.1, 0.4); // Morph from 'gears' to 'subscription'
+  var boxState = transformT < 0.99 ? 'gears' : 'subscription';
+  s += serviceBox(BOX_X, BOX_Y, boxW, boxH, boxState, u, 1);
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var sfY = SF_BASE_Y;
+  var boxW = BOX_W;
+  var boxH = BOX_H;
+
+  s += stickFigure(SF_X, sfY, AMBER, 'knowing', 'down', 1); // Knowing expression
+
+  // Box is simple, clear container with internal mechanism
+  var transformT = ramp(u, 0.1, 0.4); // Morph from 'subscription' to 'clear'
+  var boxState = transformT < 0.99 ? 'subscription' : 'clear';
+  s += serviceBox(BOX_X, BOX_Y, boxW, boxH, boxState, u, 1);
+
+  // Camera pulls back slightly
+  var scale = lerp(1.0, 0.9, smooth(ramp(u, 0.5, 0.9)));
+  var camTy = lerp(0, 50, smooth(ramp(u, 0.5, 0.9)));
+  s = '<g ' + camera(scale, 0, camTy) + '>' + s + '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
