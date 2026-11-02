@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You're at the doctor for a routine check-up, just wanting to get in and out quickly, feeling perfectly fine.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "Then, they hit you with the big question: 'Does anyone in your family have heart disease, diabetes, or certain cancers?'",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "Your first thought might be that they're just looking for a simple, direct genetic switch, a single 'bad' gene passed down.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "But the system is far more complex. Doctors use this data to construct a predictive model, spotting patterns of predisposition across generations.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "It's not about a guarantee, but a map of increased likelihoods, helping them understand your personal statistical landscape for various conditions.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "So, next time the doctor asks, you'll know they're not just curious; they're piecing together your unique health blueprint to guide your care.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

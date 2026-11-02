@@ -1,0 +1,15 @@
+{
+  "id": "why-doctors-ask-about-family-history",
+  "slug": "2026-11-02__why-doctors-ask-about-family-history",
+  "title_working": "Why Doctors Ask About Your Family's Health",
+  "system": "predictive modeling and risk assessment based on genetic predispositions",
+  "cluster": "institutions-and-bureaucracy",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-11-02T15:40:38+00:00",
+  "produced_at": "2026-11-02T15:47:42+00:00",
+  "verify": "PASS",
+  "takeaway": "Doctors use your family's health history to build a unique predictive model of your personal health risks.",
+  "animation_source": "fallback"
+}

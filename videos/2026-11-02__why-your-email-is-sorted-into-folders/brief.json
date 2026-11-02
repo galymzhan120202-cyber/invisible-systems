@@ -1,0 +1,15 @@
+{
+  "id": "why-your-email-is-sorted-into-folders",
+  "slug": "2026-11-02__why-your-email-is-sorted-into-folders",
+  "title_working": "Why Your Inbox Sorts Emails Into Folders",
+  "system": "automated categorization and filtering based on learned patterns",
+  "cluster": "platforms-and-algorithms",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-11-02T15:33:46+00:00",
+  "produced_at": "2026-11-02T15:40:35+00:00",
+  "verify": "PASS",
+  "takeaway": "Your email inbox uses a dynamic, learning system to sort messages based on your past actions and message patterns.",
+  "animation_source": "fallback"
+}

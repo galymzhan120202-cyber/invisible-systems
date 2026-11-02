@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why The Cheapest Wine Isn't Always The Best Deal</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> system/rules
+var AMBER = "#F2A93B";              // warm amber   -> customer/desire
+var CORAL = "#FF5B5B";              // coral red    -> naive model/trap
+
+var DUR = 60;
+window.__duration = DUR;
+
+// Scene-specific constants
+var TABLE_Y = BOT - 200;
+var CUSTOMER_Y = TABLE_Y - 280;
+var LIST_W = 400, LIST_H = 600;
+var LIST_X = CX, LIST_Y = TABLE_Y - LIST_H / 2 - 100; // Centered above table
+var LIST_ITEM_COUNT = 5;
+var PRICE_BAR_W = 200;
+var PRICE_BAR_MAX_H = 360; // Max height for the tallest bar
+var PRICE_BAR_MIN_H = 60; // Min height for the shortest bar
+
+// Relative heights for 5 items (highest to lowest price)
+var BASE_PRICE_HEIGHTS = [PRICE_BAR_MAX_H, 0.7 * PRICE_BAR_MAX_H, 0.5 * PRICE_BAR_MAX_H, 0.3 * PRICE_BAR_MAX_H, PRICE_BAR_MIN_H];
+// Y positions for the center of each price bar, from top to bottom of the list
+var PRICE_BAR_YS = [];
+var itemSlotHeight = LIST_H / LIST_ITEM_COUNT;
+for (var i = 0; i < LIST_ITEM_COUNT; i++) {
+    PRICE_BAR_YS.push(LIST_Y - LIST_H / 2 + itemSlotHeight / 2 + i * itemSlotHeight);
+}
+
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+// Helper for color lerping (simple RGB interpolation)
+function lerpColor(a, b, t) {
+    var ah = parseInt(a.replace(/#/g, '0x'), 16),
+        ar = ah >> 16, ag = (ah >> 8) & 0xff, ab = ah & 0xff,
+        bh = parseInt(b.replace(/#/g, '0x'), 16),
+        br = bh >> 16, bg = (bh >> 8) & 0xff, bb = bh & 0xff,
+        rr = ar + t * (br - ar),
+        rg = ag + t * (bg - ag),
+        rb = ab + t * (bb - ab);
+    return '#' + ((1 << 24) + (rr << 16) + (rg << 8) + rb | 0).toString(16).slice(1);
+}
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, fill) {
+  return '<path d="' + d + '" fill="' + (fill || 'none') + '" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+/* the stick-figure customer */
+function stickFigure(x, y, headCol, bodyCol, armUp, questionMark, smile, gazeX, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += dot(x, y - 60, 20, headCol); // Head
+  g += line(x, y - 40, x, y + 40, bodyCol, 10); // Body
+  g += line(x, y + 40, x - 30, y + 100, bodyCol, 10); // Left leg
+  g += line(x, y + 40, x + 30, y + 100, bodyCol, 10); // Right leg
+  
+  var armY = y - 10;
+  if (armUp) {
+    g += line(x, armY, x - 50, armY - 50, bodyCol, 10); // Left arm up
+    g += line(x, armY, x + 50, armY - 50, bodyCol, 10); // Right arm up
+  } else {
+    g += line(x, armY, x - 40, armY + 40, bodyCol, 10); // Left arm down
+    g += line(x, armY, x + 40, armY + 40, bodyCol, 10); // Right arm down
+  }
+
+  // Gaze direction
+  var eyeShiftX = 0;
+  if (gazeX != null) {
+      eyeShiftX = (gazeX - x) * 0.08; // Slight shift for eyes
+  }
+  g += dot(x + 8 + eyeShiftX, y - 60 + 5, 4, WHITE, 0.8); // Eye 1
+  g += dot(x - 8 + eyeShiftX, y - 60 + 5, 4, WHITE, 0.8); // Eye 2
+  if (smile) {
+      g += pathTag("M " + (x - 12 + eyeShiftX) + " " + (y - 50) + " Q " + (x + eyeShiftX) + " " + (y - 40) + " " + (x + 12 + eyeShiftX) + " " + (y - 50), WHITE, 4);
+  } else {
+      g += line(x - 12 + eyeShiftX, y - 50, x + 12 + eyeShiftX, y - 50, WHITE, 4); // Mouth
+  }
+
+  if (questionMark) {
+    g += glyphQuestion(x + 60, y - 120, 40, AMBER, op);
+  }
+  g += '</g>';
+  return g;
+}
+
+/* the wine list */
+function wineList(x, y, w, h, priceData, highlightedIdx, highlightCol, transparency, op) {
+  op = (op == null ? 1 : op);
+  transparency = (transparency == null ? 0 : transparency);
+  var g = '<g opacity="' + op + '">';
+  
+  // Base list rectangle
+  g += rrect(x, y, w, h, 20, WHITE, 1 - transparency); // Solid part
+  if (transparency > 0) {
+      g += rrectStroke(x, y, w, h, 20, WHITE, 6, transparency); // Outline for transparent part
+  }
+
+  // Price bars
+  var barX = x + w / 4; // Position bars on the right side of the list
+  for (var i = 0; i < priceData.length; i++) {
+    var barY = PRICE_BAR_YS[i];
+    var barH = priceData[i].h;
+    var barCol = priceData[i].col;
+    g += rrect(barX, barY, PRICE_BAR_W, barH, 10, barCol, 0.9);
+  }
+
+  // Highlight
+  if (highlightedIdx != null && highlightedIdx < priceData.length) {
+    var highlightY = PRICE_BAR_YS[highlightedIdx];
+    var highlightH = priceData[highlightedIdx].h;
+    g += rrectStroke(barX, highlightY, PRICE_BAR_W + 20, highlightH + 20, 15, highlightCol, 8, 1);
+  }
+
+  g += '</g>';
+  return g;
+}
+
+/* thought bubble with content */
+function thoughtBubble(x, y, contentGlyphFunc, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += dot(x - 40, y + 40, 8, col, op * 0.6);
+  g += dot(x - 60, y + 60, 12, col, op * 0.8);
+  g += rrect(x, y, 160, 100, 30, col, op);
+  g += contentGlyphFunc(x, y, 60, WHITE, op); // Content function passed in
+  g += '</g>';
+  return g;
+}
+
+/* glyph: dollar sign with checkmark */
+function glyphDollarCheck(x, y, size, col, op) {
+  var s = '';
+  // Dollar sign
+  s += pathTag("M " + (x - size * 0.2) + " " + (y - size * 0.4) +
+               " L " + (x - size * 0.2) + " " + (y - size * 0.2) +
+               " C " + (x - size * 0.2) + " " + (y - size * 0.1) + " " + (x - size * 0.1) + " " + y + " " + x + " " + y +
+               " C " + (x + size * 0.1) + " " + y + " " + (x + size * 0.2) + " " + (y + size * 0.1) + " " + (x + size * 0.2) + " " + (y + size * 0.2) +
+               " L " + (x + size * 0.2) + " " + (y + size * 0.4) +
+               " M " + x + " " + (y - size * 0.5) + " L " + x + " " + (y + size * 0.5), col, 8, op);
+  // Checkmark
+  s += pathTag("M " + (x - size * 0.4) + " " + (y + size * 0.1) +
+               " L " + (x - size * 0.2) + " " + (y + size * 0.3) +
+               " L " + (x + size * 0.4) + " " + (y - size * 0.3), col, 8, op);
+  return s;
+}
+
+/* glyph: question mark */
+function glyphQuestion(x, y, size, col, op) {
+  var d = "M " + x + " " + (y - size * 0.4) +
+          " C " + (x + size * 0.3) + " " + (y - size * 0.4) + " " + (x + size * 0.3) + " " + (y - size * 0.1) + " " + x + " " + (y - size * 0.1) +
+          " C " + (x - size * 0.2) + " " + (y - size * 0.1) + " " + (x - size * 0.2) + " " + (y + size * 0.1) + " " + (x - size * 0.05) + " " + (y + size * 0.1) +
+          " L " + (x + size * 0.05) + " " + (y + size * 0.1) +
+          " M " + x + " " + (y + size * 0.3) + " L " + x + " " + (y + size * 0.4);
+  return pathTag(d, col, 8, op);
+}
+
+/* glyph: trap (inverted triangle) */
+function glyphTrap(x, y, size, col, op) {
+    var d = "M " + (x - size * 0.4) + " " + (y - size * 0.4) +
+            " L " + (x + size * 0.4) + " " + (y - size * 0.4) +
+            " L " + x + " " + (y + size * 0.4) + " Z";
+    return pathTag(d, col, 8, op, col); // Filled triangle
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var listSlideIn = easeOut(ramp(u, 0.2, 0.6));
+  var bubbleAppear = easeOut(ramp(u, 0.6, 0.9));
+  
+  var listY = lerp(BOT + LIST_H / 2, LIST_Y, listSlideIn);
+
+  s += rrect(CX, TABLE_Y, 800, 160, 20, DIM, 0.8); // Table
+
+  // Customer looking towards where the list will appear
+  s += stickFigure(CX, CUSTOMER_Y, AMBER, AMBER, false, false, false, CX + 100 * listSlideIn); 
+  s += wineList(LIST_X, listY, LIST_W, LIST_H, [], null, null, 0, 1); // Blank list
+
+  if (bubbleAppear > 0) {
+    s += thoughtBubble(CX + 180, CUSTOMER_Y - 100, glyphDollarCheck, AMBER, bubbleAppear);
+  }
+
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var zoom = lerp(1.0, 1.4, smooth(ramp(u, 0.0, 0.4)));
+  var panY = lerp(0, -100, smooth(ramp(u, 0.0, 0.4)));
+  var eyeScan = smooth(ramp(u, 0.3, 0.8)); // Eye scans down
+
+  s += '<g ' + camera(zoom, 0, panY) + '>';
+  s += rrect(CX, TABLE_Y, 800, 160, 20, DIM, 0.8); // Table
+  s += stickFigure(CX, CUSTOMER_Y, AMBER, AMBER, false, false, false, LIST_X); // Customer looking at list
+
+  // Price data for scene 2
+  var priceData = BASE_PRICE_HEIGHTS.map((h, i) => ({h: h, col: WHITE}));
+  s += wineList(LIST_X, LIST_Y, LIST_W, LIST_H, priceData, null, null, 0, 1);
+
+  // Eye line
+  var eyeStartX = CX - 100; // From customer's head
+  var eyeStartY = CUSTOMER_Y - 60;
+  
+  // Scan path: start at top item, scan down to second-lowest (index 3)
+  var scanTargetY = PRICE_BAR_YS[3]; // Y of the second-lowest price bar (0-indexed)
+  var scanPathY = lerp(PRICE_BAR_YS[0] - priceData[0].h/2, scanTargetY, eyeScan); // Scan from top of list to target
+  
+  s += line(eyeStartX, eyeStartY, LIST_X + LIST_W / 4, scanPathY, AMBER, 4, 0.7);
+  s += dot(LIST_X + LIST_W / 4, scanPathY, 10, AMBER, 0.9);
+
+  // Highlight the second-lowest price bar when scan completes
+  if (eyeScan >= 0.95) {
+      s += rrectStroke(LIST_X + LIST_W / 4, PRICE_BAR_YS[3], PRICE_BAR_W + 20, priceData[3].h + 20, 15, AMBER, 8, 1);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var zoom = lerp(1.4, 1.2, smooth(ramp(u, 0.0, 0.3))); // Pull back slightly
+  var panY = lerp(-100, -50, smooth(ramp(u, 0.0, 0.3)));
+  var questionAppear = easeOut(ramp(u, 0.1, 0.4));
+  var trapFlicker = pulse(u, 0.6, 0.2) * 0.8; // Flicker around the chosen price
+
+  s += '<g ' + camera(zoom, 0, panY) + '>';
+  s += rrect(CX, TABLE_Y, 800, 160, 20, DIM, 0.8); // Table
+  s += stickFigure(CX, CUSTOMER_Y, AMBER, AMBER, false, questionAppear > 0.5, false, LIST_X); // Customer with question mark
+
+  var priceData = BASE_PRICE_HEIGHTS.map((h, i) => ({h: h, col: WHITE}));
+  s += wineList(LIST_X, LIST_Y, LIST_W, LIST_H, priceData, 3, AMBER, 0, 1); // Second-lowest highlighted
+
+  // Coral red trap/question marks around the highlighted price
+  var targetBarX = LIST_X + LIST_W / 4;
+  var targetBarY = PRICE_BAR_YS[3];
+  var targetBarH = priceData[3].h;
+
+  if (trapFlicker > 0.05) {
+      s += glyphQuestion(targetBarX - 80, targetBarY - targetBarH / 2 - 40, 30, CORAL, trapFlicker);
+      s += glyphTrap(targetBarX + 80, targetBarY + targetBarH / 2 + 40, 40, CORAL, trapFlicker);
+      s += ring(targetBarX, targetBarY, targetBarH / 2 + 30 + Math.sin(u * 20) * 5, CORAL, 6, trapFlicker * 0.6);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var listTransform = smooth(ramp(u, 0.1, 0.7)); // Transformation of the list
+  
+  s += rrect(CX, TABLE_Y, 800, 160, 20, DIM, 0.8); // Table
+  s += stickFigure(CX, CUSTOMER_Y, AMBER, AMBER, false, false, false, LIST_X); // Customer observing
+
+  // Price data for scene 4 transformation
+  var priceData = [];
+  for (var i = 0; i < LIST_ITEM_COUNT; i++) {
+    var h = BASE_PRICE_HEIGHTS[i];
+    var col = WHITE;
+
+    if (i === 0) { // Highest price becomes anchor (BLUE, taller)
+      h = lerp(BASE_PRICE_HEIGHTS[0], PRICE_BAR_MAX_H * 1.5, listTransform);
+      col = lerpColor(WHITE, BLUE, listTransform);
+    } else if (i === 1) { // Next highest becomes reasonable (BLUE)
+      h = lerp(BASE_PRICE_HEIGHTS[1], PRICE_BAR_MAX_H * 0.8, listTransform);
+      col = lerpColor(WHITE, BLUE, listTransform);
+    } else if (i === 3) { // Second-lowest becomes unappealing (CORAL, shrinks)
+      h = lerp(BASE_PRICE_HEIGHTS[3], PRICE_BAR_MIN_H * 0.5, listTransform);
+      col = lerpColor(WHITE, CORAL, listTransform);
+    } else { // Others fade slightly
+      col = lerpColor(WHITE, DIM, listTransform);
+    }
+    priceData.push({h: h, col: col});
+  }
+  
+  s += wineList(LIST_X, LIST_Y, LIST_W, LIST_H, priceData, null, null, 0, 1);
+
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var shatter = smooth(ramp(u, 0.1, 0.7)); // Shattering effect
+  
+  s += rrect(CX, TABLE_Y, 800, 160, 20, DIM, 0.8); // Table
+  s += stickFigure(CX, CUSTOMER_Y, AMBER, AMBER, false, false, false, CX); // Customer looking forward
+
+  // Transformed price data from end of scene 4 (stable state)
+  var priceData = [];
+  for (var i = 0; i < LIST_ITEM_COUNT; i++) {
+    var h = BASE_PRICE_HEIGHTS[i];
+    var col = WHITE;
+    if (i === 0) { h = PRICE_BAR_MAX_H * 1.5; col = BLUE; }
+    else if (i === 1) { h = PRICE_BAR_MAX_H * 0.8; col = BLUE; }
+    else if (i === 3) { h = PRICE_BAR_MIN_H * 0.5; col = CORAL; }
+    else { col = DIM; }
+    priceData.push({h: h, col: col});
+  }
+  s += wineList(LIST_X, LIST_Y, LIST_W, LIST_H, priceData, null, null, 0, 1);
+
+  // Coral red shattered fragments around the customer
+  var fragCount = 20;
+  for (var i = 0; i < fragCount; i++) {
+    var angle = rnd(i) * Math.PI * 2;
+    var dist = lerp(0, 300, shatter);
+    var x1 = CX + Math.cos(angle) * dist;
+    var y1 = CUSTOMER_Y + Math.sin(angle) * dist;
+    var x2 = x1 + Math.cos(angle + Math.PI / 2) * (rnd(i + 1) * 40 - 20);
+    var y2 = y1 + Math.sin(angle + Math.PI / 2) * (rnd(i + 2) * 40 - 20);
+    s += line(x1, y1, x2, y2, CORAL, 6, 1 - shatter);
+  }
+
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var transparency = smooth(ramp(u, 0.1, 0.6));
+  var pointAt = smooth(ramp(u, 0.6, 0.9));
+  
+  s += rrect(CX, TABLE_Y, 800, 160, 20, DIM, 0.8); // Table
+  s += stickFigure(CX, CUSTOMER_Y, AMBER, AMBER, false, false, true, LIST_X); // Customer smiles
+
+  // Transformed price data from end of scene 4 (stable state)
+  var priceData = [];
+  for (var i = 0; i < LIST_ITEM_COUNT; i++) {
+    var h = BASE_PRICE_HEIGHTS[i];
+    var col = WHITE;
+    if (i === 0) { h = PRICE_BAR_MAX_H * 1.5; col = BLUE; }
+    else if (i === 1) { h = PRICE_BAR_MAX_H * 0.8; col = BLUE; }
+    else if (i === 3) { h = PRICE_BAR_MIN_H * 0.5; col = CORAL; }
+    else { col = DIM; }
+    priceData.push({h: h, col: col});
+  }
+  s += wineList(LIST_X, LIST_Y, LIST_W, LIST_H, priceData, null, null, transparency, 1);
+
+  // Faint signal blue lines underneath the prices, revealing structure
+  if (transparency > 0) {
+      var barX = LIST_X + LIST_W / 4;
+      for (var i = 0; i < LIST_ITEM_COUNT; i++) {
+          var barY = PRICE_BAR_YS[i];
+          var barH = priceData[i].h;
+          // Horizontal line through the bar
+          s += line(barX - PRICE_BAR_W / 2 - 50, barY, barX + PRICE_BAR_W / 2 + 50, barY, BLUE, 4, transparency * 0.4);
+          // Vertical lines connecting to a base
+          s += line(barX - PRICE_BAR_W / 2, barY + barH / 2, barX - PRICE_BAR_W / 2, LIST_Y + LIST_H / 2 + 20, BLUE, 4, transparency * 0.4);
+          s += line(barX + PRICE_BAR_W / 2, barY + barH / 2, barX + PRICE_BAR_W / 2, LIST_Y + LIST_H / 2 + 20, BLUE, 4, transparency * 0.4);
+      }
+  }
+
+  // Customer points to a different, middle-tier bottle (index 2)
+  if (pointAt > 0) {
+      var targetBarX = LIST_X + LIST_W / 4;
+      var targetBarY = PRICE_BAR_YS[2]; // Middle item
+      var targetBarH = priceData[2].h;
+      s += rrectStroke(targetBarX, targetBarY, PRICE_BAR_W + 20, targetBarH + 20, 15, AMBER, 8, pointAt);
+      
+      // Arm pointing
+      var armX = CX + 40;
+      var armY = CUSTOMER_Y - 10;
+      var handX = lerp(armX + 40, targetBarX - PRICE_BAR_W/2 - 20, easeOut(pointAt));
+      var handY = lerp(armY + 40, targetBarY, easeOut(pointAt));
+      s += line(armX, armY, handX, handY, AMBER, 10, 1);
+  }
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
