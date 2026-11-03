@@ -1,0 +1,15 @@
+{
+  "id": "why-the-quick-reply-button-is-so-addictive",
+  "slug": "2026-11-03__why-the-quick-reply-button-is-so-addictive",
+  "title_working": "Why Quick Reply Buttons Are So Addictive",
+  "system": "intermittent reinforcement and reduced cognitive load in communication",
+  "cluster": "platforms-and-algorithms",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "failed",
+  "created_at": "2026-11-03T14:01:22+00:00",
+  "produced_at": "2026-11-03T14:04:17+00:00",
+  "verify": "FAIL",
+  "takeaway": "Quick reply buttons leverage unpredictable rewards and low effort to create a powerful, often addictive, communication loop.",
+  "animation_source": "llm"
+}

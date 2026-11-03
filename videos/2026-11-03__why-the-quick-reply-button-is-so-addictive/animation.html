@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Quick Reply Buttons Are So Addictive</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue  -> system / button
+var AMBER = "#F2A93B";              // warm amber   -> YOU / hand
+var CORAL = "#FF5B5B";              // coral red    -> friction / cost
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* New custom shapes for the story */
+function stickFigure(x, y, scale, headCol, bodyCol, armAngle, legAngle, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ') scale(' + scale + ')">';
+  g += dot(0, -60, 24, headCol); // Head
+  g += line(0, -30, 0, 60, bodyCol, 10); // Body
+  g += line(0, 0, Math.sin(armAngle) * 50, Math.cos(armAngle) * 50, bodyCol, 10); // Left arm
+  g += line(0, 0, Math.sin(-armAngle) * 50, Math.cos(-armAngle) * 50, bodyCol, 10); // Right arm
+  g += line(0, 60, Math.sin(legAngle) * 40, 60 + Math.cos(legAngle) * 40, bodyCol, 10); // Left leg
+  g += line(0, 60, Math.sin(-legAngle) * 40, 60 + Math.cos(-legAngle) * 40, bodyCol, 10); // Right leg
+  g += '</g>';
+  return g;
+}
+
+function stickFigureHand(x, y, angle, fingerBend, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ') rotate(' + angle + ')">';
+  g += line(0, 0, 50, 0, col, 12); // Palm
+  g += line(50, 0, 70, -10 + fingerBend * 10, col, 10); // Finger 1
+  g += line(50, 0, 65, 10 + fingerBend * 5, col, 10); // Finger 2
+  g += '</g>';
+  return g;
+}
+
+function messageBubble(x, y, w, h, rad, col, op) {
+  return rrect(x, y, w, h, rad, col, op);
+}
+
+function checkmark(x, y, size, col, sw, op) {
+  var d = "M " + (x - size * 0.6) + " " + (y + size * 0.1) +
+          " L " + (x - size * 0.1) + " " + (y + size * 0.6) +
+          " L " + (x + size * 0.6) + " " + (y - size * 0.4);
+  return pathTag(d, col, sw, op);
+}
+
+function questionMark(x, y, size, col, sw, op) {
+  var d = "M " + (x - size * 0.2) + " " + (y - size * 0.5) +
+          " C " + (x + size * 0.4) + " " + (y - size * 0.5) + " " + (x + size * 0.4) + " " + (y + size * 0.1) + " " + x + " " + (y + size * 0.1) +
+          " L " + x + " " + (y + size * 0.3) +
+          " M " + x + " " + (y + size * 0.6);
+  return pathTag(d, col, sw, op);
+}
+
+function exclamationMark(x, y, size, col, sw, op) {
+  var d = "M " + x + " " + (y - size * 0.5) + " L " + x + " " + (y + size * 0.2) +
+          " M " + x + " " + (y + size * 0.6);
+  return pathTag(d, col, sw, op);
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.9, smooth(u));
+  var driftY = lerp(0, -60, smooth(u));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  // Stick figure
+  s += stickFigure(CX, BOT - 300, 1.0, AMBER, WHITE, 0.1 * Math.sin(u * Math.PI * 2), 0.05 * Math.sin(u * Math.PI * 2), 1);
+
+  // Chaotic message bubbles
+  var bubbleCount = 12;
+  for (var i = 0; i < bubbleCount; i++) {
+    var rx = rnd(i * 10) * 800 - 400;
+    var ry = rnd(i * 11) * 800 - 400;
+    var bw = lerp(100, 180, rnd(i * 12));
+    var bh = lerp(60, 100, rnd(i * 13));
+    var rad = lerp(10, 25, rnd(i * 14));
+    var pulseOp = 0.6 + 0.2 * Math.sin(u * Math.PI * 4 + i);
+    s += messageBubble(CX + rx, CY + ry, bw, bh, rad, WHITE, pulseOp);
+  }
+
+  // Amber thought bubble with question mark
+  var thoughtBubbleY = BOT - 600;
+  s += rrectStroke(CX, thoughtBubbleY, 200, 120, 30, AMBER, 8, 1);
+  s += questionMark(CX, thoughtBubbleY, 40, AMBER, 10, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Fading chaotic bubbles
+  var fadeBubbles = 1 - smooth(ramp(u, 0.0, 0.2));
+  var bubbleCount = 12;
+  for (var i = 0; i < bubbleCount; i++) {
+    var rx = rnd(i * 10) * 800 - 400;
+    var ry = rnd(i * 11) * 800 - 400;
+    var bw = lerp(100, 180, rnd(i * 12));
+    var bh = lerp(60, 100, rnd(i * 13));
+    var rad = lerp(10, 25, rnd(i * 14));
+    s += messageBubble(CX + rx, CY + ry, bw, bh, rad, WHITE, fadeBubbles * 0.6);
+  }
+
+  // Single clear message bubble
+  var bubbleScale = lerp(0.5, 1.0, smooth(ramp(u, 0.1, 0.4)));
+  s += messageBubble(CX, CY, 600 * bubbleScale, 300 * bubbleScale, 60, WHITE, 1);
+
+  // Quick reply button
+  var buttonY = CY + 100 * bubbleScale;
+  var buttonW = 180 * bubbleScale, buttonH = 80 * bubbleScale, buttonRad = 20 * bubbleScale;
+  s += rrect(CX, buttonY, buttonW, buttonH, buttonRad, BLUE, 1);
+  s += checkmark(CX, buttonY, 40 * bubbleScale, WHITE, 10, 1);
+
+  // Amber finger tapping
+  var tapProgress = smooth(ramp(u, 0.4, 0.6));
+  var fingerX = lerp(CX + 200, CX + 60, tapProgress);
+  var fingerY = lerp(CY + 100, buttonY, tapProgress);
+  var fingerAngle = lerp(30, 0, tapProgress);
+  var fingerBend = tapProgress;
+  s += stickFigureHand(fingerX, fingerY, fingerAngle, fingerBend, AMBER, 1);
+
+  // Button glow on tap
+  if (tapProgress > 0.01 && tapProgress < 0.99) {
+    var glowOp = Math.sin(tapProgress * Math.PI) * 0.8;
+    s += ring(CX, buttonY, lerp(buttonW / 2, buttonW / 2 + 20, tapProgress), BLUE, 10, glowOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Multiple new message bubbles with buttons
+  var bubbleLayout = [
+    {x: CX, y: CY - 200, w: 500, h: 250, rad: 50},
+    {x: CX - 220, y: CY + 100, w: 400, h: 200, rad: 40},
+    {x: CX + 220, y: CY + 400, w: 450, h: 220, rad: 45},
+  ];
+
+  var tapSequence = [
+    {time: 0.1, target: 0},
+    {time: 0.3, target: 1},
+    {time: 0.5, target: 2},
+    {time: 0.7, target: 0}
+  ];
+
+  var currentTap = -1;
+  var tapU = 0;
+  for (var i = 0; i < tapSequence.length; i++) {
+    if (u >= tapSequence[i].time) {
+      currentTap = tapSequence[i].target;
+      tapU = (u - tapSequence[i].time) / (tapSequence[i + 1] ? (tapSequence[i + 1].time - tapSequence[i].time) : (1 - tapSequence[i].time));
+    }
+  }
+
+  var fingerX = CX + 200, fingerY = CY + 100, fingerAngle = 30, fingerBend = 0;
+
+  for (var i = 0; i < bubbleLayout.length; i++) {
+    var b = bubbleLayout[i];
+    s += messageBubble(b.x, b.y, b.w, b.h, b.rad, WHITE, 1);
+    var buttonY = b.y + b.h / 2 - b.h * 0.1;
+    var buttonW = b.w * 0.35, buttonH = b.h * 0.25, buttonRad = b.rad * 0.4;
+    s += rrect(b.x, buttonY, buttonW, buttonH, buttonRad, BLUE, 1);
+    s += checkmark(b.x, buttonY, buttonH * 0.5, WHITE, 8, 1);
+
+    if (currentTap === i) {
+      var tapProgress = smooth(clamp(tapU * 2, 0, 1)); // Faster tap animation
+      fingerX = lerp(fingerX, b.x + b.w * 0.2, tapProgress);
+      fingerY = lerp(fingerY, buttonY, tapProgress);
+      fingerAngle = lerp(fingerAngle, 0, tapProgress);
+      fingerBend = tapProgress;
+      var glowOp = Math.sin(tapProgress * Math.PI) * 0.8;
+      s += ring(b.x, buttonY, lerp(buttonW / 2, buttonW / 2 + 15, tapProgress), BLUE, 8, glowOp);
+    }
+  }
+
+  s += stickFigureHand(fingerX, fingerY, fingerAngle, fingerBend, AMBER, 1);
+
+  // Coral question mark morphs to exclamation mark
+  var symbolY = TOP + 200;
+  var morph = smooth(ramp(u, 0.6, 0.9));
+  if (morph < 0.5) {
+    s += questionMark(CX, symbolY, 60, CORAL, 12, 1);
+  } else {
+    s += exclamationMark(CX, symbolY, 60, CORAL, 12, 1);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var buttonDissolve = smooth(ramp(u, 0.0, 0.2));
+  var loopAppear = smooth(ramp(u, 0.2, 0.4));
+
+  // Dissolving quick reply button
+  if (buttonDissolve < 1) {
+    s += rrect(CX, CY, 180, 80, 20, BLUE, 1 - buttonDissolve);
+    s += checkmark(CX, CY, 40, WHITE, 10, 1 - buttonDissolve);
+  }
+
+  // Feedback loop diagram
+  if (loopAppear > 0) {
+    var loopScale = lerp(0.5, 1.0, easeOut(loopAppear));
+
+    // Central blue circle (the system)
+    s += dot(CX, CY, 60 * loopScale, BLUE, loopAppear);
+
+    // Amber hand reaching
+    var handReach = smooth(ramp(u, 0.4, 0.7));
+    var handX = lerp(CX + 200, CX + 100, handReach);
+    var handY = lerp(CY + 200, CY + 60, handReach);
+    var handAngle = lerp(45, 10, handReach);
+    s += stickFigureHand(handX, handY, handAngle, 0, AMBER, loopAppear);
+    s += line(handX, handY, CX + 60 * loopScale * Math.cos(Math.PI / 4), CY + 60 * loopScale * Math.sin(Math.PI / 4), AMBER, 8, loopAppear * handReach);
+
+    // Coral intermittent line (occasional 'miss')
+    var missPulse = Math.sin(u * Math.PI * 6); // Faster pulse
+    var missOp = clamp(missPulse, 0, 1) * loopAppear * ramp(u, 0.6, 0.9);
+    s += line(CX - 60 * loopScale, CY - 60 * loopScale, CX - 150 * loopScale, CY - 150 * loopScale, CORAL, 8, missOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var baseColY = BOT - 400;
+  var blueColX = CX - 150;
+  var amberColX = CX + 150;
+
+  // Blue column (system ease) grows taller
+  var blueHeight = lerp(200, 600, smooth(ramp(u, 0.0, 0.6)));
+  s += rrect(blueColX, baseColY - blueHeight / 2 + 100, 120, blueHeight, 10, BLUE, 1);
+
+  // Amber column (user effort) shrinks
+  var amberHeight = lerp(600, 200, smooth(ramp(u, 0.0, 0.6)));
+  s += rrect(amberColX, baseColY - amberHeight / 2 + 100, 120, amberHeight, 10, AMBER, 1);
+
+  // Coral dots (missed opportunities) fall and stack
+  var numDots = 6;
+  var dotFallProgress = smooth(ramp(u, 0.3, 0.9));
+  for (var i = 0; i < numDots; i++) {
+    var dotU = clamp((dotFallProgress * numDots - i) / 1, 0, 1);
+    var startY = baseColY - amberHeight / 2 - 50 - rnd(i) * 100;
+    var endY = baseColY + amberHeight / 2 - 20 - i * 30;
+    var dotY = lerp(startY, endY, easeIn(dotU));
+    s += dot(amberColX, dotY, 15, CORAL, 0.8);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var reform = smooth(ramp(u, 0.2, 0.6));
+
+  // Blue system column reforms to a simple line
+  var blueLineX = CX - 200;
+  s += line(blueLineX, TOP + 100, blueLineX, BOT - 100, BLUE, lerp(120, 8, reform), 1);
+
+  // Amber hand drawing a longer, more thoughtful message bubble
+  var handX = CX + 200;
+  var handY = CY + 100;
+  var drawProgress = smooth(ramp(u, 0.1, 0.7));
+  var bubblePath = "M " + (handX - 150) + " " + (handY - 50) +
+                   " Q " + (handX - 200) + " " + (handY - 150) + " " + (handX - 100) + " " + (handY - 200) +
+                   " Q " + (handX + 100) + " " + (handY - 250) + " " + (handX + 150) + " " + (handY - 150) +
+                   " Q " + (handX + 200) + " " + (handY - 50) + " " + (handX + 100) + " " + (handY + 0) +
+                   " Q " + (handX + 0) + " " + (handY + 50) + " " + (handX - 150) + " " + (handY - 50);
+  
+  // Animate drawing the path
+  var pathLen = 1000; // Approximate length
+  var dashOffset = pathLen * (1 - drawProgress);
+  s += '<path d="' + bubblePath + '" fill="none" stroke="' + WHITE + '" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" ' +
+       'stroke-dasharray="' + pathLen + '" stroke-dashoffset="' + dashOffset + '" opacity="1"/>';
+
+  s += stickFigureHand(handX, handY, 0, 0, AMBER, 1);
+
+  // Coral red 'ghost' of the quick reply button floats away
+  var ghostX = lerp(CX, CX + 400, easeOut(u));
+  var ghostY = lerp(BOT - 100, TOP - 100, easeOut(u));
+  var ghostOp = lerp(0.6, 0, smooth(u));
+  s += rrect(ghostX, ghostY, 100, 40, 10, CORAL, ghostOp);
+  s += checkmark(ghostX, ghostY, 20, WHITE, 6, ghostOp);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

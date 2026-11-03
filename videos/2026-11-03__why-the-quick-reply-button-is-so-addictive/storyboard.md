@@ -1,0 +1,12 @@
+# Production Plan: Why Quick Reply Buttons Are So Addictive
+
+**System:** Intermittent reinforcement and reduced cognitive load in communication
+**Narrator:** Bright, energetic adult female voice (e.g., AvaNeural)
+**Palette:** `signal blue` (system/rule/button), `warm amber` (user/desire/hand), `coral red` (friction/failure/cost)
+**Hero Element:** Stick figure hand, message bubbles, and the quick reply button icon, which transforms into a feedback loop.
+
+| # | Time | Story beat | Stick-figure scene | Motion / camera / transition | English VO | SFX |
+|---|------|------------|--------------------|------------------------------|------------|-----|
+| 1 | 0-10s | **YOU + NEED** (Overwhelmed by messages, desire for quick connection) | Stick figure surrounded by a chaotic cloud of white message bubbles. An `warm amber` thought bubble with a question mark hovers over their head. | Camera slowly zooms out, revealing more message bubbles. The bubbles subtly pulse. | Your inbox overflows, a constant stream. You want to connect, but deep replies take effort. Too much to process, too little time for true thoughtfulness. | `whoosh-fast.mp3` (0.8s), `focus.mp3` (4.2s) |
+| 2 | 10-20s | **GO** (Discovering the quick reply solution) | A single, simple message bubble appears front and center. Inside it, a `signal blue` quick reply button (e.g., a simple checkmark icon). A `warm amber` stick-figure finger taps it. | A complex message cloud parts, revealing one clear message. The button subtly glows `signal blue` as it's tapped. | Then, a 'Like' or 'Got it!' button appears. A frictionless tap. Message acknowledged, conversation flows. It feels efficient, a perfect digital shortcut. | `transform.mp3` (11.5s), `click-soft.mp3` (13.8s), `complete-done.mp3` (17.0s) |
+| 3 | 20-30s | **SEARCH** (Noticing the addictive pattern, naive explanation) | Multiple new message bubbles with `signal blue` quick reply buttons appear. The `warm amber` finger rapidly taps several buttons. A `coral red` question mark appears, then morphs into an exclamation mark above the figure. | Quick succession of taps, each with a small pulse from the button. The `coral red` symbol flashes and morphs, indicating growing bewilderment. | Soon, you're constantly tapping quick replies. You think it's just convenience, saving seconds. But why does that quick tap feel so satisfying, almost addictive? | `click-soft.mp3` (21.0s), `focus.mp3` (25.5s) |
