@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Games Tutorialize Obvious Actions</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band
+var STROKE_W = 9; // Default stroke width for main elements
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue
+var AMBER = "#F2A93B";              // warm amber
+var CORAL = "#FF5B5B";              // coral red
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+// Custom helpers for the scene
+function stickFigure(x, y, col, pose, scale, op) {
+  op = (op == null ? 1 : op);
+  scale = (scale == null ? 1 : scale);
+  var sw = STROKE_W * scale;
+  var headR = 20 * scale;
+  var bodyLen = 80 * scale;
+  var limbLen = 50 * scale; // Approx length for arms/legs
+  var headY = y - headR - bodyLen - limbLen / 2; // Top of head
+  var neckY = headY + headR;
+  var chestY = neckY + bodyLen / 4;
+  var waistY = neckY + bodyLen;
+  var footY = y;
+
+  var g = '<g opacity="' + op + '">';
+  
+  // Body and limbs based on pose
+  switch (pose) {
+    case 'ready':
+      g += line(x, neckY, x, waistY, col, sw); // Body
+      g += line(x, chestY, x - limbLen, chestY + limbLen / 2, col, sw); // Left arm down
+      g += line(x, chestY, x + limbLen, chestY + limbLen / 2, col, sw); // Right arm down
+      g += line(x, waistY, x - limbLen / 2, footY, col, sw); // Left leg
+      g += line(x, waistY, x + limbLen / 2, footY, col, sw); // Right leg
+      g += dot(x, headY, headR, col); // Head
+      break;
+    case 'annoyed': // Arms crossed
+      g += line(x, neckY, x, waistY, col, sw); // Body
+      g += line(x - limbLen * 0.7, chestY + limbLen / 4, x + limbLen * 0.7, chestY + limbLen / 4, col, sw); // Crossed arms
+      g += line(x, waistY, x - limbLen / 2, footY, col, sw); // Left leg
+      g += line(x, waistY, x + limbLen / 2, footY, col, sw); // Right leg
+      g += dot(x, headY, headR, col); // Head
+      break;
+    case 'observing': // Hands on hips
+      g += line(x, neckY, x, waistY, col, sw); // Body
+      g += line(x, chestY, x - limbLen / 2, chestY + limbLen / 4, col, sw); // Left arm to hip
+      g += line(x, chestY, x + limbLen / 2, chestY + limbLen / 4, col, sw); // Right arm to hip
+      g += line(x, waistY, x - limbLen / 2, footY, col, sw); // Left leg
+      g += line(x, waistY, x + limbLen / 2, footY, col, sw); // Right leg
+      g += dot(x, headY, headR, col); // Head
+      break;
+    case 'playing': // Arms up, dynamic legs
+      g += line(x, neckY, x, waistY, col, sw); // Body
+      g += line(x, chestY, x - limbLen * 0.8, chestY - limbLen * 0.8, col, sw); // Left arm up
+      g += line(x, chestY, x + limbLen * 0.8, chestY - limbLen * 0.8, col, sw); // Right arm up
+      g += line(x, waistY, x - limbLen / 3, footY - limbLen / 4, col, sw); // Left leg bent
+      g += line(x, waistY, x + limbLen / 3, footY, col, sw); // Right leg straight
+      g += dot(x, headY, headR, col); // Head
+      break;
+    case 'sigh': // Head down, shoulders slumped
+      g += line(x, neckY + headR/2, x, waistY, col, sw); // Shorter body for slump
+      g += line(x, chestY + headR/2, x - limbLen * 0.8, chestY + limbLen / 2 + headR/2, col, sw); // Slumped arms
+      g += line(x, chestY + headR/2, x + limbLen * 0.8, chestY + limbLen / 2 + headR/2, col, sw);
+      g += line(x, waistY, x - limbLen / 2, footY, col, sw); // Legs
+      g += line(x, waistY, x + limbLen / 2, footY, col, sw);
+      g += dot(x, headY + headR/2, headR, col); // Head slightly lower
+      break;
+    case 'nod': // Head slightly down, then up
+      g += line(x, neckY, x, waistY, col, sw);
+      g += line(x, chestY, x - limbLen, chestY + limbLen / 2, col, sw); // Arms down
+      g += line(x, chestY, x + limbLen, chestY + limbLen / 2, col, sw);
+      g += line(x, waistY, x - limbLen / 2, footY, col, sw); // Legs
+      g += line(x, waistY, x + limbLen / 2, footY, col, sw);
+      g += dot(x, headY + headR/4, headR, col); // Head slightly down
+      break;
+    default: // Default to ready
+      g += line(x, neckY, x, waistY, col, sw);
+      g += line(x, chestY, x - limbLen, chestY + limbLen / 2, col, sw);
+      g += line(x, chestY, x + limbLen, chestY + limbLen / 2, col, sw);
+      g += line(x, waistY, x - limbLen / 2, footY, col, sw);
+      g += line(x, waistY, x + limbLen / 2, footY, col, sw);
+      g += dot(x, headY, headR, col);
+      break;
+  }
+  g += '</g>';
+  return g;
+}
+
+function gameFrame(x, y, w, h, col, sw, rad, op) {
+  return rrectStroke(x, y, w, h, rad, col, sw, op);
+}
+
+function controller(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var bodyW = size * 2.2, bodyH = size * 1.4;
+  var bodyRad = size * 0.4;
+  g += rrect(x, y, bodyW, bodyH, bodyRad, col, op); // Main body
+  g += rrect(x - bodyW * 0.4, y, bodyW * 0.2, bodyH * 0.8, bodyRad * 0.3, WHITE, op * 0.2); // Left grip highlight
+  g += rrect(x + bodyW * 0.4, y, bodyW * 0.2, bodyH * 0.8, bodyRad * 0.3, WHITE, op * 0.2); // Right grip highlight
+
+  // D-pad (simple cross)
+  g += line(x - size * 0.7, y, x - size * 0.5, y, WHITE, size * 0.2, op);
+  g += line(x - size * 0.6, y - size * 0.1, x - size * 0.6, y + size * 0.1, WHITE, size * 0.2, op);
+
+  // Action buttons (dots)
+  g += dot(x + size * 0.5, y - size * 0.2, size * 0.1, WHITE, op);
+  g += dot(x + size * 0.6, y, size * 0.1, WHITE, op);
+  g += dot(x + size * 0.5, y + size * 0.2, size * 0.1, WHITE, op);
+  g += dot(x + size * 0.4, y, size * 0.1, WHITE, op);
+
+  g += '</g>';
+  return g;
+}
+
+function questionMark(x, y, size, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var curveD = "M " + (x - size * 0.3) + " " + (y - size * 0.5) +
+               " Q " + (x + size * 0.5) + " " + (y - size * 0.5) + " " + (x + size * 0.5) + " " + (y - size * 0.1) +
+               " Q " + (x + size * 0.5) + " " + (y + size * 0.2) + " " + (x + size * 0.3) + " " + (y + size * 0.2);
+  var dotY = y + size * 0.4;
+  return pathTag(curveD, col, sw, op) + dot(x, dotY, sw * 0.6, col, op);
+}
+
+function arrow(x, y, size, direction, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var d = "";
+  switch (direction) {
+    case 'up':
+      d = "M " + (x - size / 2) + " " + (y + size / 2) + " L " + x + " " + (y - size / 2) + " L " + (x + size / 2) + " " + (y + size / 2);
+      break;
+    case 'down':
+      d = "M " + (x - size / 2) + " " + (y - size / 2) + " L " + x + " " + (y + size / 2) + " L " + (x + size / 2) + " " + (y - size / 2);
+      break;
+    case 'left':
+      d = "M " + (x + size / 2) + " " + (y - size / 2) + " L " + (x - size / 2) + " " + y + " L " + (x + size / 2) + " " + (y + size / 2);
+      break;
+    case 'right':
+      d = "M " + (x - size / 2) + " " + (y - size / 2) + " L " + (x + size / 2) + " " + y + " L " + (x - size / 2) + " " + (y + size / 2);
+      break;
+  }
+  return pathTag(d, col, sw, op);
+}
+
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+// Game frame dimensions
+var FRAME_W = W * 0.8;
+var FRAME_H = BOT - TOP - 100; // Adjusted to fit within TOP/BOT
+var FRAME_Y = CY; // Center Y
+var FRAME_X = CX; // Center X
+var FRAME_RAD = 40;
+
+// Stick figure base Y
+var PLAYER_Y = FRAME_Y + FRAME_H / 2 - 60; // Base of feet for stick figure
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var frameScale = lerp(0.7, 1.0, smooth(ramp(u, 0, 0.4)));
+  var frameOp = lerp(0.0, 1.0, smooth(ramp(u, 0, 0.4)));
+
+  s += '<g ' + camera(frameScale, 0, 0) + '>';
+  s += gameFrame(FRAME_X, FRAME_Y, FRAME_W, FRAME_H, WHITE, STROKE_W, FRAME_RAD, frameOp);
+
+  var playerOp = lerp(0, 1, smooth(ramp(u, 0.2, 0.6)));
+  s += stickFigure(FRAME_X, PLAYER_Y, AMBER, 'ready', 1, playerOp);
+
+  var controllerOp = lerp(0, 1, smooth(ramp(u, 0.4, 0.8)));
+  s += controller(CX, BOT - 100, 50, WHITE, controllerOp);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  s += gameFrame(FRAME_X, FRAME_Y, FRAME_W, FRAME_H, WHITE, STROKE_W, FRAME_RAD, 1);
+  s += stickFigure(FRAME_X, PLAYER_Y, AMBER, 'annoyed', 1, 1);
+
+  var popupW = FRAME_W * 0.7;
+  var popupH = FRAME_H * 0.4;
+  var popupY = FRAME_Y - popupH / 2;
+  var popupScale = lerp(0.2, 1.0, easeOut(ramp(u, 0, 0.3)));
+  var popupOp = lerp(0, 1, ramp(u, 0, 0.1));
+
+  s += '<g transform="translate(' + CX + ' ' + CY + ') scale(' + popupScale + ') translate(' + (-CX) + ' ' + (-CY) + ')">';
+  s += rrect(FRAME_X, popupY, popupW, popupH, 20, CORAL, popupOp);
+  s += rrectStroke(FRAME_X, popupY, popupW, popupH, 20, WHITE, STROKE_W, popupOp);
+
+  // 'Press X to Jump!' - represented by a simple dot and arrow
+  s += dot(FRAME_X + popupW * 0.2, popupY - popupH * 0.1, 12, WHITE, popupOp); // 'X' button
+  s += arrow(FRAME_X, popupY + popupH * 0.1, 40, 'down', WHITE, STROKE_W, popupOp); // Arrow pointing to stick figure
+  s += '</g>';
+
+  // Glow effect for pop-up
+  var glowOp = pulse(u, 0.15, 0.1) * 0.6;
+  s += rrect(FRAME_X, popupY, popupW * 1.05, popupH * 1.05, 25, CORAL, glowOp);
+
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var cameraZoom = lerp(1.0, 1.05, smooth(ramp(u, 0.2, 0.8)));
+  var cameraShiftY = lerp(0, -20, smooth(ramp(u, 0.2, 0.8)));
+
+  s += '<g ' + camera(cameraZoom, 0, cameraShiftY) + '>';
+  s += gameFrame(FRAME_X, FRAME_Y, FRAME_W, FRAME_H, WHITE, STROKE_W, FRAME_RAD, 1);
+
+  // Faded pop-up
+  var popupW = FRAME_W * 0.7;
+  var popupH = FRAME_H * 0.4;
+  var popupY = FRAME_Y - popupH / 2;
+  s += rrect(FRAME_X, popupY, popupW, popupH, 20, CORAL, 0.3);
+  s += rrectStroke(FRAME_X, popupY, popupW, popupH, 20, WHITE, STROKE_W, 0.3);
+  s += dot(FRAME_X + popupW * 0.2, popupY - popupH * 0.1, 12, WHITE, 0.3);
+  s += arrow(FRAME_X, popupY + popupH * 0.1, 40, 'down', WHITE, STROKE_W, 0.3);
+
+  s += stickFigure(FRAME_X, PLAYER_Y, AMBER, 'annoyed', 1, 1);
+
+  // Question mark thought bubble
+  var qmX = FRAME_X + 100;
+  var qmY = PLAYER_Y - 300;
+  var qmScale = lerp(0.2, 1.0, easeOut(ramp(u, 0.1, 0.4)));
+  var qmOp = lerp(0, 1, ramp(u, 0.1, 0.4));
+  s += '<g transform="translate(' + qmX + ' ' + qmY + ') scale(' + qmScale + ') translate(' + (-qmX) + ' ' + (-qmY) + ')">';
+  s += questionMark(qmX, qmY, 60, CORAL, STROKE_W, qmOp);
+  s += '</g>';
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  s += gameFrame(FRAME_X, FRAME_Y, FRAME_W, FRAME_H, WHITE, STROKE_W, FRAME_RAD, 1);
+
+  // Pop-up dissolving and reforming into funnel
+  var popupW = FRAME_W * 0.7;
+  var popupH = FRAME_H * 0.4;
+  var popupY = FRAME_Y - popupH / 2;
+
+  var dissolve = ramp(u, 0.0, 0.3); // Pop-up dissolves
+  var reform = ramp(u, 0.3, 0.6);   // Funnel reforms
+
+  // Dissolving fragments (random dots)
+  if (dissolve < 1) {
+    for (var i = 0; i < 20; i++) {
+      var rx = lerp(FRAME_X - popupW / 2, FRAME_X + popupW / 2, rnd(i));
+      var ry = lerp(popupY - popupH / 2, popupY + popupH / 2, rnd(i + 10));
+      var dx = lerp(-100, 100, rnd(i + 20));
+      var dy = lerp(-100, 100, rnd(i + 30));
+      s += dot(rx + dx * dissolve, ry + dy * dissolve, lerp(10, 2, dissolve), CORAL, 1 - dissolve);
+    }
+  }
+
+  // Funnel structure
+  var funnelOp = reform;
+  var funnelTopW = lerp(0, FRAME_W * 0.6, reform);
+  var funnelBotW = lerp(0, FRAME_W * 0.2, reform);
+  var funnelTopY = TOP + 200;
+  var funnelBotY = BOT - 200;
+
+  var dFunnel = "M " + (FRAME_X - funnelTopW / 2) + " " + funnelTopY +
+                " L " + (FRAME_X - funnelBotW / 2) + " " + funnelBotY +
+                " L " + (FRAME_X + funnelBotW / 2) + " " + funnelBotY +
+                " L " + (FRAME_X + funnelTopW / 2) + " " + funnelTopY + " Z";
+  s += pathTag(dFunnel, BLUE, STROKE_W, funnelOp);
+
+  // Small stick figures being guided
+  var numPlayers = 6;
+  for (var i = 0; i < numPlayers; i++) {
+    var playerU = (u * 0.8 + rnd(i)) % 1;
+    var playerY = lerp(funnelBotY, funnelTopY, playerU);
+    
+    // Calculate current funnel width at playerY
+    var tY = (playerY - funnelTopY) / (funnelBotY - funnelTopY);
+    var currentFunnelW = lerp(funnelTopW, funnelBotW, tY);
+    
+    var playerX = lerp(FRAME_X - currentFunnelW / 2 + 30, FRAME_X + currentFunnelW / 2 - 30, rnd(i + 100));
+    
+    var playerPose = 'ready';
+    if (rnd(i + 200) > 0.7) playerPose = 'playing'; // Some fumbling
+    
+    s += stickFigure(playerX, playerY, WHITE, playerPose, 0.5, funnelOp * 0.8);
+  }
+
+  s += stickFigure(FRAME_X - FRAME_W / 2 - 100, PLAYER_Y, AMBER, 'observing', 1, 1); // Observing from side
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  s += gameFrame(FRAME_X, FRAME_Y, FRAME_W, FRAME_H, WHITE, STROKE_W, FRAME_RAD, 1);
+
+  // Funnel expands into broader path
+  var pathW = lerp(FRAME_W * 0.2, FRAME_W * 0.8, smooth(u));
+  var pathTopY = TOP + 100;
+  var pathBotY = BOT - 100;
+
+  var dPath = "M " + (FRAME_X - pathW / 2) + " " + pathTopY +
+              " L " + (FRAME_X - pathW / 2) + " " + pathBotY +
+              " L " + (FRAME_X + pathW / 2) + " " + pathBotY +
+              " L " + (FRAME_X + pathW / 2) + " " + pathTopY + " Z";
+  s += pathTag(dPath, BLUE, STROKE_W, 1);
+
+  // Many white stick figures happily moving and playing
+  var numPlayers = 15;
+  for (var i = 0; i < numPlayers; i++) {
+    var playerU = (u * 1.5 + rnd(i)) % 1; // Faster movement
+    var playerY = lerp(pathBotY, pathTopY, playerU);
+    var playerX = lerp(FRAME_X - pathW / 2 + 50, FRAME_X + pathW / 2 - 50, rnd(i + 100));
+    
+    var playerPose = 'playing'; // All playing now
+    s += stickFigure(playerX, playerY, WHITE, playerPose, 0.5, 1);
+  }
+
+  // Amber stick figure integrated into the flow
+  var amberPlayerX = lerp(FRAME_X - FRAME_W / 2 - 100, FRAME_X, smooth(ramp(u, 0.1, 0.5)));
+  var amberPlayerY = lerp(PLAYER_Y, PLAYER_Y - 50, smooth(ramp(u, 0.1, 0.5)));
+  s += stickFigure(amberPlayerX, amberPlayerY, AMBER, 'playing', 1, 1);
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var cameraScale = lerp(1.0, 0.9, smooth(ramp(u, 0.5, 0.9)));
+  var cameraShiftY = lerp(0, 50, smooth(ramp(u, 0.5, 0.9)));
+
+  s += '<g ' + camera(cameraScale, 0, cameraShiftY) + '>';
+  s += gameFrame(FRAME_X, FRAME_Y, FRAME_W, FRAME_H, WHITE, STROKE_W, FRAME_RAD, 1);
+
+  // Wide path (from scene 5)
+  var pathW = FRAME_W * 0.8;
+  var pathTopY = TOP + 100;
+  var pathBotY = BOT - 100;
+  var dPath = "M " + (FRAME_X - pathW / 2) + " " + pathTopY +
+              " L " + (FRAME_X - pathW / 2) + " " + pathBotY +
+              " L " + (FRAME_X + pathW / 2) + " " + pathBotY +
+              " L " + (FRAME_X + pathW / 2) + " " + pathTopY + " Z";
+  s += pathTag(dPath, BLUE, STROKE_W, 1);
+
+  // Small, less intrusive signal blue tutorial pop-up
+  var tutorialW = FRAME_W * 0.3;
+  var tutorialH = FRAME_H * 0.15;
+  var tutorialX = FRAME_X + FRAME_W / 2 - tutorialW / 2 - 30;
+  var tutorialY = TOP + tutorialH / 2 + 30;
+  var tutorialOp = pulse(u, 0.2, 0.1) * 0.8; // Briefly flashes
+
+  s += rrect(tutorialX, tutorialY, tutorialW, tutorialH, 15, BLUE, tutorialOp);
+  s += rrectStroke(tutorialX, tutorialY, tutorialW, tutorialH, 15, WHITE, STROKE_W / 2, tutorialOp);
+  s += dot(tutorialX, tutorialY, 10, WHITE, tutorialOp); // Simple glyph
+
+  // Stick figure's reaction: sigh then nod
+  var playerPose = 'playing';
+  if (u > 0.4 && u < 0.6) {
+    playerPose = 'sigh';
+  } else if (u >= 0.6) {
+    playerPose = 'nod';
+  }
+  s += stickFigure(FRAME_X, PLAYER_Y - 50, AMBER, playerPose, 1, 1);
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable at u=1
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500); // Fallback for slow font loading
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
