@@ -1,0 +1,15 @@
+{
+  "id": "why-boarding-a-plane-is-slower-than-it-should-be",
+  "slug": "2026-11-05__why-boarding-a-plane-is-slower-than-it-should-be",
+  "title_working": "Why Boarding a Plane is Slower Than It Should Be",
+  "system": "inefficient queueing strategies and limited gate space",
+  "cluster": "queues-and-waiting",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-11-05T14:36:19+00:00",
+  "produced_at": "2026-11-05T14:39:36+00:00",
+  "verify": "PASS",
+  "takeaway": "You'll understand the invisible system that makes plane boarding feel so frustratingly slow, even when everyone is trying their best.",
+  "animation_source": "llm"
+}

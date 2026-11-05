@@ -1,0 +1,15 @@
+{
+  "id": "why-buses-bunch-up-in-twos-and-threes",
+  "slug": "2026-11-05__why-buses-bunch-up-in-twos-and-threes",
+  "title_working": "Why Buses Bunch Up In Twos and Threes",
+  "system": "schedule adherence and passenger load effects on public transport",
+  "cluster": "queues-and-waiting",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-11-05T14:30:25+00:00",
+  "produced_at": "2026-11-05T14:36:16+00:00",
+  "verify": "PASS",
+  "takeaway": "You now understand the invisible feedback loop that causes buses to bunch up, making your wait longer and your ride more crowded.",
+  "animation_source": "llm"
+}

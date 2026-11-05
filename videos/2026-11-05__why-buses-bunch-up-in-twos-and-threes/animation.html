@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Buses Bunch Up In Twos and Threes</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary elements
+var BLUE  = "#4C86F0";              // signal blue  -> the system / rules
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want
+var CORAL = "#FF5B5B";              // coral red    -> the problem / crowded
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, fill) {
+  return '<path d="' + d + '" fill="' + (fill || 'none') + '" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* Custom elements for the bus story */
+function stickFigure(x, y, col, op, pose) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = 18;
+  var bodyH = 60;
+  var armL = 30;
+  var legL = 40;
+
+  g += dot(x, y - bodyH - headR, headR, col); // Head
+  g += line(x, y - bodyH, x, y, col, 8);      // Body
+
+  if (pose === 'look_clock') { // checking arm
+    g += line(x, y - bodyH * 0.7, x + armL * 0.8, y - bodyH * 0.5, col, 7); // Right arm bent
+    g += line(x + armL * 0.8, y - bodyH * 0.5, x + armL * 0.8, y - bodyH * 0.3, col, 7);
+    g += line(x, y - bodyH * 0.7, x - armL, y - bodyH * 0.6, col, 7); // Left arm down
+  } else if (pose === 'look_back') { // looking back
+    g += line(x, y - bodyH * 0.7, x - armL * 0.8, y - bodyH * 0.5, col, 7); // Left arm bent
+    g += line(x - armL * 0.8, y - bodyH * 0.5, x - armL * 0.8, y - bodyH * 0.3, col, 7);
+    g += line(x, y - bodyH * 0.7, x + armL, y - bodyH * 0.6, col, 7); // Right arm down
+    g += line(x, y - bodyH - headR, x - headR * 0.8, y - bodyH - headR * 0.2, col, 6); // Gaze left
+  } else if (pose === 'nod') { // nodding
+    g += line(x, y - bodyH * 0.7, x - armL * 0.6, y - bodyH * 0.5, col, 7); // Arms slightly bent
+    g += line(x, y - bodyH * 0.7, x + armL * 0.6, y - bodyH * 0.5, col, 7);
+    g += line(x, y - bodyH - headR, x, y - bodyH - headR * 0.2, col, 6); // Gaze down
+  } else { // default pose
+    g += line(x, y - bodyH * 0.7, x - armL, y - bodyH * 0.6, col, 7); // Arms down
+    g += line(x, y - bodyH * 0.7, x + armL, y - bodyH * 0.6, col, 7);
+  }
+
+  g += line(x, y, x - legL * 0.6, y + legL, col, 7); // Legs
+  g += line(x, y, x + legL * 0.6, y + legL, col, 7);
+  g += '</g>';
+  return g;
+}
+
+function bus(x, y, w, h, col, op, packed) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var bodyRad = 20;
+  var wheelR = 16;
+  var wheelY = y + h / 2 - wheelR + 6;
+
+  g += rrect(x, y, w, h, bodyRad, col, 0.9); // Body
+  g += rrectStroke(x, y, w, h, bodyRad, WHITE, 8, 1); // Outline
+
+  g += dot(x - w / 3, wheelY, wheelR, WHITE); // Wheels
+  g += dot(x + w / 3, wheelY, wheelR, WHITE);
+
+  if (packed) {
+    var passengerCount = 8;
+    for (var i = 0; i < passengerCount; i++) {
+      var px = x - w / 2 + 40 + (i % 4) * 40;
+      var py = y - h / 2 + 40 + Math.floor(i / 4) * 50;
+      g += stickFigure(px, py, WHITE, 0.6, 'standing');
+    }
+  }
+  g += '</g>';
+  return g;
+}
+
+function busStop(x, y, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += line(x, y, x, y - 100, col, 8); // Post
+  g += rrect(x + 50, y - 120, 100, 40, 10, col); // Sign board
+  g += '</g>';
+  return g;
+}
+
+function clockIcon(x, y, r, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, r, col, 8);
+  g += line(x, y, x + r * 0.5, y - r * 0.4, col, 6); // Hour hand
+  g += line(x, y, x + r * 0.2, y + r * 0.6, col, 6); // Minute hand
+  g += dot(x, y, 6, col);
+  g += '</g>';
+  return g;
+}
+
+function questionMark(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var d = "M " + x + " " + (y - size) +
+          " A " + (size * 0.6) + " " + (size * 0.6) + " 0 1 1 " + (x - size * 0.4) + " " + (y - size * 0.1) +
+          " L " + (x - size * 0.2) + " " + (y + size * 0.2) +
+          " M " + x + " " + (y + size * 0.4);
+  return pathTag(d, col, 10, op);
+}
+
+function loopIcon(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var d = "M " + (x - size * 0.5) + " " + (y - size * 0.2) +
+          " A " + (size * 0.4) + " " + (size * 0.4) + " 0 1 1 " + (x + size * 0.5) + " " + (y - size * 0.2) +
+          " L " + (x + size * 0.5) + " " + (y + size * 0.2) +
+          " A " + (size * 0.4) + " " + (size * 0.4) + " 0 1 1 " + (x - size * 0.5) + " " + (y + size * 0.2) +
+          " Z";
+  var arrow1 = "M " + (x - size * 0.5) + " " + (y - size * 0.2) + " L " + (x - size * 0.6) + " " + (y - size * 0.35) + " M " + (x - size * 0.5) + " " + (y - size * 0.2) + " L " + (x - size * 0.35) + " " + (y - size * 0.35);
+  var arrow2 = "M " + (x + size * 0.5) + " " + (y + size * 0.2) + " L " + (x + size * 0.6) + " " + (y + size * 0.35) + " M " + (x + size * 0.5) + " " + (y + size * 0.2) + " L " + (x + size * 0.35) + " " + (y + size * 0.35);
+
+  return pathTag(d, col, 8, op) + pathTag(arrow1, col, 8, op) + pathTag(arrow2, col, 8, op);
+}
+
+// Hero element: the route line
+function segmentedRoute(yOffset, segmentCount, segmentLength, gapLength, col, sw, op, phase, xOffset, stretchFactor) {
+  op = (op == null ? 1 : op);
+  xOffset = xOffset || 0;
+  stretchFactor = stretchFactor || 1;
+  var g = '';
+  var totalLength = segmentLength + gapLength;
+  var startY = TOP + yOffset;
+  var endY = BOT + yOffset;
+
+  for (var i = 0; i < segmentCount; i++) {
+    var currentSegmentStart = startY + (i * totalLength + phase * totalLength * stretchFactor) % (endY - startY + totalLength);
+    if (currentSegmentStart > endY) currentSegmentStart -= (endY - startY + totalLength);
+    while (currentSegmentStart < startY - totalLength) currentSegmentStart += (endY - startY + totalLength);
+
+    var segY1 = currentSegmentStart;
+    var segY2 = currentSegmentStart + segmentLength * stretchFactor;
+
+    segY1 = clamp(segY1, startY, endY);
+    segY2 = clamp(segY2, startY, endY);
+
+    if (segY2 > segY1) {
+      g += line(CX + xOffset, segY1, CX + xOffset, segY2, col, sw, op);
+    }
+  }
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+var BUS_WIDTH = 280;
+var BUS_HEIGHT = 160;
+var BUS_Y_REST = CY + 300; // Common resting Y for buses at stop
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.1, 0.9, smooth(u));
+  var cameraY = lerp(0, -100, smooth(u));
+  s += '<g ' + camera(scale, 0, cameraY) + '>';
+
+  // Bus stop
+  s += busStop(CX - 200, BOT - 100, WHITE, 0.8);
+
+  // Amber stick figure
+  var figX = CX - 200;
+  var figY = BOT - 180;
+  var headBob = Math.sin(u * Math.PI * 2) * 8;
+  s += stickFigure(figX, figY + headBob, AMBER, 1, 'look_clock');
+
+  // Clock icon
+  var clockOp = lerp(0, 1, ramp(u, 0.0, 0.2));
+  s += clockIcon(figX + 80, figY - 100, 30, WHITE, clockOp);
+
+  // Route line stretching into distance
+  var routeSW = lerp(12, 8, smooth(u));
+  var routeOp = lerp(0.4, 0.2, smooth(u));
+
+  s += segmentedRoute(lerp(0, -200, smooth(u)), 10, 100, 100, WHITE, routeSW, routeOp, u * 0.5);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var cameraShake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14);
+  s += '<g ' + camera(1.0, cameraShake, 0) + '>';
+
+  s += busStop(CX - 200, BOT - 100, WHITE, 0.8);
+
+  // Route line (persists)
+  s += segmentedRoute(-200, 10, 100, 100, WHITE, 8, 0.2, u * 0.8);
+
+  // First bus (coral red, packed) arrives and stops
+  var bus1X = lerp(W + BUS_WIDTH, CX + 100, easeOut(ramp(u, 0.0, 0.3)));
+  var bus1Y = BUS_Y_REST;
+  var bus1Op = ramp(u, 0.0, 0.1);
+  s += bus(bus1X, bus1Y, BUS_WIDTH, BUS_HEIGHT, CORAL, bus1Op, true);
+
+  // Amber stick figure enters bus
+  var figX_start = CX - 200;
+  var figY_start = BOT - 180;
+  var figX_end = bus1X - BUS_WIDTH / 2 + 60; // Inside the bus
+  var figY_end = bus1Y - BUS_HEIGHT / 2 + 40;
+  var figEnter = ramp(u, 0.2, 0.4);
+  var currentFigX = lerp(figX_start, figX_end, figEnter);
+  var currentFigY = lerp(figY_start, figY_end, figEnter);
+  var figOp = lerp(1, 0, ramp(u, 0.35, 0.45)); // Fade out as they enter
+  s += stickFigure(currentFigX, currentFigY, AMBER, figOp);
+
+  // Second bus (white, empty) approaches
+  var bus2X = lerp(W + BUS_WIDTH * 2, CX + 100, easeOut(ramp(u, 0.4, 0.8)));
+  var bus2Y = BUS_Y_REST;
+  var bus2Op = ramp(u, 0.3, 0.5);
+  s += bus(bus2X, bus2Y, BUS_WIDTH, BUS_HEIGHT, WHITE, bus2Op, false);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  // Camera inside first bus, looking out back window
+  var camScale = lerp(1.0, 0.9, smooth(u));
+  var camX = lerp(0, 80, smooth(u)); // Slight shift to simulate looking back
+  var camY = lerp(0, 100, smooth(u));
+  s += '<g ' + camera(camScale, camX, camY) + '>';
+
+  // Interior of the crowded bus (coral red)
+  var busInteriorX = CX + 100;
+  var busInteriorY = BUS_Y_REST;
+  s += rrect(busInteriorX, busInteriorY, BUS_WIDTH, BUS_HEIGHT, 20, CORAL, 0.9);
+  s += rrectStroke(busInteriorX, busInteriorY, BUS_WIDTH, BUS_HEIGHT, 20, WHITE, 8, 1);
+  // Amber stick figure inside, looking back
+  s += stickFigure(busInteriorX - 80, busInteriorY - 40, AMBER, 1, 'look_back');
+  // Other passengers
+  for (var i = 0; i < 4; i++) {
+    s += stickFigure(busInteriorX + 40 + i * 40, busInteriorY - 40, WHITE, 0.6, 'standing');
+  }
+
+  // Back window view - second bus in distance
+  var secondBusScale = lerp(0.8, 0.6, smooth(u));
+  var secondBusX = lerp(busInteriorX, busInteriorX - 200, smooth(u));
+  var secondBusY = lerp(busInteriorY + 100, busInteriorY + 200, smooth(u));
+  var secondBusOp = lerp(1, 0.6, smooth(u));
+  s += '<g transform="translate(' + secondBusX + ' ' + secondBusY + ') scale(' + secondBusScale + ') translate(' + (-secondBusX) + ' ' + (-secondBusY) + ')">';
+  s += bus(secondBusX, secondBusY, BUS_WIDTH, BUS_HEIGHT, WHITE, secondBusOp, false);
+  s += '</g>';
+
+  // Question mark icon
+  var qX = CX + 200;
+  var qY = CY - 300;
+  var qSize = 80;
+  var qOp = ramp(u, 0.0, 0.2);
+  var shatter = ramp(u, 0.4, 0.6); // Animate shattering
+
+  if (shatter < 1) {
+    s += questionMark(qX, qY, qSize, WHITE, qOp * (1 - shatter));
+  } else {
+    // Shattered pieces
+    for (var i = 0; i < 5; i++) {
+      var pieceX = qX + Math.cos(i * Math.PI * 0.4) * 50 * (shatter - 1);
+      var pieceY = qY + Math.sin(i * Math.PI * 0.4) * 50 * (shatter - 1);
+      s += dot(pieceX, pieceY, 8, WHITE, qOp * (1 - shatter));
+    }
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var camScale = lerp(0.9, 0.7, smooth(u)); // Zoom out for overhead view
+  var camY = lerp(100, -200, smooth(u));
+  s += '<g ' + camera(camScale, 0, camY) + '>';
+
+  // Route line (signal blue)
+  var routeSW = lerp(8, 16, smooth(u));
+  s += segmentedRoute(-200, 10, 100, 100, BLUE, routeSW, 0.4, u * 0.2);
+
+  // First bus (coral red, full)
+  var bus1Y_start = BOT - 200;
+  var bus1Y_end = TOP + 200;
+  var bus1Speed = lerp(0.05, 0.02, smooth(u)); // Slows down
+  var bus1Y = lerp(bus1Y_start, bus1Y_end, u * bus1Speed);
+  // Simulate stops and delays
+  var stopPhase = Math.floor(u * 3); // 3 stops over 10s
+  var stopDelay = pulse(u, (stopPhase + 0.5) / 10 * 3, 0.1); // Delay at each stop
+  var bus1X = CX - 150;
+  s += bus(bus1X, bus1Y, BUS_WIDTH * 0.8, BUS_HEIGHT * 0.8, CORAL, 1, true);
+
+  // Passenger dots boarding/alighting
+  for (var i = 0; i < 3; i++) {
+    var pPhase = (u * 0.8 + rnd(i)) % 1;
+    var pY = lerp(bus1Y + BUS_HEIGHT * 0.4, bus1Y - BUS_HEIGHT * 0.4, pPhase);
+    var pX = bus1X + lerp(-BUS_WIDTH * 0.5, BUS_WIDTH * 0.5, rnd(i + 10));
+    var pOp = 1 - Math.abs(pPhase - 0.5) * 2; // Fade in/out at bus
+    s += dot(pX, pY, 10, WHITE, pOp * 0.8);
+  }
+
+  // Route segment behind stretches
+  var stretchAmount = lerp(0, 200, smooth(ramp(u, 0.2, 0.8)));
+  var routeLineX = CX + 150;
+  s += line(routeLineX, bus1Y + BUS_HEIGHT / 2 + 20, routeLineX, bus1Y + BUS_HEIGHT / 2 + 20 + stretchAmount, BLUE, 16, 0.8);
+  s += line(routeLineX, bus1Y + BUS_HEIGHT / 2 + 20 + stretchAmount, routeLineX, BOT, BLUE, 16, 0.4); // Fading out
+
+  // Second bus (white, empty)
+  var bus2Y_start = BOT - 200;
+  var bus2Y_end = TOP + 200;
+  var bus2Speed = lerp(0.08, 0.12, smooth(u)); // Faster
+  var bus2Y = lerp(bus2Y_start, bus2Y_end, u * bus2Speed);
+  var bus2X = CX + 150;
+  s += bus(bus2X, bus2Y, BUS_WIDTH * 0.8, BUS_HEIGHT * 0.8, WHITE, 1, false);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var camScale = lerp(0.7, 0.8, smooth(u)); // Zoom in slightly
+  var camY = lerp(-200, -100, smooth(u));
+  s += '<g ' + camera(camScale, 0, camY) + '>';
+
+  // Route line (signal blue)
+  s += segmentedRoute(-200, 10, 100, 100, BLUE, 16, 0.4, u * 0.3);
+
+  // First bus (coral red, full) lags
+  var bus1X = CX - 150;
+  var bus1Y_start = TOP + 200;
+  var bus1Y_end = BOT - 200;
+  var bus1Speed = lerp(0.02, 0.01, smooth(u)); // Even slower
+  var bus1Y = lerp(bus1Y_start, bus1Y_end, u * bus1Speed);
+  s += bus(bus1X, bus1Y, BUS_WIDTH * 0.8, BUS_HEIGHT * 0.8, CORAL, 1, true);
+
+  // Second bus (white, empty) catches up
+  var bus2X = CX + 150;
+  var bus2Y_start = TOP + 200;
+  var bus2Y_end = BOT - 200;
+  var bus2Speed = lerp(0.12, 0.18, smooth(u)); // Faster
+  var bus2Y = lerp(bus2Y_start, bus2Y_end, u * bus2Speed);
+  s += bus(bus2X, bus2Y, BUS_WIDTH * 0.8, BUS_HEIGHT * 0.8, WHITE, 1, false);
+
+  // Visualizing the gap compression
+  var gapY = lerp(bus1Y, bus2Y, 0.5);
+  var gapWidth = lerp(300, 50, smooth(u));
+  var gapOp = lerp(0.8, 0.2, smooth(u));
+  s += line(CX - gapWidth / 2, gapY, CX + gapWidth / 2, gapY, DIM, 6, gapOp);
+  s += line(CX - gapWidth / 2, gapY - 20, CX - gapWidth / 2, gapY + 20, DIM, 6, gapOp);
+  s += line(CX + gapWidth / 2, gapY - 20, CX + gapWidth / 2, gapY + 20, DIM, 6, gapOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var camScale = lerp(0.8, 1.0, smooth(u));
+  var camY = lerp(-100, 0, smooth(u));
+  s += '<g ' + camera(camScale, 0, camY) + '>';
+
+  // Bus stop
+  s += busStop(CX - 200, BOT - 100, WHITE, 0.8);
+
+  // Amber stick figure at stop, nodding knowingly
+  var figX = CX - 200;
+  var figY = BOT - 180;
+  var headNod = Math.sin(u * Math.PI * 3) * 6;
+  s += stickFigure(figX, figY + headNod, AMBER, 1, 'nod');
+
+  // Route line with bunched buses in distance
+  var routeOp = lerp(0.4, 0.2, smooth(u));
+  s += segmentedRoute(-200, 10, 100, 100, WHITE, 8, routeOp, u * 0.5);
+
+  var busDistance = lerp(BOT + 200, CY, smooth(u));
+  var busScale = lerp(0.3, 0.5, smooth(u));
+
+  // Bunched buses
+  s += '<g transform="translate(' + CX + ' ' + busDistance + ') scale(' + busScale + ') translate(' + (-CX) + ' ' + (-busDistance) + ')">';
+  s += bus(CX - 80, busDistance, BUS_WIDTH, BUS_HEIGHT, CORAL, 1, true);
+  s += bus(CX + 80, busDistance, BUS_WIDTH, BUS_HEIGHT, WHITE, 1, false);
+  s += '</g>';
+
+  // Thought bubble with feedback loop icon
+  var bubbleX = figX + 180;
+  var bubbleY = figY - 200;
+  var bubbleR = 80;
+  var bubbleOp = ramp(u, 0.4, 0.6);
+  s += ring(bubbleX, bubbleY, bubbleR, WHITE, 6, bubbleOp);
+  s += dot(bubbleX - 60, bubbleY + bubbleR + 20, 12, WHITE, bubbleOp);
+  s += dot(bubbleX - 30, bubbleY + bubbleR + 40, 8, WHITE, bubbleOp);
+
+  var loopIconOp = ramp(u, 0.5, 0.7);
+  s += loopIcon(bubbleX, bubbleY, 60, BLUE, loopIconOp);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure last frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() {
+  render(0);
+  window.__ready = true;
+}
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

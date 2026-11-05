@@ -1,0 +1,22 @@
+# Why Buses Bunch Up In Twos and Threes
+
+*   **System:** Positive feedback loop in public transport scheduling and passenger load.
+*   **Narrator:** Bright, energetic adult-female voice.
+*   **Palette:** signal blue (system/rules), warm amber (user/desire), coral red (problem/naive model).
+*   **Hero Element:** A bus (amber for the user's initial expectation, then red/blue for the system effect), stick-figure passengers, and a segmented route line representing time/distance.
+
+| # | Time | Story beat | Stick-figure scene | Motion / camera / transition | English VO | SFX |
+|---|------|------------|--------------------|------------------------------|------------|-----|
+| 1 | 0–10s | **YOU + NEED** | A single stick-figure (warm amber) stands at a bus stop, looking at an abstract clock icon. An empty route line stretches into the distance. | Camera slowly zooms out, revealing the long, empty route ahead. The stick-figure checks their arm (clock icon). | You're waiting for your bus, checking the time. You just need to get to your destination, a simple, everyday journey. Where is it? | click-soft.mp3 (0.6), whoosh.mp3 (2.1) |
+| 2 | 10–20s | **GO** | A bus (coral red, packed with many small stick-figures) arrives at the stop. The amber stick-figure enters. Moments later, a second bus (white, nearly empty) approaches behind the first. | The first bus moves quickly into frame, stopping. Passengers, including the amber figure, quickly merge into it (red). The second bus appears, moving slower. | Finally, a bus arrives, completely packed. Then, moments later, another bus pulls up right behind it, almost empty. | whoosh-fast.mp3 (10.6), drop-thud.mp3 (12.0), whoosh.mp3 (14.0) |
+| 3 | 20–30s | **SEARCH** | The amber stick-figure is inside the crowded (coral red) bus, looking back at the empty bus behind it. A question mark icon appears and then fragments. | Camera is inside the first bus, looking out the back window. The question mark icon shatters (stack-collapse). The empty bus in the background slightly shrinks as if falling further behind. | It feels like bad luck, or poor scheduling. Surely, this isn't how the system is designed. What's actually happening? | stack-collapse.mp3 (22.0), focus.mp3 (25.0) |
+| 4 | 30–40s | **FIND** | Overhead view of the route line (signal blue). The first bus (coral red, full) moves slowly, stopping often. The segment of the route behind it visibly stretches, growing wider. | The route line animates with small dots (passengers) boarding/alighting the first bus. The blue line behind the first bus stretches, illustrating a growing time gap. | Here's the hidden truth: the first bus gets delayed by many passengers, taking longer at each stop. This creates a bigger gap behind it. | click-soft.mp3 (32.0), transform.mp3 (35.0) |
+| 5 | 40–50s | **TAKE** | The second bus (white, empty) is now shown moving faster along the stretched route line, catching up. The first bus (still coral red) lags further. | The camera pans forward with the second bus, showing it gaining on the increasingly slow, red-tinged first bus. The gap between them visually compresses from the front. | The second bus, with fewer people, moves faster and catches up. Meanwhile, the first collects even more, slowing it further in a feedback loop. | whoosh-fast.mp3 (42.0), transform.mp3 (47.0) |
+| 6 | 50–60s | **RETURN + CHANGE** | The amber stick-figure is back at a bus stop, but now sees the route line with two bunched buses (one red, one white) in the distance. A thought bubble shows the feedback loop. | The stick-figure nods knowingly. The camera zooms in slightly on the buses in the distance, then on the thought bubble which depicts the looping mechanism (signal blue). | So, your wait was longer, and your ride more crowded. Now you see it's not random, but a predictable system. You'll spot the bunching every time. | focus.mp3 (52.0), complete-done.mp3 (55.0) |
+
+**Continuity map:**
+*   **Scene 1 → 2:** The empty route line becomes populated with buses and passengers.
+*   **Scene 2 → 3:** The perspective shifts from outside the bus to inside, looking back.
+*   **Scene 3 → 4:** The question mark fragments, leading to an overhead view of the route and mechanism.
+*   **Scene 4 → 5:** The overhead view continues, but focuses on the second bus catching up.
+*   **Scene 5 → 6:** Returns to the amber stick-figure at the bus stop, but now with understanding of the visible system.

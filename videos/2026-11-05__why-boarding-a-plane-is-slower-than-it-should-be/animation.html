@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Boarding a Plane is Slower Than It Should Be</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / plane structure
+var AMBER = "#F2A93B";              // warm amber   -> YOU / passenger goals
+var CORAL = "#FF5B5B";              // coral red    -> friction / naive assumptions
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, fill) {
+  return '<path d="' + d + '" fill="' + (fill || 'none') + '" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* stick figure: head, body, two arms, two legs.
+   x, y = center of body. h = total height.
+   pose: 0=neutral, 1=crossed arms, 2=gazing up, 3=smiling. */
+function stickFigure(x, y, h, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var sw = 8; // Stroke width for stick figure
+  var headR = h * 0.15;
+  var bodyH = h * 0.4;
+  var armL = h * 0.3;
+  var legL = h * 0.35;
+  var headY = y - h / 2 + headR;
+  var bodyY1 = headY + headR + sw / 2;
+  var bodyY2 = bodyY1 + bodyH;
+  var legY = bodyY2;
+
+  var g = '<g opacity="' + op + '">';
+  // Head
+  g += dot(x, headY, headR, col);
+  // Body
+  g += line(x, bodyY1, x, bodyY2, col, sw);
+
+  // Arms
+  if (pose === 1) { // Crossed arms
+    g += line(x - armL * 0.6, bodyY1 + armL * 0.3, x + armL * 0.6, bodyY1 + armL * 0.3, col, sw);
+    g += line(x - armL * 0.3, bodyY1 + armL * 0.6, x + armL * 0.3, bodyY1 + armL * 0.6, col, sw);
+  } else { // Neutral / other poses
+    g += line(x, bodyY1 + sw/2, x - armL * 0.8, bodyY1 + armL * 0.6, col, sw);
+    g += line(x, bodyY1 + sw/2, x + armL * 0.8, bodyY1 + armL * 0.6, col, sw);
+  }
+
+  // Legs
+  g += line(x, legY, x - legL * 0.4, legY + legL, col, sw);
+  g += line(x, legY, x + legL * 0.4, legY + legL, col, sw);
+
+  // Gaze/Smile
+  if (pose === 2) { // Gazing up (not used in this animation)
+    g += line(x, headY - headR * 0.5, x + headR * 0.4, headY - headR * 0.8, WHITE, sw * 0.7, 0.9);
+  } else if (pose === 3) { // Smiling
+    g += pathTag('M ' + (x - headR * 0.3) + ' ' + (headY + headR * 0.2) + ' Q ' + x + ' ' + (headY + headR * 0.4) + ' ' + (x + headR * 0.3) + ' ' + (headY + headR * 0.2), WHITE, sw * 0.7, 0.9);
+    g += line(x - headR * 0.2, headY - headR * 0.3, x - headR * 0.1, headY - headR * 0.2, WHITE, sw * 0.5, 0.9); // left eye
+    g += line(x + headR * 0.2, headY - headR * 0.3, x + headR * 0.1, headY - headR * 0.2, WHITE, sw * 0.5, 0.9); // right eye
+  }
+
+  g += '</g>';
+  return g;
+}
+
+/* A simple plane outline */
+function planeOutline(x, y, w, h, rad, col, sw, op) {
+  return rrectStroke(x, y, w, h, rad, col, sw, op);
+}
+
+/* A simple ticket icon */
+function ticketIcon(x, y, w, h, col, op) {
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 8, col);
+  g += rrect(x + w * 0.3, y - h * 0.4, w * 0.4, h * 0.2, 4, WHITE, 0.3); // Placeholder for details
+  g += rrect(x + w * 0.3, y + h * 0.2, w * 0.4, h * 0.2, 4, WHITE, 0.3);
+  g += dot(x + w * 0.4, y + h * 0.4, 6, WHITE, 0.3); // Small dot for seat number
+  g += '</g>';
+  return g;
+}
+
+/* Plane interior elements: aisle, seats, bins */
+function planeInterior(x, y, w, h, aisleW, col, sw, op, highlightChokePoints, showX, showIncentives) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var seatW = (w - aisleW) / 2;
+  var binH = h / 12; // Bins above seats
+
+  // Aisle background
+  g += rrect(x, y, aisleW, h, 10, col, 0.1);
+  // Aisle lines
+  g += line(x - aisleW / 2, y - h / 2, x - aisleW / 2, y + h / 2, col, sw * 0.7);
+  g += line(x + aisleW / 2, y - h / 2, x + aisleW / 2, y + h / 2, col, sw * 0.7);
+
+  // Seats and Bins (roughly 6 rows)
+  for (var i = 0; i < 6; i++) {
+    var rowY = y - h / 2 + (h / 6) / 2 + i * (h / 6);
+    var seatH = (h / 6) * 0.8;
+    // Left seats
+    g += rrect(x - aisleW / 2 - seatW / 2, rowY, seatW, seatH, 8, col, 0.2);
+    // Right seats
+    g += rrect(x + aisleW / 2 + seatW / 2, rowY, seatW, seatH, 8, col, 0.2);
+
+    // Left bins
+    g += rrect(x - aisleW / 2 - seatW / 2, rowY - seatH * 0.6, seatW, binH, 6, col, 0.15);
+    // Right bins
+    g += rrect(x + aisleW / 2 + seatW / 2, rowY - seatH * 0.6, seatW, binH, 6, col, 0.15);
+  }
+
+  // Highlight choke points (aisle width, bin areas)
+  if (highlightChokePoints) {
+    // Aisle width
+    g += line(x - aisleW / 2, y - h / 2 + 50, x + aisleW / 2, y - h / 2 + 50, BLUE, sw * 0.5, 0.6);
+    g += line(x - aisleW / 2, y + h / 2 - 50, x + aisleW / 2, y + h / 2 - 50, BLUE, sw * 0.5, 0.6);
+    // Bin areas (example: near the top of the section)
+    g += rrectStroke(x, y - h / 2 + binH / 2 + 40, w * 0.8, binH * 1.5, 10, BLUE, sw * 0.5, 0.6);
+    g += rrectStroke(x, y + h / 2 - binH / 2 - 40, w * 0.8, binH * 1.5, 10, BLUE, sw * 0.5, 0.6);
+  }
+
+  if (showX) {
+    var xSize = Math.min(w, h) * 0.6;
+    g += line(x - xSize / 2, y - xSize / 2, x + xSize / 2, y + xSize / 2, CORAL, sw * 1.5, 0.8);
+    g += line(x + xSize / 2, y - xSize / 2, x - xSize / 2, y + xSize / 2, CORAL, sw * 1.5, 0.8);
+  }
+
+  if (showIncentives) {
+    for (var i = 0; i < 3; i++) {
+      var incentiveX = x + (i - 1) * 100;
+      var incentiveY = y + h / 2 - 100;
+      g += dot(incentiveX, incentiveY, 20 + Math.sin(op * 10 + i) * 5, AMBER, op * 0.8);
+    }
+  }
+
+  g += '</g>';
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+// Constants for scene elements
+var YOU_H = 220; // Stick figure height
+var YOU_Y = CY + 300; // Resting Y position for YOU
+var PLANE_W = 700;
+var PLANE_H = 1200;
+var AISLE_W = 180;
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.95, smooth(u));
+  var panX = lerp(0, -100, smooth(u));
+  s += '<g ' + camera(scale, panX, 0) + '>';
+
+  // YOU stick figure
+  var youX = CX - 200;
+  var youY = YOU_Y;
+  s += stickFigure(youX, youY, YOU_H, AMBER, 0);
+
+  // Ticket icon
+  var ticketX = youX + 60;
+  var ticketY = youY - YOU_H / 2 - 30;
+  s += ticketIcon(ticketX, ticketY, 80, 100, WHITE, 1);
+
+  // Simple plane outline
+  var planeOutlineX = CX + 200;
+  var planeOutlineY = CY - 100;
+  var planeOutlineW = PLANE_W * 0.8;
+  var planeOutlineH = PLANE_H * 0.8;
+  s += planeOutline(planeOutlineX, planeOutlineY, planeOutlineW, planeOutlineH, 60, BLUE, 8, 0.6);
+
+  // Imagined smooth path (dashed blue line)
+  var pathOp = lerp(0.8, 0.2, smooth(u));
+  var pathY_start = youY - YOU_H / 2 - 100;
+  var pathY_end = planeOutlineY - planeOutlineH / 2 + 100;
+  var pathX_start = youX + 60;
+  var pathX_mid = CX + 100;
+  var pathX_end = planeOutlineX;
+
+  var dashLength = 40;
+  var gapLength = 60;
+  var totalLength = Math.sqrt(Math.pow(pathX_mid - pathX_start, 2) + Math.pow(pathY_start - pathY_end, 2)) + Math.abs(pathX_end - pathX_mid); // Approximation
+  var numDashes = Math.floor(totalLength / (dashLength + gapLength));
+
+  var pathD = 'M ' + pathX_start + ' ' + pathY_start + ' Q ' + pathX_mid + ' ' + pathY_start + ' ' + pathX_mid + ' ' + pathY_end + ' L ' + pathX_end + ' ' + pathY_end;
+  s += '<path d="' + pathD + '" fill="none" stroke="' + BLUE + '" stroke-width="10" stroke-linecap="round" stroke-dasharray="' + dashLength + ' ' + gapLength + '" stroke-dashoffset="' + (u * (dashLength + gapLength) * 2) + '" opacity="' + pathOp + '"/>';
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var scale = lerp(0.95, 1.0, smooth(u));
+  var panX = lerp(-100, 0, smooth(u));
+  s += '<g ' + camera(scale, panX, 0) + '>';
+
+  var planeInteriorX = CX;
+  var planeInteriorY = CY;
+  var planeInteriorW = PLANE_W;
+  var planeInteriorH = PLANE_H;
+
+  // Plane interior
+  s += planeInterior(planeInteriorX, planeInteriorY, planeInteriorW, planeInteriorH, AISLE_W, BLUE, 8, 0.8);
+
+  // Line of stick figures
+  var numFigures = 8;
+  var figureH = YOU_H * 0.8;
+  var figureSpacing = figureH * 1.2;
+
+  var youFigX = planeInteriorX;
+  var youFigY = lerp(BOT - figureH / 2 - 100, CY + 100, smooth(u)); // YOU moves up the aisle
+
+  // YOU stick figure
+  s += stickFigure(youFigX, youFigY, figureH, AMBER, 0);
+
+  // Other white stick figures
+  for (var i = 0; i < numFigures; i++) {
+    var figY = youFigY + figureSpacing * (i + 1) - u * 30; // Lagging behind YOU
+    if (figY > TOP + figureH / 2 && figY < BOT - figureH / 2) {
+      s += stickFigure(planeInteriorX + (rnd(i) - 0.5) * 40, figY, figureH * 0.9, WHITE, 0, 0.8);
+    }
+  }
+
+  // Jerky movement simulation
+  var jerkY = 0;
+  if (u > 0.3 && u < 0.4) { jerkY = Math.sin((u - 0.3) * Math.PI * 10) * 10; }
+  if (u > 0.6 && u < 0.7) { jerkY = Math.sin((u - 0.6) * Math.PI * 10) * 10; }
+  s += '<g transform="translate(0 ' + jerkY + ')">';
+  s += '</g>';
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH — is something targeting me? (funnel + coral beam on the OTHER lane) */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var planeInteriorX = CX;
+  var planeInteriorY = CY;
+  var planeInteriorW = PLANE_W;
+  var planeInteriorH = PLANE_H;
+
+  // Plane interior
+  s += planeInterior(planeInteriorX, planeInteriorY, planeInteriorW, planeInteriorH, AISLE_W, BLUE, 8, 0.8);
+
+  // YOU stick figure (frustrated)
+  var youX = planeInteriorX;
+  var youY = CY + 100;
+  s += stickFigure(youX, youY, YOU_H * 0.9, AMBER, 1); // Pose 1: crossed arms
+
+  // Thought bubble (coral outline)
+  var bubbleX = youX + 150;
+  var bubbleY = youY - YOU_H * 0.8;
+  var bubbleW = 300;
+  var bubbleH = 250;
+  var bubbleRad = 30;
+
+  var bubbleOp = ramp(u, 0.1, 0.3) * (1 - ramp(u, 0.8, 1.0));
+  if (bubbleOp > 0.01) {
+    s += rrectStroke(bubbleX, bubbleY, bubbleW, bubbleH, bubbleRad, CORAL, 7, bubbleOp);
+    // Thought bubble tail
+    s += line(youX + 50, youY - YOU_H * 0.4, bubbleX - bubbleW / 2 + 50, bubbleY + bubbleH / 2 - 20, CORAL, 7, bubbleOp);
+
+    // Jumbled pile of bags and stick figures inside thought bubble
+    var innerBubbleX = bubbleX;
+    var innerBubbleY = bubbleY + 20;
+    var innerBubbleW = bubbleW * 0.7;
+    var innerBubbleH = bubbleH * 0.7;
+
+    for (var i = 0; i < 4; i++) {
+      var figX = innerBubbleX + (rnd(i) - 0.5) * innerBubbleW * 0.6;
+      var figY = innerBubbleY + (rnd(i + 1) - 0.5) * innerBubbleH * 0.6;
+      s += stickFigure(figX, figY, YOU_H * 0.4, WHITE, 0, bubbleOp * 0.6);
+    }
+    for (var j = 0; j < 6; j++) {
+      var bagX = innerBubbleX + (rnd(j + 10) - 0.5) * innerBubbleW * 0.7;
+      var bagY = innerBubbleY + (rnd(j + 11) - 0.5) * innerBubbleH * 0.7;
+      s += rrect(bagX, bagY, 60, 40, 10, DIM, bubbleOp * 0.7);
+    }
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND — belts; slow lane passed for minutes, fast lane overtakes in seconds */
+function scene4(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.7, smooth(u)); // Zoom out
+  var panY = lerp(0, -100, smooth(u)); // Pan up to show more of the plane
+  s += '<g ' + camera(scale, 0, panY) + '>';
+
+  var planeInteriorX = CX;
+  var planeInteriorY = CY;
+  var planeInteriorW = PLANE_W;
+  var planeInteriorH = PLANE_H;
+
+  // Plane interior with choke points highlighted
+  s += planeInterior(planeInteriorX, planeInteriorY, planeInteriorW, planeInteriorH, AISLE_W, BLUE, 8, 0.8, true);
+
+  // YOU stick figure (looking around)
+  var youX = planeInteriorX;
+  var youY = CY + 100;
+  s += stickFigure(youX, youY, YOU_H * 0.9, AMBER, 0); // Neutral pose
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE — losing moments stack into a tall coral memory column */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(0.7, 0.8, smooth(u)); // Slight zoom in
+  var panY = lerp(-100, -50, smooth(u));
+  s += '<g ' + camera(scale, 0, panY) + '>';
+
+  var planeInteriorX = CX;
+  var planeInteriorY = CY;
+  var planeInteriorW = PLANE_W;
+  var planeInteriorH = PLANE_H;
+
+  // Plane interior with "X" over aisle and pulsating amber dots
+  var xOp = ramp(u, 0.1, 0.4);
+  var incentiveOp = ramp(u, 0.3, 0.6);
+  s += planeInterior(planeInteriorX, planeInteriorY, planeInteriorW, planeInteriorH, AISLE_W, BLUE, 8, 0.8, true, xOp, incentiveOp);
+
+  // YOU stick figure (observing)
+  var youX = planeInteriorX;
+  var youY = CY + 100;
+  s += stickFigure(youX, youY, YOU_H * 0.9, AMBER, 0);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE — one shared finish line, then snap back to plain lanes */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.8, 1.0, smooth(u));
+  var panY = lerp(-50, 0, smooth(u));
+  s += '<g ' + camera(scale, 0, panY) + '>';
+
+  // Plane outline with transparent layers
+  var planeOutlineX = CX;
+  var planeOutlineY = CY - 100;
+  var planeOutlineW = PLANE_W;
+  var planeOutlineH = PLANE_H;
+
+  // Base plane outline fades in
+  var outlineOp = ramp(u, 0.0, 0.3);
+  s += planeOutline(planeOutlineX, planeOutlineY, planeOutlineW, planeOutlineH, 60, BLUE, 8, outlineOp * 0.8);
+
+  // Transparent layers showing the "invisible system"
+  var systemLayerOp = ramp(u, 0.3, 0.7);
+  if (systemLayerOp > 0.01) {
+    // Aisle representation
+    s += rrect(planeOutlineX, planeOutlineY, AISLE_W * 0.8, planeOutlineH * 0.8, 10, BLUE, systemLayerOp * 0.2);
+    // Bin areas
+    s += rrect(planeOutlineX - planeOutlineW * 0.25, planeOutlineY - planeOutlineH * 0.3, planeOutlineW * 0.2, planeOutlineH * 0.1, 8, BLUE, systemLayerOp * 0.15);
+    s += rrect(planeOutlineX + planeOutlineW * 0.25, planeOutlineY - planeOutlineH * 0.3, planeOutlineW * 0.2, planeOutlineH * 0.1, 8, BLUE, systemLayerOp * 0.15);
+    // Incentives (amber dots)
+    for (var i = 0; i < 3; i++) {
+      var incentiveX = planeOutlineX + (i - 1) * 80;
+      var incentiveY = planeOutlineY + planeOutlineH / 2 - 100;
+      s += dot(incentiveX, incentiveY, 15, AMBER, systemLayerOp * 0.6);
+    }
+  }
+
+  // YOU stick figure at the gate, looking at the plane, then smiling
+  var youX = CX - 200;
+  var youY = YOU_Y;
+  var youPose = 0;
+  if (u > 0.6) youPose = 3; // Smiling
+  s += stickFigure(youX, youY, YOU_H, AMBER, youPose);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
