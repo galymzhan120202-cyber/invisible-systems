@@ -1,0 +1,15 @@
+{
+  "id": "why-app-permissions-are-grouped",
+  "slug": "2026-11-06__why-app-permissions-are-grouped",
+  "title_working": "Why Apps Ask for All Permissions at Once",
+  "system": "bundling of permissions to reduce user friction on individual approvals",
+  "cluster": "rules-and-defaults",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-11-06T14:18:39+00:00",
+  "produced_at": "2026-11-06T14:21:52+00:00",
+  "verify": "PASS",
+  "takeaway": "You now understand why apps bundle permission requests, often making you grant more access than you'd prefer for the sake of convenience.",
+  "animation_source": "llm"
+}

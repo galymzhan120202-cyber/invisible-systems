@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Free Refills Make Business Sense</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue  -> the system / strategy
+var AMBER = "#F2A93B";              // warm amber   -> customer desire / value
+var CORAL = "#FF5B5B";              // coral red    -> naive model / perceived loss
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, fill) {
+  return '<path d="' + d + '" fill="' + (fill || 'none') + '" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+/* stick figure: head (dot), body (line), arms (lines), legs (lines) */
+function stickFigure(x, y, headSize, bodyHeight, armAngleRad, legAngleRad, col, sw, op) {
+  op = (op == null ? 1 : op);
+  sw = (sw == null ? 8 : sw);
+  headSize = (headSize == null ? 30 : headSize);
+  bodyHeight = (bodyHeight == null ? 100 : bodyHeight);
+  armAngleRad = (armAngleRad == null ? 0.3 : armAngleRad); // radians from horizontal
+  legAngleRad = (legAngleRad == null ? 0.2 : legAngleRad); // radians from vertical
+
+  var g = '<g opacity="' + op + '">';
+  g += dot(x, y - headSize - bodyHeight / 2, headSize, col); // Head
+  g += line(x, y - bodyHeight / 2, x, y + bodyHeight / 2, col, sw); // Body
+
+  // Arms
+  var armLen = bodyHeight * 0.6;
+  g += line(x, y - bodyHeight * 0.4, x - armLen * Math.cos(armAngleRad), y - bodyHeight * 0.4 + armLen * Math.sin(armAngleRad), col, sw);
+  g += line(x, y - bodyHeight * 0.4, x + armLen * Math.cos(armAngleRad), y - bodyHeight * 0.4 + armLen * Math.sin(armAngleRad), col, sw);
+
+  // Legs
+  var legLen = bodyHeight * 0.7;
+  g += line(x, y + bodyHeight / 2, x - legLen * Math.sin(legAngleRad), y + bodyHeight / 2 + legLen * Math.cos(legAngleRad), col, sw);
+  g += line(x, y + bodyHeight / 2, x + legLen * Math.sin(legAngleRad), y + bodyHeight / 2 + legLen * Math.cos(legAngleRad), col, sw);
+  g += '</g>';
+  return g;
+}
+
+/* generic cup shape */
+function cup(x, y, wTop, h, wBot, col, sw, op) {
+  sw = (sw == null ? 9 : sw);
+  op = (op == null ? 1 : op);
+  var d = "M " + (x - wTop / 2) + " " + (y - h / 2) +
+          " L " + (x + wTop / 2) + " " + (y - h / 2) +
+          " L " + (x + wBot / 2) + " " + (y + h / 2) +
+          " L " + (x - wBot / 2) + " " + (y + h / 2) + " Z";
+  return pathTag(d, col, sw, op, "none");
+}
+
+/* abstract dispenser */
+function dispenser(x, y, w, h, spoutY, col, sw, op) {
+  sw = (sw == null ? 9 : sw);
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 20, col, 1);
+  g += rrect(x, y - h / 2 - 30, w * 0.6, 40, 10, col, 1); // top cap
+  g += line(x, y + spoutY, x, y + spoutY + 40, col, sw); // spout
+  g += '</g>';
+  return g;
+}
+
+/* stylized 'R' sign (no actual text) */
+function refillSign(x, y, size, col, sw, op) {
+  sw = (sw == null ? 10 : sw);
+  op = (op == null ? 1 : op);
+  var half = size / 2;
+  var qtr = size / 4;
+  var d = "M " + (x - qtr) + " " + (y - half) +
+          " L " + (x - qtr) + " " + (y + half) +
+          " M " + (x - qtr) + " " + (y - qtr) +
+          " H " + (x + qtr) +
+          " A " + qtr + " " + qtr + " 0 0 1 " + (x + qtr) + " " + (y + qtr) +
+          " L " + (x + qtr) + " " + (y + half); // Simplified R-like shape
+  return pathTag(d, col, sw, op);
+}
+
+/* question mark */
+function questionMark(x, y, size, col, sw, op) {
+  sw = (sw == null ? 10 : sw);
+  op = (op == null ? 1 : op);
+  var half = size / 2;
+  var qtr = size / 4;
+  var d = "M " + (x - qtr) + " " + (y - half) +
+          " A " + qtr + " " + qtr + " 0 1 1 " + (x + qtr) + " " + (y - qtr) +
+          " V " + (y + qtr) +
+          " M " + x + " " + (y + half - 10) + " V " + (y + half); // dot
+  return pathTag(d, col, sw, op);
+}
+
+/* funnel/magnet shape */
+function funnelMagnet(x, y, wTop, h, col, sw, op) {
+  sw = (sw == null ? 10 : sw);
+  op = (op == null ? 1 : op);
+  var wMid = wTop * 0.6;
+  var d = "M " + (x - wTop / 2) + " " + (y - h / 2) +
+          " L " + (x - wMid / 2) + " " + (y) +
+          " L " + (x - wTop / 2) + " " + (y + h / 2) +
+          " M " + (x + wTop / 2) + " " + (y - h / 2) +
+          " L " + (x + wMid / 2) + " " + (y) +
+          " L " + (x + wTop / 2) + " " + (y + h / 2);
+  return pathTag(d, col, sw, op);
+}
+
+/* small snack item */
+function snack(x, y, size, col, sw, op) {
+  sw = (sw == null ? 8 : sw);
+  op = (op == null ? 1 : op);
+  return rrect(x, y, size, size * 0.8, size * 0.15, col, op);
+}
+
+/* refill station */
+function refillStation(x, y, w, h, col, sw, op) {
+  sw = (sw == null ? 9 : sw);
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 30, col, 1);
+  g += rrect(x, y - h / 2 - 40, w * 0.8, 60, 15, col, 1); // top part
+  g += line(x - w * 0.3, y - h * 0.1, x - w * 0.3, y + h * 0.2, col, sw); // lever
+  g += dot(x - w * 0.3, y + h * 0.2 + 20, 15, col); // lever end
+  g += '</g>';
+  return g;
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var sfX = lerp(CX - 300, CX - 150, smooth(ramp(u, 0.0, 0.3)));
+  var sfY = 1400;
+  var cupY = lerp(sfY + 100, sfY + 20, smooth(ramp(u, 0.3, 0.5)));
+  var dispenserX = CX + 200;
+  var dispenserY = 1100;
+
+  // Counter
+  s += rrect(CX, 1550, W * 0.8, 200, 30, DIM, 0.5);
+
+  // Stick figure approaching
+  var armAngle = lerp(0.3, 0.8, Math.sin(u * Math.PI * 2) * 0.5 + 0.5);
+  var legAngle = lerp(0.2, 0.5, Math.sin(u * Math.PI * 2 + Math.PI / 2) * 0.5 + 0.5);
+  s += stickFigure(sfX, sfY, 30, 100, armAngle, legAngle, WHITE);
+
+  // Dispenser
+  s += dispenser(dispenserX, dispenserY, 180, 400, 100, WHITE);
+
+  // Cup
+  var cupOp = ramp(u, 0.2, 0.4);
+  var fillHeight = lerp(0, 150, easeIn(ramp(u, 0.5, 0.8)));
+  s += cup(CX - 150, cupY, 100, 160, 80, WHITE, 9, cupOp);
+  if (fillHeight > 0) {
+    s += rrect(CX - 150, cupY + 80 - fillHeight / 2, 80, fillHeight, 10, WHITE, cupOp); // fill
+  }
+  s += line(dispenserX, dispenserY + 140, CX - 150, cupY - 70, WHITE, 7, ramp(u, 0.5, 0.7)); // pour stream
+
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var sfX = CX - 150;
+  var sfY = 1400;
+  var cupY = 1320;
+  var signX = CX + 200;
+  var signY = 600;
+
+  // Background counter/wall
+  s += rrect(CX, 1550, W * 0.8, 200, 30, DIM, 0.5);
+  s += rrect(CX, CY - 300, W * 0.9, 800, 40, DIM, 0.2); // wall behind sign
+
+  // Stick figure holding cup
+  var armAngle = lerp(0.3, -0.6, smooth(ramp(u, 0.1, 0.3))); // arm raises to hold cup
+  s += stickFigure(sfX, sfY, 30, 100, armAngle, 0.2, WHITE);
+  var cupScale = lerp(1, 1.05, Math.sin(u * Math.PI * 2) * 0.5 + 0.5);
+  s += '<g transform="translate(' + sfX + ' ' + (cupY + 40) + ') scale(' + cupScale + ') translate(' + (-sfX) + ' ' + (-(cupY + 40)) + ')">';
+  var cupColor = WHITE;
+  var glowOp = ramp(u, 0.3, 0.6);
+  if (glowOp > 0) {
+    cupColor = AMBER;
+    s += ring(sfX, cupY + 40, 70 + Math.sin(u * 15) * 5, AMBER, 12, glowOp * 0.6);
+    s += ring(sfX, cupY + 40, 70 + Math.sin(u * 15 + Math.PI) * 8, AMBER, 6, glowOp * 0.9);
+  }
+  s += cup(sfX, cupY + 40, 100, 160, 80, cupColor, 9);
+  s += '</g>';
+
+  // Refill sign
+  var signPop = smooth(ramp(u, 0.05, 0.2));
+  if (signPop > 0) {
+    s += rrect(signX, signY, 300, 400, 30, WHITE, signPop);
+    s += refillSign(signX, signY, 180, BLUE, 12, signPop);
+  }
+
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var sfX = CX - 150;
+  var sfY = 1400;
+  var cupY = 1320;
+  var signX = CX + 200;
+  var signY = 600;
+
+  // Background
+  s += rrect(CX, 1550, W * 0.8, 200, 30, DIM, 0.5);
+  s += rrect(CX, CY - 300, W * 0.9, 800, 40, DIM, 0.2); // wall behind sign
+  s += rrect(signX, signY, 300, 400, 30, WHITE, 0.9);
+  s += refillSign(signX, signY, 180, BLUE, 12, 0.9);
+
+  // Stick figure with shrug
+  var shrug = smooth(ramp(u, 0.2, 0.5));
+  var armAngle = lerp(-0.6, -0.1, shrug);
+  var bodyLean = lerp(0, 0.1, shrug);
+  s += '<g transform="rotate(' + (bodyLean * 10) + ' ' + sfX + ' ' + sfY + ')">';
+  s += stickFigure(sfX, sfY, 30, 100, armAngle, 0.2, WHITE);
+  s += '</g>';
+
+  // Cup color change to coral red
+  var cupColor = lerpColor(AMBER, CORAL, smooth(ramp(u, 0.1, 0.4)));
+  s += cup(sfX, cupY + 40, 100, 160, 80, cupColor, 9);
+
+  // Question mark thought bubble
+  var qOp = ramp(u, 0.3, 0.6) * (1 - ramp(u, 0.8, 1.0));
+  var qPulse = Math.sin(u * 20) * 5;
+  if (qOp > 0) {
+    s += questionMark(sfX + qPulse, sfY - 200 + qPulse, 80, CORAL, 10, qOp);
+  }
+
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var sfX = CX - 150;
+  var sfY = 1400;
+  var funnelX = CX;
+  var funnelY = CY;
+
+  // Background elements fading out
+  var bgFade = 1 - smooth(ramp(u, 0.0, 0.3));
+  s += rrect(CX, 1550, W * 0.8, 200, 30, DIM, 0.5 * bgFade);
+  s += rrect(CX, CY - 300, W * 0.9, 800, 40, DIM, 0.2 * bgFade);
+  s += rrect(CX + 200, 600, 300, 400, 30, WHITE, 0.9 * bgFade);
+  s += refillSign(CX + 200, 600, 180, BLUE, 12, 0.9 * bgFade);
+
+  // Cup dissolving and reforming into funnel
+  var dissolve = smooth(ramp(u, 0.0, 0.3)); // cup dissolves
+  var reform = smooth(ramp(u, 0.4, 0.7)); // funnel reforms
+
+  if (dissolve < 1) {
+    var cupOp = 1 - dissolve;
+    var cupScale = 1 + dissolve * 0.5;
+    s += '<g transform="translate(' + sfX + ' ' + (sfY + 40) + ') scale(' + cupScale + ') translate(' + (-sfX) + ' ' + (-(sfY + 40)) + ')">';
+    s += cup(sfX, sfY + 40, 100, 160, 80, CORAL, 9, cupOp);
+    s += '</g>';
+    s += questionMark(sfX, sfY - 200, 80, CORAL, 10, cupOp);
+  }
+
+  if (reform > 0) {
+    var funnelW = lerp(0, 300, reform);
+    var funnelH = lerp(0, 600, reform);
+    s += funnelMagnet(funnelX, funnelY, funnelW, funnelH, BLUE, 10, reform);
+  }
+
+  // Stick figure pulled towards funnel
+  var sfPull = smooth(ramp(u, 0.6, 0.9));
+  var currentSfX = lerp(sfX, CX - 100, sfPull);
+  s += stickFigure(currentSfX, sfY, 30, 100, 0.3, 0.2, WHITE);
+
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var sfX = CX - 100;
+  var sfY = 1400;
+  var funnelX = CX;
+  var funnelY = CY;
+  var snackX = sfX + 100;
+  var snackY = sfY - 20;
+
+  // Blue funnel/magnet
+  s += funnelMagnet(funnelX, funnelY, 300, 600, BLUE, 10);
+  var pulseOp = Math.sin(u * Math.PI * 4) * 0.3 + 0.3;
+  s += ring(funnelX, funnelY, 200 + Math.sin(u * 10) * 10, BLUE, 8, pulseOp);
+
+  // Stick figure holding snack
+  s += stickFigure(sfX, sfY, 30, 100, -0.3, 0.2, WHITE); // arm holding snack
+  var snackPop = smooth(ramp(u, 0.1, 0.3));
+  if (snackPop > 0) {
+    s += snack(snackX, snackY, 60, AMBER, 8, snackPop);
+  }
+
+  // Dots representing other purchases/returns
+  for (var i = 0; i < 5; i++) {
+    var dotU = (u * 0.5 + rnd(i)) % 1;
+    var dotX = lerp(funnelX + 200, funnelX + 50, easeIn(dotU));
+    var dotY = lerp(TOP + 100 + rnd(i + 10) * 200, funnelY + 50, easeIn(dotU));
+    s += dot(dotX, dotY, 12, DIM, (1 - dotU) * 0.8);
+  }
+
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var sfX = CX - 150;
+  var sfY = 1400;
+  var refillStationX = CX + 200;
+  var refillStationY = 1100;
+
+  // Funnel fading out
+  var funnelFade = 1 - smooth(ramp(u, 0.0, 0.2));
+  s += funnelMagnet(CX, CY, 300, 600, BLUE, 10, funnelFade);
+  s += ring(CX, CY, 200, BLUE, 8, 0.6 * funnelFade);
+  s += stickFigure(CX - 100, sfY, 30, 100, -0.3, 0.2, WHITE, 8, funnelFade);
+  s += snack(CX - 100 + 100, sfY - 20, 60, AMBER, 8, funnelFade);
+
+  // Refill station appears
+  var stationPop = smooth(ramp(u, 0.2, 0.4));
+  s += refillStation(refillStationX, refillStationY, 200, 400, WHITE, 9, stationPop);
+
+  // Stick figure moves to refill station
+  var sfMove = smooth(ramp(u, 0.3, 0.6));
+  var currentSfX = lerp(CX - 100, sfX, sfMove);
+  var currentSfArmAngle = lerp(-0.3, 0.3, sfMove);
+  s += stickFigure(currentSfX, sfY, 30, 100, currentSfArmAngle, 0.2, WHITE);
+
+  // Cup held by stick figure
+  var cupColor = lerpColor(AMBER, WHITE, smooth(ramp(u, 0.5, 0.7)));
+  s += cup(currentSfX, sfY + 40, 100, 160, 80, cupColor, 9);
+
+  // Refill machine with subtle blue aura
+  var auraOp = Math.sin(u * Math.PI * 4) * 0.2 + 0.3;
+  s += rrect(refillStationX, refillStationY, 240, 440, 40, BLUE, auraOp * stationPop);
+
+  // Stick figure nod
+  var nod = smooth(ramp(u, 0.7, 0.9));
+  var headRot = lerp(0, 10, nod);
+  s += '<g transform="rotate(' + headRot + ' ' + currentSfX + ' ' + (sfY - 30 - 50) + ')">';
+  s += dot(currentSfX, sfY - 30 - 50, 30, WHITE); // Head
+  s += '</g>';
+  s += line(currentSfX, sfY - 50, currentSfX, sfY + 50, WHITE, 8); // Body
+  s += line(currentSfX, sfY, currentSfX - 60, sfY + 30, WHITE, 8); // Arms
+  s += line(currentSfX, sfY, currentSfX + 60, sfY + 30, WHITE, 8);
+  s += line(currentSfX, sfY + 50, currentSfX - 30, sfY + 120, WHITE, 8); // Legs
+  s += line(currentSfX, sfY + 50, currentSfX + 30, sfY + 120, WHITE, 8);
+
+  return s;
+}
+
+// Helper to interpolate colors (e.g., for cup morphing)
+function lerpColor(a, b, t) {
+  var ca = parseInt(a.slice(1), 16), cb = parseInt(b.slice(1), 16);
+  var ra = (ca >> 16) & 0xFF, ga = (ca >> 8) & 0xFF, ba = ca & 0xFF;
+  var rb = (cb >> 16) & 0xFF, gb = (cb >> 8) & 0xFF, bb = cb & 0xFF;
+  var r = Math.round(lerp(ra, rb, t));
+  var g = Math.round(lerp(ga, gb, t));
+  var b = Math.round(lerp(ba, bb, t));
+  return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500); // Fallback
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

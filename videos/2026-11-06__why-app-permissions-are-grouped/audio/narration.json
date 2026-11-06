@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You download a new app, eager to use its features. You just want to get started quickly, without hassle. A buzz of anticipation as you tap the icon.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "Immediately, a screen appears. A long list of permissions: location, camera, microphone, contacts. All of them, right there, all at once.",
+    "rate": "+5%",
+    "start": 9.8
+  },
+  {
+    "id": "scene-03",
+    "text": "You pause. Why does a simple app need *everything*? You might suspect it's just greedy, or overreaching for your data.",
+    "rate": "+5%",
+    "start": 20.1
+  },
+  {
+    "id": "scene-04",
+    "text": "But the system learned: users abandon apps when interrupted too much. Each individual request creates friction, causing people to quit.",
+    "rate": "+5%",
+    "start": 30.4
+  },
+  {
+    "id": "scene-05",
+    "text": "So, platforms bundled these requests. One big 'Accept' instead of many small ones. The cost? You often grant more access than you truly intend.",
+    "rate": "+5%",
+    "start": 40.7
+  },
+  {
+    "id": "scene-06",
+    "text": "Tomorrow, you'll still tap 'Accept.' But now, you see the hidden bargain. You understand this invisible system of bundled choices.",
+    "rate": "+5%",
+    "start": 51.0
+  }
+]

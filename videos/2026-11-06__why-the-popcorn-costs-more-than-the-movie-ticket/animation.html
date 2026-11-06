@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Popcorn Costs More Than The Movie Ticket</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary elements
+var BLUE  = "#4C86F0";              // signal blue  -> the system / profit
+var AMBER = "#F2A93B";              // warm amber   -> YOU / desire
+var CORAL = "#FF5B5B";              // coral red    -> naive model / shock
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+// Global stick figure height and resting Y position
+var STICK_FIGURE_H = 220;
+var STICK_FIGURE_Y = BOT - STICK_FIGURE_H / 2 - 100;
+
+/* the stick figure: head, body, and limbs based on expression */
+function stickFigure(x, y, h, col, expression, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = h * 0.12;
+  var bodyH = h * 0.4;
+  var armL = h * 0.25;
+  var legL = h * 0.3;
+  var headY = y - bodyH * 0.5 - headR;
+  var bodyTop = y - bodyH * 0.5;
+  var bodyBot = y + bodyH * 0.5;
+
+  // Head
+  g += dot(x, headY, headR, col);
+
+  // Body
+  g += line(x, bodyTop, x, bodyBot, col, 10);
+
+  // Limbs based on expression
+  switch (expression) {
+    case 'excited':
+      g += line(x, bodyTop + 10, x - armL * 0.8, bodyTop + 10 - armL, col, 10); // Left arm up
+      g += line(x, bodyTop + 10, x + armL * 0.8, bodyTop + 10 - armL, col, 10); // Right arm up
+      g += line(x, bodyBot, x - legL * 0.5, bodyBot + legL * 0.8, col, 10); // Left leg slightly bent
+      g += line(x, bodyBot, x + legL * 0.5, bodyBot + legL * 0.8, col, 10); // Right leg slightly bent
+      break;
+    case 'pointing':
+      g += line(x, bodyTop + 10, x - armL * 0.6, bodyTop + 10 + armL * 0.5, col, 10); // Left arm down
+      g += line(x, bodyTop + 10, x + armL * 1.2, bodyTop + 10 - armL * 0.2, col, 10); // Right arm pointing forward
+      g += line(x, bodyBot, x - legL * 0.2, bodyBot + legL, col, 10);
+      g += line(x, bodyBot, x + legL * 0.2, bodyBot + legL, col, 10);
+      break;
+    case 'shocked':
+      g += line(x, bodyTop + 10, x - armL, bodyTop + 10 - armL * 0.5, col, 10); // Arms up, wide
+      g += line(x, bodyTop + 10, x + armL, bodyTop + 10 - armL * 0.5, col, 10);
+      g += line(x, bodyBot, x - legL * 0.2, bodyBot + legL, col, 10);
+      g += line(x, bodyBot, x + legL * 0.2, bodyBot + legL, col, 10);
+      break;
+    case 'questioning':
+      g += line(x, bodyTop + 10, x - armL * 0.5, bodyTop + 10 + armL * 0.2, col, 10); // Left arm down
+      g += line(x, bodyTop + 10, x + armL * 0.2, bodyTop + 10 + armL * 0.8, col, 10); // Right arm to chin
+      g += line(x, bodyBot, x - legL * 0.2, bodyBot + legL, col, 10);
+      g += line(x, bodyBot, x + legL * 0.2, bodyBot + legL, col, 10);
+      g += line(x, headY + headR * 0.4, x + headR * 0.8, headY + headR * 0.8, col, 7); // Head tilt line
+      break;
+    case 'eating':
+      g += line(x, bodyTop + 10, x - armL * 0.5, bodyTop + 10 + armL * 0.2, col, 10); // Left arm down
+      g += line(x, bodyTop + 10, x + armL * 0.5, headY + headR * 0.5, col, 10); // Right arm to mouth
+      g += line(x, bodyBot, x - legL * 0.2, bodyBot + legL, col, 10);
+      g += line(x, bodyBot, x + legL * 0.2, bodyBot + legL, col, 10);
+      break;
+    default: // neutral
+      g += line(x, bodyTop + 10, x - armL * 0.5, bodyTop + 10 + armL * 0.5, col, 10);
+      g += line(x, bodyTop + 10, x + armL * 0.5, bodyTop + 10 + armL * 0.5, col, 10);
+      g += line(x, bodyBot, x - legL * 0.2, bodyBot + legL, col, 10);
+      g += line(x, bodyBot, x + legL * 0.2, bodyBot + legL, col, 10);
+      break;
+  }
+  g += '</g>';
+  return g;
+}
+
+/* popcorn bag icon with kernels */
+function popcornIcon(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var bagW = size * 0.8;
+  var bagH = size;
+  g += rrect(x, y + bagH * 0.1, bagW, bagH * 0.8, size * 0.1, col, 0.2); // Bag body
+  g += line(x - bagW * 0.4, y - bagH * 0.3, x + bagW * 0.4, y - bagH * 0.3, col, 8); // Top line
+  g += dot(x - bagW * 0.2, y - bagH * 0.45, size * 0.15, col); // Popcorn kernels
+  g += dot(x + bagW * 0.2, y - bagH * 0.4, size * 0.13, col);
+  g += dot(x, y - bagH * 0.55, size * 0.18, col);
+  g += '</g>';
+  return g;
+}
+
+/* more detailed popcorn bag for holding */
+function popcornBag(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var bagW = size * 0.8;
+  var bagH = size;
+  // Bag outline
+  g += rrectStroke(x, y + bagH * 0.1, bagW, bagH * 0.8, size * 0.1, col, 10);
+  // Stripes
+  g += line(x - bagW * 0.2, y + bagH * 0.1, x - bagW * 0.2, y + bagH * 0.5, col, 6, 0.4);
+  g += line(x + bagW * 0.2, y + bagH * 0.1, x + bagW * 0.2, y + bagH * 0.5, col, 6, 0.4);
+  // Popcorn kernels
+  g += dot(x - bagW * 0.25, y - bagH * 0.35, size * 0.15, col);
+  g += dot(x + bagW * 0.25, y - bagH * 0.3, size * 0.13, col);
+  g += dot(x, y - bagH * 0.45, size * 0.18, col);
+  g += dot(x - bagW * 0.1, y - bagH * 0.55, size * 0.1, col);
+  g += dot(x + bagW * 0.1, y - bagH * 0.5, size * 0.11, col);
+  g += '</g>';
+  return g;
+}
+
+/* price tag icon */
+function priceTag(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var tagW = size * 0.8;
+  var tagH = size * 0.6;
+  var rad = size * 0.1;
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, tagW, tagH, rad, col);
+  g += dot(x + tagW * 0.3, y - tagH * 0.2, size * 0.08, WHITE); // Price indicator (dot)
+  g += line(x - tagW * 0.2, y + tagH * 0.1, x + tagW * 0.2, y + tagH * 0.1, WHITE, 8); // Price indicator (bar)
+  g += ring(x - tagW * 0.4 + rad * 0.8, y - tagH * 0.3 + rad * 0.8, size * 0.05, WHITE, 4); // Hole
+  g += '</g>';
+  return g;
+}
+
+/* movie ticket icon */
+function movieTicket(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var ticketW = size * 1.2;
+  var ticketH = size * 0.6;
+  var notchR = size * 0.08;
+  var d = "M " + (x - ticketW / 2) + " " + (y - ticketH / 2) +
+          " H " + (x + ticketW / 2) +
+          " V " + (y + ticketH / 2) +
+          " H " + (x - ticketW / 2 + notchR * 2) +
+          " Q " + (x - ticketW / 2 + notchR) + " " + (y + ticketH / 2 - notchR) + " " + (x - ticketW / 2) + " " + (y + ticketH / 2 - notchR * 2) +
+          " V " + (y - ticketH / 2) + " Z";
+  return '<path d="' + d + '" fill="' + col + '" opacity="' + op + '"/>';
+}
+
+/* question mark icon */
+function questionMark(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var d = "M " + (x - size * 0.2) + " " + (y - size * 0.4) +
+          " Q " + (x + size * 0.4) + " " + (y - size * 0.4) + " " + (x + size * 0.4) + " " + (y - size * 0.05) +
+          " Q " + (x + size * 0.3) + " " + (y + size * 0.3) + " " + x + " " + (y + size * 0.3) +
+          " V " + (y + size * 0.5) +
+          " M " + x + " " + (y + size * 0.7) + " V " + (y + size * 0.8);
+  return pathTag(d, col, size * 0.15, op);
+}
+
+/* studio icon (simple rectangle with a star) */
+function studioIcon(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, size * 1.5, size, size * 0.1, col);
+  // Simple star glyph
+  var starSize = size * 0.3;
+  var starPath = "M " + x + " " + (y - starSize * 0.5) +
+                 " L " + (x + starSize * 0.15) + " " + (y - starSize * 0.15) +
+                 " L " + (x + starSize * 0.5) + " " + (y - starSize * 0.15) +
+                 " L " + (x + starSize * 0.2) + " " + (y + starSize * 0.1) +
+                 " L " + (x + starSize * 0.3) + " " + (y + starSize * 0.5) +
+                 " L " + x + " " + (y + starSize * 0.2) +
+                 " L " + (x - starSize * 0.3) + " " + (y + starSize * 0.5) +
+                 " L " + (x - starSize * 0.2) + " " + (y + starSize * 0.1) +
+                 " L " + (x - starSize * 0.5) + " " + (y - starSize * 0.15) +
+                 " L " + (x - starSize * 0.15) + " " + (y - starSize * 0.15) + " Z";
+  g += '<path d="' + starPath + '" fill="' + WHITE + '"/>';
+  g += '</g>';
+  return g;
+}
+
+/* cinema counter icon */
+function cinemaCounter(x, y, w, h, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y + h * 0.2, w, h * 0.6, h * 0.1, col); // Counter body
+  g += rrect(x, y - h * 0.3, w * 1.05, h * 0.2, h * 0.05, col); // Counter top
+  g += '</g>';
+  return g;
+}
+
+/* system grid for scene 6 */
+function systemGrid(x, y, w, h, col, op, density, u) {
+  op = (op == null ? 1 : op);
+  density = density == null ? 1 : density;
+  var g = '<g opacity="' + op + '">';
+  var numX = Math.floor(w / (80 / density));
+  var numY = Math.floor(h / (80 / density));
+  var startX = x - w / 2;
+  var startY = y - h / 2;
+  var stepX = w / numX;
+  var stepY = h / numY;
+
+  for (var i = 0; i <= numX; i++) {
+    for (var j = 0; j <= numY; j++) {
+      var cx = startX + i * stepX;
+      var cy = startY + j * stepY;
+      g += dot(cx, cy, 5 * density, col, 0.6); // Nodes
+      if (i < numX) { // Horizontal lines
+        var len = stepX * (0.5 + 0.5 * Math.sin(u * Math.PI * 2 + i * 0.5 + j * 0.3));
+        g += line(cx, cy, cx + len, cy, col, 2 * density, 0.4);
+      }
+      if (j < numY) { // Vertical lines
+        var len = stepY * (0.5 + 0.5 * Math.sin(u * Math.PI * 2 + i * 0.7 + j * 0.4));
+        g += line(cx, cy, cx, cy + len, col, 2 * density, 0.4);
+      }
+    }
+  }
+  g += '</g>';
+  return g;
+}
+
+/* persistent cinema screen background (hero element) */
+function cinemaScreen(x, y, w, h, col, op) {
+  return rrect(x, y, w, h, 30, col, op);
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU - Excited for the movie. */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.0, 1.08, smooth(u * 0.9));
+  var driftY = lerp(0, -50, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+  s += cinemaScreen(CX, CY, W * 0.8, H * 0.8, DIM, 0.2);
+  s += stickFigure(CX, STICK_FIGURE_Y, STICK_FIGURE_H, AMBER, 'excited', 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): NEED - Desire for snacks. */
+function scene2(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += cinemaScreen(CX, CY, W * 0.8, H * 0.8, DIM, 0.1); // Faded screen
+  // Concession stand counter
+  s += rrect(CX, BOT - 100, W * 0.8, 100, 20, DIM, 0.4);
+  var stickX = lerp(CX, CX - 200, easeOut(ramp(u, 0.0, 0.3)));
+  s += stickFigure(stickX, STICK_FIGURE_Y, STICK_FIGURE_H, AMBER, 'pointing', 1);
+
+  // Snack icons animating in
+  var popcornScale = lerp(0, 1, easeOut(ramp(u, 0.5, 0.8)));
+  s += popcornIcon(CX + 180, CY - 100, popcornScale * 180, WHITE, 1);
+  s += rrect(CX + 80, CY - 100, 60, 100, 10, WHITE, lerp(0, 0.7, easeOut(ramp(u, 0.3, 0.6)))); // Drink icon
+  s += rrect(CX - 20, CY - 100, 80, 50, 8, WHITE, lerp(0, 0.7, easeOut(ramp(u, 0.4, 0.7)))); // Candy bar icon
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): GO - Discovering the high price. */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += cinemaScreen(CX, CY, W * 0.8, H * 0.8, DIM, 0.05); // Even more faded screen
+
+  var stickX = lerp(CX - 200, CX - 180, smooth(ramp(u, 0.0, 0.2)));
+  s += stickFigure(stickX, STICK_FIGURE_Y, STICK_FIGURE_H, AMBER, 'shocked', 1);
+
+  var popcornBagScale = lerp(0, 1, easeOut(ramp(u, 0.0, 0.3))) * 200;
+  s += popcornBag(CX + 100, STICK_FIGURE_Y - 50, popcornBagScale, AMBER, 1);
+
+  var priceTagSize = lerp(0, 1, easeOut(ramp(u, 0.3, 0.6))) * 120;
+  var priceTagOp = lerp(0.8, 1, Math.sin(u * Math.PI * 10) * 0.5 + 0.5); // Flashing effect
+  s += priceTag(CX + 100, STICK_FIGURE_Y + 150, priceTagSize, CORAL, priceTagOp);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): SEARCH - Questioning the price. */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  // Split screen visual
+  s += rrect(CX - W * 0.25, CY, W * 0.4, H * 0.7, 20, DIM, 0.1); // Left panel background
+  s += rrect(CX + W * 0.25, CY, W * 0.4, H * 0.7, 20, DIM, 0.1); // Right panel background
+
+  s += movieTicket(CX - 300, CY - 200, 100, WHITE, 1);
+  s += popcornBag(CX + 300, CY - 200, 200, AMBER, 1);
+  s += priceTag(CX + 300, CY + 50, 150, CORAL, 1);
+
+  s += stickFigure(CX, STICK_FIGURE_Y, STICK_FIGURE_H, AMBER, 'questioning', 1);
+
+  var qmOp = lerp(0, 1, easeOut(ramp(u, 0.2, 0.5)));
+  s += questionMark(CX, STICK_FIGURE_Y - STICK_FIGURE_H * 0.8, 60, WHITE, qmOp);
+
+  // Radiating coral lines from price tag
+  var radiateOp = lerp(0, 0.6, easeOut(ramp(u, 0.4, 0.8)));
+  var radiateLen = lerp(0, 150, easeOut(ramp(u, 0.4, 0.9)));
+  var tagX = CX + 300, tagY = CY + 50;
+  for (var i = 0; i < 8; i++) {
+    var angle = i * Math.PI / 4 + u * Math.PI * 0.2;
+    s += line(tagX, tagY, tagX + Math.cos(angle) * radiateLen, tagY + Math.sin(angle) * radiateLen, CORAL, 5, radiateOp);
+  }
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): FIND - The true mechanism revealed. */
+function scene5(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  // Background system hint
+  s += rrect(CX, CY, W, H, 0, BLUE, 0.08);
+
+  // Left panel: Ticket to Studio
+  var studioX = CX - 300, studioY = CY - 200;
+  var smallStickX = CX - 300, smallStickY = CY + 100;
+  var ticketX = CX - 300, ticketY = CY + 50;
+  s += studioIcon(studioX, studioY, 200, BLUE, 1);
+  s += stickFigure(smallStickX, smallStickY, STICK_FIGURE_H * 0.7, WHITE, 'neutral', 0.8);
+  s += movieTicket(ticketX, ticketY, 50, WHITE, 1);
+
+  // Right panel: Popcorn to Cinema
+  var cinemaX = CX + 300, cinemaY = CY + 100;
+  var popcornX = CX + 300, popcornY = CY - 50;
+  s += cinemaCounter(cinemaX, cinemaY, 300, 100, BLUE, 1);
+  s += stickFigure(CX + 300, CY - 100, STICK_FIGURE_H, AMBER, 'neutral', 1);
+  s += popcornBag(popcornX, popcornY, 100, AMBER, 1);
+
+  // Money flow animation
+  var flowProgress = easeIn(ramp(u, 0.2, 0.8));
+  var numDots = 5;
+
+  // Small money flow (ticket to studio)
+  for (var i = 0; i < numDots; i++) {
+    var p = (flowProgress * 0.8 + i / numDots) % 1;
+    var currentX = lerp(ticketX, studioX, p);
+    var currentY = lerp(ticketY, studioY + 50, p);
+    s += dot(currentX, currentY, 8, WHITE, (1 - p) * 0.8);
+  }
+
+  // Large money flow (popcorn to cinema)
+  for (var i = 0; i < numDots * 2; i++) { // More dots for larger flow
+    var p = (flowProgress + i / (numDots * 2)) % 1;
+    var currentX = lerp(popcornX, cinemaX, p);
+    var currentY = lerp(popcornY + 50, cinemaY - 50, p);
+    s += dot(currentX, currentY, 15, BLUE, (1 - p) * 0.9);
+  }
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): TAKE / RETURN / CHANGE - Understanding the system. */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.9, smooth(u));
+  var stickFigX = lerp(CX, CX, smooth(u));
+  var stickFigY = lerp(STICK_FIGURE_Y, BOT - STICK_FIGURE_H / 2 - 200, smooth(u));
+
+  s += '<g ' + camera(scale, 0, lerp(0, 0, smooth(u))) + '>';
+
+  // Cinema screen morphs into system grid
+  var screenOp = lerp(0.2, 0, smooth(ramp(u, 0.0, 0.4)));
+  s += cinemaScreen(CX, CY, W * 0.8, H * 0.8, DIM, screenOp);
+
+  var systemOp = lerp(0, 1, smooth(ramp(u, 0.3, 0.8)));
+  var systemDensity = lerp(0.5, 1.2, smooth(ramp(u, 0.3, 0.9)));
+  s += systemGrid(CX, CY, W * 0.8, H * 0.8, BLUE, systemOp, systemDensity, u);
+
+  // Stick figure sitting and eating popcorn
+  s += stickFigure(stickFigX, stickFigY, STICK_FIGURE_H, AMBER, 'eating', 1);
+
+  // Popcorn bag with subtle blue glow
+  var popcornBagX = stickFigX + 100;
+  var popcornBagY = stickFigY - 50;
+  s += popcornBag(popcornBagX, popcornBagY, 150, AMBER, 1);
+  var glowOp = lerp(0, 0.2, Math.sin(u * Math.PI * 4) * 0.5 + 0.5);
+  s += rrect(popcornBagX, popcornBagY, 160, 160, 20, BLUE, glowOp);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

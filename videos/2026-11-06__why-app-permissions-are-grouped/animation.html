@@ -1,0 +1,550 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Apps Ask for All Permissions at Once</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> system / accept
+var AMBER = "#F2A93B";              // warm amber   -> YOU / desire
+var CORAL = "#FF5B5B";              // coral red    -> friction / naive model
+
+var DUR = 60;
+window.__duration = DUR;
+
+// Phone and Figure constants
+var PHONE_W = 400, PHONE_H = 700;
+var PHONE_X = CX + 100, PHONE_Y = CY - 100; // Offset for figure holding it
+var FIGURE_X = CX - 100, FIGURE_Y = CY + 200;
+var FIGURE_SCALE = 1.0;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, fill) {
+  return '<path d="' + d + '" fill="' + (fill || 'none') + '" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom shape builders ---------- */
+// Generic app icon: square with a circle
+function appIcon(x, y, size, col, op) {
+  var s = '';
+  s += rrect(x, y, size, size, size * 0.2, col, op);
+  s += dot(x, y, size * 0.3, WHITE, op);
+  return s;
+}
+
+// Phone frame with screen content
+function phone(x, y, w, h, screenContent, col, op) {
+  var s = '<g opacity="' + op + '">';
+  s += rrectStroke(x, y, w, h, 30, col, 10, op); // Phone body
+  s += rrect(x, y, w - 24, h - 24, 20, '#000000', op); // Screen background
+  s += '<g transform="translate(' + (x - (w - 24) / 2) + ' ' + (y - (h - 24) / 2) + ')">'; // Screen content group
+  s += screenContent;
+  s += '</g>';
+  s += '</g>';
+  return s;
+}
+
+// Stick figure with different poses
+function stickFigure(x, y, scale, pose, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g transform="translate(' + x + ' ' + y + ') scale(' + scale + ')">';
+  var headR = 40;
+  var bodyLen = 100;
+  var armLen = 70;
+  var legLen = 90;
+
+  // Head
+  g += dot(0, -headR - bodyLen / 2, headR, col, op);
+
+  // Body
+  g += line(0, -bodyLen / 2, 0, bodyLen / 2, col, 10, op);
+
+  // Arms
+  if (pose === 0 || pose === 1 || pose === 4) { // Neutral, excited, knowing
+    g += line(-armLen * 0.7, -bodyLen * 0.3, -armLen, 0, col, 10, op);
+    g += line(armLen * 0.7, -bodyLen * 0.3, armLen, 0, col, 10, op);
+  } else if (pose === 2) { // Confused (scratching head)
+    g += line(-armLen * 0.7, -bodyLen * 0.3, -armLen, 0, col, 10, op);
+    g += line(armLen * 0.7, -bodyLen * 0.3, 0, -headR - bodyLen / 2 - headR * 0.6, col, 10, op); // Arm to head
+  } else if (pose === 3) { // Tapping phone
+    g += line(-armLen * 0.7, -bodyLen * 0.3, -armLen, 0, col, 10, op);
+    g += line(armLen * 0.7, -bodyLen * 0.3, armLen * 0.8, -bodyLen * 0.8, col, 10, op); // Arm up for tap
+  }
+
+  // Legs
+  g += line(0, bodyLen / 2, -legLen * 0.5, bodyLen / 2 + legLen, col, 10, op);
+  g += line(0, bodyLen / 2, legLen * 0.5, bodyLen / 2 + legLen, col, 10, op);
+
+  // Pose-specific elements
+  if (pose === 1) { // Excited (stars)
+    for (var i = 0; i < 4; i++) {
+      var angle = i * Math.PI / 2 + Math.sin(op * 10) * 0.2;
+      var starX = Math.cos(angle) * (headR + 20);
+      var starY = Math.sin(angle) * (headR + 20) - headR - bodyLen / 2;
+      g += dot(starX, starY, 6, AMBER, op);
+    }
+  }
+  if (pose === 4) { // Knowing (nod)
+    g += line(0, -headR - bodyLen / 2 + 10, 0, -headR - bodyLen / 2 + 20, col, 7, op); // Simple nod line
+  }
+
+  g += '</g>';
+  return g;
+}
+
+// Permission toggle switch
+function permissionToggle(x, y, w, h, labelGlyphType, active, col, op) {
+  var s = '';
+  var rad = h / 2;
+  var toggleX = x + w / 2 - rad - 10;
+  var toggleY = y;
+
+  // Background rectangle
+  s += rrect(x, y, w, h, rad, DIM, op * 0.2);
+
+  // Glyph
+  var glyphSize = rad * 0.7;
+  var glyphX = x - w / 2 + rad + 10;
+  var glyphY = y;
+  s += permissionGlyph(glyphX, glyphY, glyphSize, col, op, 'none');
+
+  // Toggle switch
+  s += rrect(toggleX, toggleY, rad * 2, rad * 0.8, rad * 0.4, CORAL, op); // Switch track
+  var switchDotX = active ? toggleX + rad * 0.5 : toggleX - rad * 0.5;
+  s += dot(switchDotX, toggleY, rad * 0.4, WHITE, op); // Switch dot
+
+  return s;
+}
+
+// Individual permission glyphs (location, camera, mic, contacts)
+function permissionGlyph(x, y, size, col, op, fill) {
+  var d = '';
+  switch (fill) {
+    case 'location': // Location pin
+      d = "M " + x + " " + (y - size) + " C " + (x + size * 0.7) + " " + (y - size) + " " + (x + size * 0.7) + " " + (y + size * 0.3) + " " + x + " " + (y + size);
+      d += " C " + (x - size * 0.7) + " " + (y + size * 0.3) + " " + (x - size * 0.7) + " " + (y - size) + " " + x + " " + (y - size) + " Z";
+      d += " M " + x + " " + (y - size * 0.3) + " A " + (size * 0.3) + " " + (size * 0.3) + " 0 1 0 " + (x + 0.1) + " " + (y - size * 0.3); // Inner dot
+      return pathTag(d, col, 8, op, col); // Fill for location
+    case 'camera': // Camera
+      d = "M " + (x - size * 0.8) + " " + (y - size * 0.5) + " L " + (x + size * 0.8) + " " + (y - size * 0.5) + " L " + (x + size * 0.8) + " " + (y + size * 0.5) + " L " + (x - size * 0.8) + " " + (y + size * 0.5) + " Z";
+      d += " M " + x + " " + y + " A " + (size * 0.4) + " " + (size * 0.4) + " 0 1 0 " + (x + 0.1) + " " + y; // Lens
+      return pathTag(d, col, 8, op, col); // Fill for camera
+    case 'mic': // Microphone
+      d = "M " + (x - size * 0.3) + " " + (y - size) + " L " + (x + size * 0.3) + " " + (y - size) + " L " + (x + size * 0.3) + " " + (y + size * 0.3) + " L " + (x - size * 0.3) + " " + (y + size * 0.3) + " Z";
+      d += " M " + x + " " + (y + size * 0.3) + " L " + x + " " + (y + size * 0.8);
+      d += " M " + (x - size * 0.5) + " " + (y + size * 0.6) + " L " + (x + size * 0.5) + " " + (y + size * 0.6);
+      return pathTag(d, col, 8, op, col); // Fill for mic
+    case 'contacts': // Person/contacts
+      d = "M " + x + " " + (y - size * 0.5) + " A " + (size * 0.3) + " " + (size * 0.3) + " 0 1 0 " + (x + 0.1) + " " + (y - size * 0.5); // Head
+      d += " M " + (x - size * 0.6) + " " + (y + size * 0.5) + " C " + (x - size * 0.6) + " " + (y + size * 0.1) + " " + (x + size * 0.6) + " " + (y + size * 0.1) + " " + (x + size * 0.6) + " " + (y + size * 0.5); // Shoulders
+      return pathTag(d, col, 8, op, col); // Fill for contacts
+    default: // Generic dot if no specific type
+      return dot(x, y, size * 0.5, col, op);
+  }
+}
+
+// Question mark glyph
+function questionMark(x, y, size, col, op) {
+  var d = "M " + (x - size * 0.3) + " " + (y - size) + " A " + (size * 0.7) + " " + (size * 0.7) + " 0 1 1 " + (x + size * 0.3) + " " + (y - size * 0.3);
+  d += " L " + (x + size * 0.3) + " " + (y + size * 0.2);
+  d += " M " + x + " " + (y + size * 0.5) + " L " + x + " " + (y + size * 0.6);
+  return pathTag(d, col, 12, op);
+}
+
+// Friction icon (zig-zag)
+function frictionIcon(x, y, size, col, op) {
+  var d = "M " + (x - size * 0.5) + " " + (y - size * 0.5) + " L " + (x + size * 0.5) + " " + (y - size * 0.5);
+  d += " M " + (x - size * 0.5) + " " + (y + size * 0.5) + " L " + (x + size * 0.5) + " " + (y + size * 0.5);
+  d += " M " + (x - size * 0.5) + " " + (y - size * 0.5) + " L " + (x + size * 0.5) + " " + (y + size * 0.5);
+  d += " M " + (x + size * 0.5) + " " + (y - size * 0.5) + " L " + (x - size * 0.5) + " " + (y + size * 0.5);
+  return pathTag(d, col, 10, op);
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.0, 1.05, smooth(u));
+  var figureBounce = Math.sin(u * Math.PI * 4) * 8 * (1 - u); // excited bounce
+  s += '<g ' + camera(scale, 0, figureBounce) + '>';
+
+  // Stick figure
+  var tapProgress = ramp(u, 0.2, 0.4);
+  var figurePose = tapProgress > 0.01 ? 3 : 1;
+  s += stickFigure(FIGURE_X, FIGURE_Y, FIGURE_SCALE, figurePose, AMBER, 1);
+
+  // Phone held by figure
+  var phoneScale = lerp(1.0, 1.05, smooth(u));
+  var phoneTapX = FIGURE_X + 100 + Math.sin(tapProgress * Math.PI) * 20;
+  var phoneTapY = FIGURE_Y - 100 - Math.sin(tapProgress * Math.PI) * 20;
+  var phoneTapOp = 1 - tapProgress;
+  s += phone(phoneTapX, phoneTapY, PHONE_W * phoneScale, PHONE_H * phoneScale,
+             appIcon(PHONE_W * phoneScale / 2, PHONE_H * phoneScale / 2, 180 * phoneScale, BLUE, 1), WHITE, 1);
+
+  // Tap animation / particles
+  if (tapProgress > 0) {
+    var tapX = phoneTapX + PHONE_W * phoneScale / 2;
+    var tapY = phoneTapY + PHONE_H * phoneScale / 2;
+    var tapR = lerp(30, 80, easeOut(tapProgress));
+    var tapOp = lerp(0.8, 0, easeOut(tapProgress));
+    s += ring(tapX, tapY, tapR, AMBER, 8, tapOp);
+    for (var i = 0; i < 5; i++) {
+      var particleU = (u * 3 + rnd(i)) % 1;
+      var particleR = lerp(10, 40, easeOut(particleU));
+      var particleOp = lerp(0.6, 0, easeOut(particleU));
+      var angle = rnd(i + 10) * Math.PI * 2;
+      var px = tapX + Math.cos(angle) * particleR;
+      var py = tapY + Math.sin(angle) * particleR;
+      s += dot(px, py, 6, AMBER, particleOp);
+    }
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var scale = lerp(1.05, 1.08, smooth(u));
+  var figureBounce = Math.sin(u * Math.PI * 2) * 5 * (1 - u);
+  s += '<g ' + camera(scale, 0, figureBounce) + '>';
+
+  // Stick figure (confused)
+  s += stickFigure(FIGURE_X, FIGURE_Y, FIGURE_SCALE, 2, AMBER, 1);
+
+  // Phone screen morphs into permission list
+  var phoneScreenW = PHONE_W - 24, phoneScreenH = PHONE_H - 24;
+  var phoneScreenX = PHONE_X - phoneScreenW / 2, phoneScreenY = PHONE_Y - phoneScreenH / 2;
+  var screenContent = '';
+
+  var morphProgress = smooth(ramp(u, 0.0, 0.3));
+  var listScroll = u * 100; // Constant scroll for visual effect
+
+  if (morphProgress < 1) {
+    // Morphing from app icon to list
+    var iconSize = lerp(180, 0, morphProgress);
+    var iconOp = lerp(1, 0, morphProgress);
+    screenContent += appIcon(phoneScreenW / 2, phoneScreenH / 2, iconSize, BLUE, iconOp);
+  }
+
+  // Permission list appears
+  var listOp = lerp(0, 1, morphProgress);
+  var numToggles = 4;
+  var toggleH = 100;
+  var toggleW = phoneScreenW * 0.8;
+  var toggleRad = toggleH / 2;
+  var toggleGap = 20;
+  var totalListH = numToggles * (toggleH + toggleGap);
+
+  for (var i = 0; i < numToggles; i++) {
+    var toggleY = phoneScreenH / 2 - totalListH / 2 + i * (toggleH + toggleGap) + toggleH / 2;
+    toggleY = (toggleY - listScroll) % (totalListH + toggleH); // Loop scroll
+    if (toggleY < -toggleH / 2) toggleY += (totalListH + toggleH); // Wrap around
+    if (toggleY > phoneScreenH + toggleH / 2) toggleY -= (totalListH + toggleH);
+
+    screenContent += permissionToggle(phoneScreenW / 2, toggleY, toggleW, toggleH, i, true, CORAL, listOp);
+  }
+
+  s += phone(PHONE_X, PHONE_Y, PHONE_W, PHONE_H, screenContent, WHITE, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var scale = lerp(1.08, 1.05, smooth(u));
+  s += '<g ' + camera(scale, 0, 0) + '>';
+
+  // Stick figure (scratching head)
+  s += stickFigure(FIGURE_X, FIGURE_Y, FIGURE_SCALE, 2, AMBER, 1);
+
+  // Phone with permission list
+  var phoneScreenW = PHONE_W - 24, phoneScreenH = PHONE_H - 24;
+  var screenContent = '';
+
+  var numToggles = 4;
+  var toggleH = 100;
+  var toggleW = phoneScreenW * 0.8;
+  var toggleRad = toggleH / 2;
+  var toggleGap = 20;
+  var totalListH = numToggles * (toggleH + toggleGap);
+  var listScroll = u * 50; // Slower scroll
+
+  for (var i = 0; i < numToggles; i++) {
+    var toggleY = phoneScreenH / 2 - totalListH / 2 + i * (toggleH + toggleGap) + toggleH / 2;
+    toggleY = (toggleY - listScroll) % (totalListH + toggleH);
+    if (toggleY < -toggleH / 2) toggleY += (totalListH + toggleH);
+    if (toggleY > phoneScreenH + toggleH / 2) toggleY -= (totalListH + toggleH);
+
+    screenContent += permissionToggle(phoneScreenW / 2, toggleY, toggleW, toggleH, i, true, CORAL, 1);
+
+    // Question marks around the list
+    var qmOp = Math.sin(u * Math.PI * 4 + i) * 0.5 + 0.5;
+    var qmX = phoneScreenW / 2 + toggleW / 2 + 50;
+    var qmY = toggleY;
+    screenContent += questionMark(qmX, qmY, 30, CORAL, qmOp);
+  }
+
+  s += phone(PHONE_X, PHONE_Y, PHONE_W, PHONE_H, screenContent, WHITE, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var scale = lerp(1.05, 1.0, smooth(u));
+  s += '<g ' + camera(scale, 0, 0) + '>';
+
+  // Stick figure (neutral, observing)
+  s += stickFigure(FIGURE_X, FIGURE_Y, FIGURE_SCALE, 0, AMBER, 1);
+
+  // Phone with permission list, showing friction
+  var phoneScreenW = PHONE_W - 24, phoneScreenH = PHONE_H - 24;
+  var screenContent = '';
+
+  var numToggles = 4;
+  var toggleH = 100;
+  var toggleW = phoneScreenW * 0.8;
+  var toggleRad = toggleH / 2;
+  var toggleGap = 20;
+  var totalListH = numToggles * (toggleH + toggleGap);
+
+  var collapseProgress = smooth(ramp(u, 0.1, 0.6));
+  var frictionBarAppear = smooth(ramp(u, 0.5, 0.7));
+
+  for (var i = 0; i < numToggles; i++) {
+    var toggleY = phoneScreenH / 2 - totalListH / 2 + i * (toggleH + toggleGap) + toggleH / 2;
+    var currentToggleOp = lerp(1, 0, collapseProgress);
+    var currentToggleW = lerp(toggleW, toggleW * 0.2, collapseProgress);
+    var currentToggleH = lerp(toggleH, toggleH * 0.2, collapseProgress);
+    var currentToggleX = phoneScreenW / 2;
+
+    if (currentToggleOp > 0.05) {
+      screenContent += permissionToggle(currentToggleX, toggleY, currentToggleW, currentToggleH, i, true, CORAL, currentToggleOp);
+    }
+
+    // Friction icons replacing toggles
+    if (collapseProgress > 0.2 && currentToggleOp < 0.8) {
+      var frictionOp = lerp(0, 1, ramp(collapseProgress, 0.2, 0.8));
+      var frictionSize = lerp(20, 50, ramp(collapseProgress, 0.2, 0.8));
+      var frictionX = currentToggleX + (rnd(i + 20) - 0.5) * 100 * (1 - frictionOp);
+      var frictionY = toggleY + (rnd(i + 30) - 0.5) * 100 * (1 - frictionOp);
+      screenContent += frictionIcon(frictionX, frictionY, frictionSize, CORAL, frictionOp);
+    }
+  }
+
+  // Central friction bar
+  if (frictionBarAppear > 0.05) {
+    var barW = lerp(0, phoneScreenW * 0.7, frictionBarAppear);
+    var barH = 50;
+    var barOp = lerp(0, 1, frictionBarAppear) * (1 - ramp(u, 0.8, 1.0));
+    screenContent += rrect(phoneScreenW / 2, phoneScreenH / 2, barW, barH, 10, CORAL, barOp);
+  }
+
+  s += phone(PHONE_X, PHONE_Y, PHONE_W, PHONE_H, screenContent, WHITE, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.95, smooth(u));
+  s += '<g ' + camera(scale, 0, 0) + '>';
+
+  // Stick figure (tapping)
+  s += stickFigure(FIGURE_X, FIGURE_Y, FIGURE_SCALE, 3, AMBER, 1);
+
+  // Phone screen: elements consolidate to ACCEPT button, then dissolve
+  var phoneScreenW = PHONE_W - 24, phoneScreenH = PHONE_H - 24;
+  var screenContent = '';
+
+  var consolidateProgress = smooth(ramp(u, 0.0, 0.3));
+  var tapAcceptProgress = smooth(ramp(u, 0.4, 0.6));
+  var dissolveProgress = smooth(ramp(u, 0.6, 0.9));
+
+  // Consolidating elements
+  var numFrictionIcons = 4;
+  for (var i = 0; i < numFrictionIcons; i++) {
+    var startX = phoneScreenW / 2 + (rnd(i + 40) - 0.5) * 200;
+    var startY = phoneScreenH / 2 + (rnd(i + 50) - 0.5) * 200;
+    var endX = phoneScreenW / 2;
+    var endY = phoneScreenH / 2;
+    var currentX = lerp(startX, endX, consolidateProgress);
+    var currentY = lerp(startY, endY, consolidateProgress);
+    var iconOp = lerp(1, 0, consolidateProgress);
+    var iconSize = lerp(50, 10, consolidateProgress);
+    if (iconOp > 0.05) screenContent += frictionIcon(currentX, currentY, iconSize, CORAL, iconOp);
+  }
+
+  // ACCEPT button appears
+  var buttonOp = lerp(0, 1, consolidateProgress) * (1 - tapAcceptProgress);
+  var buttonW = lerp(0, phoneScreenW * 0.8, consolidateProgress);
+  var buttonH = lerp(0, 150, consolidateProgress);
+  if (buttonOp > 0.05) {
+    screenContent += rrect(phoneScreenW / 2, phoneScreenH / 2, buttonW, buttonH, 30, BLUE, buttonOp);
+  }
+
+  // Tap animation on button
+  if (tapAcceptProgress > 0 && tapAcceptProgress < 1) {
+    var tapR = lerp(30, 80, easeOut(tapAcceptProgress));
+    var tapOp = lerp(0.8, 0, easeOut(tapAcceptProgress));
+    screenContent += ring(phoneScreenW / 2, phoneScreenH / 2, tapR, AMBER, 8, tapOp);
+  }
+
+  // Dissolving button into floating icons
+  var numFloatingIcons = 4;
+  var iconTypes = ['location', 'camera', 'mic', 'contacts'];
+  for (var i = 0; i < numFloatingIcons; i++) {
+    var iconOp = lerp(0, 1, dissolveProgress);
+    var iconSize = lerp(0, 50, dissolveProgress);
+    var startX = phoneScreenW / 2;
+    var startY = phoneScreenH / 2;
+    var endX = (rnd(i + 60) - 0.5) * 400; // Relative to phone center
+    var endY = (rnd(i + 70) - 0.5) * 400;
+
+    var currentX = lerp(startX, endX, dissolveProgress);
+    var currentY = lerp(startY, endY, dissolveProgress);
+
+    if (iconOp > 0.05) {
+      s += permissionGlyph(currentX + PHONE_X - phoneScreenW / 2, currentY + PHONE_Y - phoneScreenH / 2, iconSize, BLUE, iconOp, iconTypes[i]);
+    }
+  }
+
+  s += phone(PHONE_X, PHONE_Y, PHONE_W, PHONE_H, screenContent, WHITE, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.95, 1.0, smooth(u));
+  s += '<g ' + camera(scale, 0, 0) + '>';
+
+  // Stick figure (calm and knowing, nods)
+  var nodProgress = smooth(ramp(u, 0.4, 0.8));
+  var figurePose = nodProgress > 0.01 ? 4 : 0;
+  s += stickFigure(FIGURE_X, FIGURE_Y, FIGURE_SCALE, figurePose, AMBER, 1);
+
+  // Phone with generic app interface
+  var phoneScreenW = PHONE_W - 24, phoneScreenH = PHONE_H - 24;
+  var screenContent = '';
+
+  // Generic app interface (simple lines/shapes)
+  screenContent += rrect(phoneScreenW / 2, phoneScreenH * 0.2, phoneScreenW * 0.7, 80, 10, DIM, 0.8);
+  screenContent += rrect(phoneScreenW / 2, phoneScreenH * 0.45, phoneScreenW * 0.8, 200, 20, DIM, 0.6);
+  screenContent += rrect(phoneScreenW / 2, phoneScreenH * 0.75, phoneScreenW * 0.7, 100, 15, DIM, 0.7);
+
+  s += phone(PHONE_X, PHONE_Y, PHONE_W, PHONE_H, screenContent, WHITE, 1);
+
+  // Floating permission icons (persisting)
+  var numFloatingIcons = 4;
+  var iconTypes = ['location', 'camera', 'mic', 'contacts'];
+  for (var i = 0; i < numFloatingIcons; i++) {
+    var iconSize = 50;
+    var floatX = (rnd(i + 60) - 0.5) * 400;
+    var floatY = (rnd(i + 70) - 0.5) * 400;
+    var bob = Math.sin(u * Math.PI * 2 + i) * 10; // Gentle bobbing
+    s += permissionGlyph(floatX + PHONE_X - phoneScreenW / 2, floatY + PHONE_Y - phoneScreenH / 2 + bob, iconSize, BLUE, 0.8, iconTypes[i]);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "Imagine you're at the movies, the lights dimming, ready for that big screen magic. The anticipation builds for the perfect escape.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "Part of the essential ritual? The snacks. Maybe a drink, but definitely some classic, buttery popcorn to complete the experience.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "You grab your ticket, then head straight for the concession stand. That's when you see the price tag for a large popcorn.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "It costs more than your actual movie ticket! You feel ripped off, wondering why this simple snack is so outrageously priced.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "Here's the invisible system: movie studios demand most of the ticket sales. Cinemas make almost no profit from your actual ticket.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "Concessions are where cinemas make their real money. The cheap ticket gets you through the door; the expensive popcorn pays the bills. Now you see the true cost of your movie experience.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]
