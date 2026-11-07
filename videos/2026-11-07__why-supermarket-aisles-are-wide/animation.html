@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Supermarket Aisles Are So Wide</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band
+var AISLE_CENTER_X = CX;
+var SHOPPER_Y = 1200;                // Shopper's typical resting height
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots / products
+var BLUE  = "#4C86F0";              // signal blue  -> the system / guidance
+var AMBER = "#F2A93B";              // warm amber   -> YOU / shopper
+var CORAL = "#FF5B5B";              // coral red    -> unplanned purchases / naive assumptions
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+/* Shopper stick figure: wide rounded body + driver head + two wheels */
+function shopper(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = 26;
+  var bodyH = 100, bodyW = 50;
+  var armL = 50, legL = 70;
+  var headY = y - headR - bodyH / 2 + 10;
+  var bodyY = y - bodyH / 2 + headR + 10;
+  var armY = bodyY - bodyH / 4;
+  var legY = bodyY + bodyH / 2;
+
+  // Head
+  g += dot(x, headY, headR, col);
+  // Body
+  g += line(x, bodyY - bodyH / 2, x, bodyY + bodyH / 2, col, 10);
+
+  // Arms & Legs based on pose
+  switch (pose) {
+    case 'walking':
+      var walkPhase = Math.sin(performance.now() / 100); // For preview, render(t) will use t
+      var armAngle1 = lerp(-40, 40, (Math.sin(walkPhase * 2) + 1) / 2);
+      var armAngle2 = lerp(40, -40, (Math.sin(walkPhase * 2) + 1) / 2);
+      var legAngle1 = lerp(-20, 20, (Math.sin(walkPhase * 2) + 1) / 2);
+      var legAngle2 = lerp(20, -20, (Math.sin(walkPhase * 2) + 1) / 2);
+
+      g += line(x, armY, x + armL * Math.sin(armAngle1 * Math.PI / 180), armY + armL * Math.cos(armAngle1 * Math.PI / 180), col, 8);
+      g += line(x, armY, x + armL * Math.sin(armAngle2 * Math.PI / 180), armY + armL * Math.cos(armAngle2 * Math.PI / 180), col, 8);
+      g += line(x, legY, x + legL * Math.sin(legAngle1 * Math.PI / 180), legY + legL * Math.cos(legAngle1 * Math.PI / 180), col, 10);
+      g += line(x, legY, x + legL * Math.sin(legAngle2 * Math.PI / 180), legY + legL * Math.cos(legAngle2 * Math.PI / 180), col, 10);
+      break;
+    case 'questioning':
+      g += line(x, armY, x - 40, armY - 30, col, 8); // Left arm up
+      g += line(x, armY, x + 40, armY + 20, col, 8); // Right arm down
+      g += line(x, legY, x - 20, legY + 40, col, 10);
+      g += line(x, legY, x + 20, legY + 40, col, 10);
+      // Question mark thought bubble
+      g += ring(x + 100, headY - 60, 24, WHITE, 6, op);
+      g += line(x + 100, headY - 80, x + 100, headY - 70, WHITE, 6, op);
+      g += dot(x + 100, headY - 40, 6, WHITE, op);
+      break;
+    case 'looking':
+      g += line(x, armY, x - 30, armY + 20, col, 8);
+      g += line(x, armY, x + 30, armY + 20, col, 8);
+      g += line(x, legY, x - 20, legY + 40, col, 10);
+      g += line(x, legY, x + 20, legY + 40, col, 10);
+      break;
+    case 'aware':
+      g += line(x, armY, x - 30, armY + 20, col, 8);
+      g += line(x, armY, x + 30, armY + 20, col, 8);
+      g += line(x, legY, x - 20, legY + 40, col, 10);
+      g += line(x, legY, x + 20, legY + 40, col, 10);
+      // Eye icon thought bubble
+      g += ring(x + 100, headY - 60, 24, BLUE, 6, op);
+      g += '<ellipse cx="' + (x + 100) + '" cy="' + (headY - 60) + '" rx="16" ry="10" fill="none" stroke="' + BLUE + '" stroke-width="6" opacity="' + op + '"/>';
+      g += dot(x + 100, headY - 60, 5, BLUE, op);
+      break;
+    case 'list': // For scene 1, focused on list
+    default:
+      g += line(x, armY, x - 30, armY + 20, col, 8);
+      g += line(x, armY, x + 30, armY + 20, col, 8);
+      g += line(x, legY, x - 20, legY + 40, col, 10);
+      g += line(x, legY, x + 20, legY + 40, col, 10);
+      // List icon thought bubble
+      g += rrect(x + 100, headY - 60, 40, 50, 8, WHITE, op);
+      g += line(x + 85, headY - 70, x + 115, headY - 70, col, 4, op);
+      g += line(x + 85, headY - 60, x + 115, headY - 60, col, 4, op);
+      g += line(x + 85, headY - 50, x + 105, headY - 50, col, 4, op);
+      break;
+  }
+  g += '</g>';
+  return g;
+}
+
+/* Shopping cart */
+function cart(x, y, col, fillLevel, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var bodyW = 120, bodyH = 80;
+  var handleY = y - bodyH / 2 - 10;
+  var wheelR = 12;
+
+  // Cart body
+  g += rrectStroke(x, y, bodyW, bodyH, 10, col, 8);
+  g += line(x - bodyW / 2 + 10, y + bodyH / 2, x + bodyW / 2 - 10, y + bodyH / 2, col, 8); // Bottom bar
+  g += line(x - bodyW / 2 + 10, y + bodyH / 2 - 10, x - bodyW / 2 + 10, y - bodyH / 2 + 10, col, 8); // Back bar
+  g += line(x + bodyW / 2 - 10, y + bodyH / 2 - 10, x + bodyW / 2 - 10, y - bodyH / 2 + 10, col, 8); // Front bar
+
+  // Handle
+  g += line(x + bodyW / 2 - 10, handleY, x + bodyW / 2 + 20, handleY, col, 8);
+  g += line(x + bodyW / 2 + 20, handleY, x + bodyW / 2 + 20, handleY + 20, col, 8);
+
+  // Wheels
+  g += dot(x - bodyW / 2 + 20, y + bodyH / 2 + wheelR, wheelR, col);
+  g += dot(x + bodyW / 2 - 20, y + bodyH / 2 + wheelR, wheelR, col);
+
+  // Items inside cart
+  if (fillLevel > 0) {
+    var itemH = 20, itemW = 40;
+    var startY = y + bodyH / 2 - itemH / 2 - 10;
+    var maxItems = 4;
+    for (var i = 0; i < Math.floor(fillLevel * maxItems); i++) {
+      var itemCol = AMBER; // Assume items are amber once in cart
+      g += rrect(x - bodyW / 4 + (rnd(i) - 0.5) * 20, startY - i * (itemH + 5), itemW + (rnd(i + 10) - 0.5) * 10, itemH, 4, itemCol, op);
+    }
+  }
+
+  g += '</g>';
+  return g;
+}
+
+/* Aisle perspective lines */
+function perspectiveAisle(xOffset, narrow, op) {
+  op = (op == null ? 1 : op);
+  var g = '';
+  var topY = TOP + 100, botY = BOT - 100;
+  var narrowW = 100, wideW = 300;
+  var currentW = lerp(narrowW, wideW, narrow);
+
+  var leftX_bot = AISLE_CENTER_X - currentW;
+  var rightX_bot = AISLE_CENTER_X + currentW;
+  var leftX_top = AISLE_CENTER_X - 60;
+  var rightX_top = AISLE_CENTER_X + 60;
+
+  g += line(leftX_bot + xOffset, botY, leftX_top + xOffset, topY, WHITE, 8, op);
+  g += line(rightX_bot + xOffset, botY, rightX_top + xOffset, topY, WHITE, 8, op);
+
+  // Floor lines
+  for (var i = 0; i < 4; i++) {
+    var p = i / 3;
+    var y = lerp(botY, topY, easeIn(p));
+    var lx = lerp(leftX_bot, leftX_top, p);
+    var rx = lerp(rightX_bot, rightX_top, p);
+    g += line(lx + xOffset, y, rx + xOffset, y, WHITE, 4, op * (1 - p * 0.5));
+  }
+
+  return g;
+}
+
+/* Shelf element */
+function shelf(x, y, w, h, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '';
+  g += rrect(x, y, w, h, 8, col, op * 0.15); // Shelf background
+  g += line(x - w / 2, y - h / 2, x + w / 2, y - h / 2, col, 6, op); // Top line
+  g += line(x - w / 2, y + h / 2, x + w / 2, y + h / 2, col, 6, op); // Bottom line
+  g += line(x - w / 2, y - h / 2, x - w / 2, y + h / 2, col, 6, op); // Left post
+  g += line(x + w / 2, y - h / 2, x + w / 2, y + h / 2, col, 6, op); // Right post
+  return g;
+}
+
+/* Simple product shape */
+function product(x, y, size, col, op) {
+  return rrect(x, y, size, size * 1.2, size * 0.2, col, op);
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var shopperX = AISLE_CENTER_X;
+  var shopperY = SHOPPER_Y;
+  var speedFactor = lerp(1.0, 0.4, smooth(u)); // Shopper slows down slightly toward end of scene
+
+  // Path behind shopper recedes quickly
+  var pathOffset = u * 400 * speedFactor;
+  var pathWidth = 200;
+  var pathTopY = TOP + 100;
+  var pathBotY = BOT - 100;
+
+  // Perspective lines for the narrow path
+  s += line(AISLE_CENTER_X - pathWidth / 2, pathBotY + pathOffset, AISLE_CENTER_X - 60, pathTopY + pathOffset * 0.2, WHITE, 8, 0.8);
+  s += line(AISLE_CENTER_X + pathWidth / 2, pathBotY + pathOffset, AISLE_CENTER_X + 60, pathTopY + pathOffset * 0.2, WHITE, 8, 0.8);
+
+  // Dashed lines on the path
+  var dashGap = 150, dashLen = 80;
+  var dashPhase = (u * 2.5 * speedFactor) % 1;
+  var dashOffset = dashPhase * dashGap;
+  for (var y = pathTopY - dashGap + dashOffset; y < pathBotY + pathOffset; y += dashGap) {
+    var a = Math.max(y, pathTopY);
+    var b = Math.min(y + dashLen, pathBotY + pathOffset);
+    if (b > a) s += line(AISLE_CENTER_X, a, AISLE_CENTER_X, b, WHITE, 6, 0.3);
+  }
+
+  // Shopper
+  var bob = Math.sin(u * Math.PI * 4) * 8;
+  s += shopper(shopperX, shopperY + bob, AMBER, 'list', 1);
+
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var shopperX = AISLE_CENTER_X;
+  var shopperY = SHOPPER_Y;
+
+  // Path widens dramatically
+  var aisleWidthFactor = smooth(ramp(u, 0.0, 0.4)); // 0=narrow, 1=wide
+  var currentAisleWidth = lerp(200, 600, aisleWidthFactor);
+  var aisleTopW = lerp(120, 200, aisleWidthFactor);
+  var aisleBotW = currentAisleWidth;
+
+  var aisleTopY = TOP + 100;
+  var aisleBotY = BOT - 100;
+
+  s += line(AISLE_CENTER_X - aisleBotW / 2, aisleBotY, AISLE_CENTER_X - aisleTopW / 2, aisleTopY, WHITE, 8, 0.8);
+  s += line(AISLE_CENTER_X + aisleBotW / 2, aisleBotY, AISLE_CENTER_X + aisleTopW / 2, aisleTopY, WHITE, 8, 0.8);
+
+  // Floor lines for wide aisle
+  for (var i = 0; i < 4; i++) {
+    var p = i / 3;
+    var y = lerp(aisleBotY, aisleTopY, easeIn(p));
+    var lx = lerp(AISLE_CENTER_X - aisleBotW / 2, AISLE_CENTER_X - aisleTopW / 2, p);
+    var rx = lerp(AISLE_CENTER_X + aisleBotW / 2, AISLE_CENTER_X + aisleTopW / 2, p);
+    s += line(lx, y, rx, y, WHITE, 4, 0.3 * (1 - p * 0.5));
+  }
+
+  // Shelves appear
+  var shelfOp = ramp(u, 0.3, 0.7);
+  var shelfW = 200, shelfH = 500;
+  var shelfXOffset = aisleBotW / 2 + shelfW / 2 + 50;
+
+  s += shelf(AISLE_CENTER_X - shelfXOffset, CY + 100, shelfW, shelfH, DIM, shelfOp);
+  s += shelf(AISLE_CENTER_X + shelfXOffset, CY + 100, shelfW, shelfH, DIM, shelfOp);
+
+  // Products on shelves
+  if (shelfOp > 0.1) {
+    for (var i = 0; i < 6; i++) {
+      s += product(AISLE_CENTER_X - shelfXOffset + (rnd(i) - 0.5) * (shelfW - 60), CY + 100 - shelfH / 2 + 50 + i * 80, 40, DIM, shelfOp * 0.8);
+      s += product(AISLE_CENTER_X + shelfXOffset + (rnd(i + 10) - 0.5) * (shelfW - 60), CY + 100 - shelfH / 2 + 50 + i * 80, 40, DIM, shelfOp * 0.8);
+    }
+  }
+
+  // Shopper's forward movement visibly slows
+  var shopperSpeed = lerp(1.0, 0.3, aisleWidthFactor);
+  var bob = Math.sin(u * Math.PI * 2 * shopperSpeed) * 6;
+  s += shopper(shopperX, shopperY + bob, AMBER, 'walking', 1);
+
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH — questioning the design */
+function scene3(u) {
+  var s = '';
+  var shopperX = AISLE_CENTER_X;
+  var shopperY = SHOPPER_Y;
+
+  // Wide aisle persists
+  var aisleTopW = 200, aisleBotW = 600;
+  var aisleTopY = TOP + 100, aisleBotY = BOT - 100;
+
+  s += line(AISLE_CENTER_X - aisleBotW / 2, aisleBotY, AISLE_CENTER_X - aisleTopW / 2, aisleTopY, WHITE, 8, 0.8);
+  s += line(AISLE_CENTER_X + aisleBotW / 2, aisleBotY, AISLE_CENTER_X + aisleTopW / 2, aisleTopY, WHITE, 8, 0.8);
+
+  // Floor lines
+  for (var i = 0; i < 4; i++) {
+    var p = i / 3;
+    var y = lerp(aisleBotY, aisleTopY, easeIn(p));
+    var lx = lerp(AISLE_CENTER_X - aisleBotW / 2, AISLE_CENTER_X - aisleTopW / 2, p);
+    var rx = lerp(AISLE_CENTER_X + aisleBotW / 2, AISLE_CENTER_X + aisleTopW / 2, p);
+    s += line(lx, y, rx, y, WHITE, 4, 0.3 * (1 - p * 0.5));
+  }
+
+  // Shelves
+  var shelfW = 200, shelfH = 500;
+  var shelfXOffset = aisleBotW / 2 + shelfW / 2 + 50;
+  s += shelf(AISLE_CENTER_X - shelfXOffset, CY + 100, shelfW, shelfH, DIM, 1);
+  s += shelf(AISLE_CENTER_X + shelfXOffset, CY + 100, shelfW, shelfH, DIM, 1);
+
+  // Products on shelves
+  for (var i = 0; i < 6; i++) {
+    s += product(AISLE_CENTER_X - shelfXOffset + (rnd(i) - 0.5) * (shelfW - 60), CY + 100 - shelfH / 2 + 50 + i * 80, 40, DIM, 0.8);
+    s += product(AISLE_CENTER_X + shelfXOffset + (rnd(i + 10) - 0.5) * (shelfW - 60), CY + 100 - shelfH / 2 + 50 + i * 80, 40, DIM, 0.8);
+  }
+
+  // Shopper stops and looks around with question mark
+  var camZoom = lerp(1.0, 1.08, smooth(ramp(u, 0.2, 0.5)) * (1 - smooth(ramp(u, 0.7, 0.9))));
+  s += '<g ' + camera(camZoom, 0, lerp(0, -30, smooth(ramp(u, 0.2, 0.5)) * (1 - smooth(ramp(u, 0.7, 0.9))))) + '>';
+  s += shopper(shopperX, shopperY, AMBER, 'questioning', 1);
+  s += '</g>';
+
+  // Coral red diagram of oversized shopping carts or expansive comfort zones
+  var diagramOp = ramp(u, 0.4, 0.6) * (1 - ramp(u, 0.8, 0.95));
+  if (diagramOp > 0.02) {
+    var diagramY = CY - 300;
+    var diagramSize = lerp(100, 180, easeOut(ramp(u, 0.4, 0.6)));
+    // Two large, overlapping rounded rectangles
+    s += rrect(CX - 80, diagramY, diagramSize * 1.2, diagramSize, 20, CORAL, diagramOp * 0.2);
+    s += rrectStroke(CX - 80, diagramY, diagramSize * 1.2, diagramSize, 20, CORAL, 8, diagramOp * 0.9);
+    s += rrect(CX + 80, diagramY + 40, diagramSize * 1.2, diagramSize, 20, CORAL, diagramOp * 0.2);
+    s += rrectStroke(CX + 80, diagramY + 40, diagramSize * 1.2, diagramSize, 20, CORAL, 8, diagramOp * 0.9);
+  }
+
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND — the true mechanism revealed */
+function scene4(u) {
+  var s = '';
+  var shopperX = AISLE_CENTER_X;
+  var shopperY = SHOPPER_Y;
+
+  // Aisle geometry transforms into a signal blue abstract system grid
+  var transform = smooth(ramp(u, 0.0, 0.3)); // 0=normal aisle, 1=system grid
+  var aisleTopW = lerp(200, 180, transform);
+  var aisleBotW = lerp(600, 500, transform);
+  var aisleTopY = TOP + 100, aisleBotY = BOT - 100;
+
+  var aisleColor = lerp(1, 0.3, transform); // Fading white aisle lines
+  s += line(AISLE_CENTER_X - aisleBotW / 2, aisleBotY, AISLE_CENTER_X - aisleTopW / 2, aisleTopY, WHITE, 8, 0.8 * aisleColor);
+  s += line(AISLE_CENTER_X + aisleBotW / 2, aisleBotY, AISLE_CENTER_X + aisleTopW / 2, aisleTopY, WHITE, 8, 0.8 * aisleColor);
+
+  // System grid overlay
+  var gridOp = transform * 0.8;
+  var gridLineW = lerp(4, 10, transform);
+  var gridColor = BLUE;
+
+  // Vertical grid lines
+  s += line(AISLE_CENTER_X - aisleBotW / 2, aisleBotY, AISLE_CENTER_X - aisleTopW / 2, aisleTopY, gridColor, gridLineW, gridOp);
+  s += line(AISLE_CENTER_X + aisleBotW / 2, aisleBotY, AISLE_CENTER_X + aisleTopW / 2, aisleTopY, gridColor, gridLineW, gridOp);
+  s += line(AISLE_CENTER_X, aisleBotY, AISLE_CENTER_X, aisleTopY, gridColor, gridLineW, gridOp * 0.6); // Center line
+
+  // Horizontal grid lines
+  for (var i = 0; i < 6; i++) {
+    var p = i / 5;
+    var y = lerp(aisleBotY, aisleTopY, easeIn(p));
+    var lx = lerp(AISLE_CENTER_X - aisleBotW / 2, AISLE_CENTER_X - aisleTopW / 2, p);
+    var rx = lerp(AISLE_CENTER_X + aisleBotW / 2, AISLE_CENTER_X + aisleTopW / 2, p);
+    s += line(lx, y, rx, y, gridColor, gridLineW, gridOp * (1 - p * 0.3));
+  }
+
+  // Shelves fade out and become part of the grid
+  var shelfOp = 1 - transform;
+  var shelfW = 200, shelfH = 500;
+  var shelfXOffset = aisleBotW / 2 + shelfW / 2 + 50;
+  s += shelf(AISLE_CENTER_X - shelfXOffset, CY + 100, shelfW, shelfH, DIM, shelfOp);
+  s += shelf(AISLE_CENTER_X + shelfXOffset, CY + 100, shelfW, shelfH, DIM, shelfOp);
+
+  // Products fade out
+  for (var i = 0; i < 6; i++) {
+    s += product(AISLE_CENTER_X - shelfXOffset + (rnd(i) - 0.5) * (shelfW - 60), CY + 100 - shelfH / 2 + 50 + i * 80, 40, DIM, shelfOp * 0.8);
+    s += product(AISLE_CENTER_X + shelfXOffset + (rnd(i + 10) - 0.5) * (shelfW - 60), CY + 100 - shelfH / 2 + 50 + i * 80, 40, DIM, shelfOp * 0.8);
+  }
+
+  // Signal blue arrows guiding the shopper's gaze and path
+  var arrowOp = ramp(u, 0.4, 0.8);
+  var arrowSize = 40;
+  var arrowY = SHOPPER_Y - 100;
+  var arrowXOffset = 150;
+
+  // Gaze arrows (pointing to shelves)
+  var pathD1 = "M " + (shopperX - 50) + " " + (arrowY - 30) + " Q " + (shopperX - 120) + " " + (arrowY - 100) + " " + (AISLE_CENTER_X - shelfXOffset + 50) + " " + (CY + 100 - 150);
+  var pathD2 = "M " + (shopperX + 50) + " " + (arrowY - 30) + " Q " + (shopperX + 120) + " " + (arrowY - 100) + " " + (AISLE_CENTER_X + shelfXOffset - 50) + " " + (CY + 100 - 150);
+  s += pathTag(pathD1, BLUE, 8, arrowOp * 0.8);
+  s += pathTag(pathD2, BLUE, 8, arrowOp * 0.8);
+  // Path arrow (pointing forward)
+  var pathD3 = "M " + shopperX + " " + (shopperY - 80) + " L " + shopperX + " " + (shopperY - 180);
+  s += pathTag(pathD3, BLUE, 10, arrowOp);
+  s += line(shopperX - 20, shopperY - 150, shopperX, shopperY - 180, BLUE, 10, arrowOp);
+  s += line(shopperX + 20, shopperY - 150, shopperX, shopperY - 180, BLUE, 10, arrowOp);
+
+  s += shopper(shopperX, shopperY, AMBER, 'looking', 1);
+
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE — losing moments stack into a tall coral memory column */
+function scene5(u) {
+  var s = '';
+  var shopperX = AISLE_CENTER_X;
+  var shopperY = SHOPPER_Y;
+
+  // Signal blue system grid remains as backdrop
+  var aisleTopW = 180, aisleBotW = 500;
+  var aisleTopY = TOP + 100, aisleBotY = BOT - 100;
+  var gridColor = BLUE;
+  var gridLineW = 10;
+  var gridOp = 0.8;
+
+  s += line(AISLE_CENTER_X - aisleBotW / 2, aisleBotY, AISLE_CENTER_X - aisleTopW / 2, aisleTopY, gridColor, gridLineW, gridOp);
+  s += line(AISLE_CENTER_X + aisleBotW / 2, aisleBotY, AISLE_CENTER_X + aisleTopW / 2, aisleTopY, gridColor, gridLineW, gridOp);
+  s += line(AISLE_CENTER_X, aisleBotY, AISLE_CENTER_X, aisleTopY, gridColor, gridLineW, gridOp * 0.6);
+
+  for (var i = 0; i < 6; i++) {
+    var p = i / 5;
+    var y = lerp(aisleBotY, aisleTopY, easeIn(p));
+    var lx = lerp(AISLE_CENTER_X - aisleBotW / 2, AISLE_CENTER_X - aisleTopW / 2, p);
+    var rx = lerp(AISLE_CENTER_X + aisleBotW / 2, AISLE_CENTER_X + aisleTopW / 2, p);
+    s += line(lx, y, rx, y, gridColor, gridLineW, gridOp * (1 - p * 0.3));
+  }
+
+  // Shopper moves slowly past shelves
+  var shopperMoveX = lerp(AISLE_CENTER_X, AISLE_CENTER_X + 100, smooth(u));
+  var shopperMoveY = lerp(SHOPPER_Y, SHOPPER_Y - 50, smooth(u));
+  s += shopper(shopperMoveX, shopperMoveY, AMBER, 'walking', 1);
+
+  // Shopping cart appears and begins to fill
+  var cartX = shopperMoveX - 120;
+  var cartY = shopperMoveY + 50;
+  var cartFillLevel = ramp(u, 0.1, 0.9);
+  s += cart(cartX, cartY, AMBER, cartFillLevel, 1);
+
+  // Shelves with coral red-outlined, unplanned items
+  var shelfW = 200, shelfH = 500;
+  var shelfXOffset = aisleBotW / 2 + shelfW / 2 + 50;
+  s += shelf(AISLE_CENTER_X - shelfXOffset, CY + 100, shelfW, shelfH, DIM, 0.2);
+  s += shelf(AISLE_CENTER_X + shelfXOffset, CY + 100, shelfW, shelfH, DIM, 0.2);
+
+  var numItems = 6;
+  for (var i = 0; i < numItems; i++) {
+    var itemX = AISLE_CENTER_X - shelfXOffset + (rnd(i) - 0.5) * (shelfW - 60);
+    var itemY = CY + 100 - shelfH / 2 + 50 + i * 80;
+    var itemSize = 40;
+
+    var itemBought = ramp(u, (i / numItems) * 0.8, (i / numItems) * 0.8 + 0.2); // Each item bought sequentially
+    var itemCol = lerpColor(CORAL, AMBER, itemBought);
+    var itemStroke = lerp(8, 0, itemBought); // Coral outline fades as it's "bought"
+    var itemFillOp = lerp(0.1, 0.9, itemBought);
+
+    // Unplanned item on shelf
+    s += rrectStroke(itemX, itemY, itemSize, itemSize * 1.2, itemSize * 0.2, CORAL, 8, 1 - itemBought);
+    s += rrect(itemX, itemY, itemSize, itemSize * 1.2, itemSize * 0.2, DIM, (1 - itemBought) * 0.4);
+
+    // Item moving into cart (briefly visible)
+    if (itemBought > 0 && itemBought < 1) {
+      var moveX = lerp(itemX, cartX + (rnd(i + 20) - 0.5) * 60, easeOut(itemBought));
+      var moveY = lerp(itemY, cartY - 20 + (rnd(i + 30) - 0.5) * 40, easeOut(itemBought));
+      s += rrect(moveX, moveY, itemSize * 0.8, itemSize, itemSize * 0.1, AMBER, 0.8);
+    }
+  }
+
+  function lerpColor(a, b, t) {
+    var ah = parseInt(a.replace(/#/g, '0x'), 16),
+        ar = ah >> 16, ag = (ah >> 8) & 0xff, ab = ah & 0xff,
+        bh = parseInt(b.replace(/#/g, '0x'), 16),
+        br = bh >> 16, bg = (bh >> 8) & 0xff, bb = bh & 0xff,
+        rr = ar + t * (br - ar),
+        rg = ag + t * (bg - ag),
+        rb = ab + t * (bb - ab);
+    return '#' + ((1 << 24) + (rr << 16) + (rg << 8) + rb | 0).toString(16).slice(1);
+  }
+
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE — with new understanding */
+function scene6(u) {
+  var s = '';
+  var shopperX = AISLE_CENTER_X;
+  var shopperY = SHOPPER_Y;
+
+  // Return to wide aisle perspective, but with a subtle signal blue overlay
+  var aisleTopW = 200, aisleBotW = 600;
+  var aisleTopY = TOP + 100, aisleBotY = BOT - 100;
+
+  // White aisle lines
+  s += line(AISLE_CENTER_X - aisleBotW / 2, aisleBotY, AISLE_CENTER_X - aisleTopW / 2, aisleTopY, WHITE, 8, 0.8);
+  s += line(AISLE_CENTER_X + aisleBotW / 2, aisleBotY, AISLE_CENTER_X + aisleTopW / 2, aisleTopY, WHITE, 8, 0.8);
+
+  // Floor lines
+  for (var i = 0; i < 4; i++) {
+    var p = i / 3;
+    var y = lerp(aisleBotY, aisleTopY, easeIn(p));
+    var lx = lerp(AISLE_CENTER_X - aisleBotW / 2, AISLE_CENTER_X - aisleTopW / 2, p);
+    var rx = lerp(AISLE_CENTER_X + aisleBotW / 2, AISLE_CENTER_X + aisleTopW / 2, p);
+    s += line(lx, y, rx, y, WHITE, 4, 0.3 * (1 - p * 0.5));
+  }
+
+  // Subtle signal blue grid overlay
+  var gridOp = lerp(0.8, 0.2, smooth(u)); // Grid fades to a subtle hint
+  var gridColor = BLUE;
+  var gridLineW = 4;
+
+  s += line(AISLE_CENTER_X - aisleBotW / 2, aisleBotY, AISLE_CENTER_X - aisleTopW / 2, aisleTopY, gridColor, gridLineW, gridOp);
+  s += line(AISLE_CENTER_X + aisleBotW / 2, aisleBotY, AISLE_CENTER_X + aisleTopW / 2, aisleTopY, gridColor, gridLineW, gridOp);
+  s += line(AISLE_CENTER_X, aisleBotY, AISLE_CENTER_X, aisleTopY, gridColor, gridLineW, gridOp * 0.6);
+
+  for (var i = 0; i < 6; i++) {
+    var p = i / 5;
+    var y = lerp(aisleBotY, aisleTopY, easeIn(p));
+    var lx = lerp(AISLE_CENTER_X - aisleBotW / 2, AISLE_CENTER_X - aisleTopW / 2, p);
+    var rx = lerp(AISLE_CENTER_X + aisleBotW / 2, AISLE_CENTER_X + aisleTopW / 2, p);
+    s += line(lx, y, rx, y, gridColor, gridLineW, gridOp * (1 - p * 0.3));
+  }
+
+  // Shelves (faintly visible)
+  var shelfW = 200, shelfH = 500;
+  var shelfXOffset = aisleBotW / 2 + shelfW / 2 + 50;
+  s += shelf(AISLE_CENTER_X - shelfXOffset, CY + 100, shelfW, shelfH, DIM, 0.1);
+  s += shelf(AISLE_CENTER_X + shelfXOffset, CY + 100, shelfW, shelfH, DIM, 0.1);
+
+  // Shopper walks with a new awareness (eye icon thought bubble)
+  var bob = Math.sin(u * Math.PI * 2) * 6;
+  s += shopper(shopperX, shopperY + bob, AMBER, 'aware', 1);
+
+  // Cart (still full, but now with amber items)
+  s += cart(shopperX - 120, shopperY + 50, AMBER, 1, 1);
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

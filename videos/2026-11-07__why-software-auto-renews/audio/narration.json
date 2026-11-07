@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You found that perfect software, promising to simplify your life. Signing up was a breeze: a few clicks, and your new digital tool was ready.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "Months pass. You're busy, using the software casually. Then, out of nowhere, a charge appears on your statement. A surprise auto-renewal.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "You think, 'Did I forget to cancel?' You scold yourself for not keeping track, feeling foolish for missing the deadline.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "But it's not just you. This system is designed to capture inertia, gently nudging you past the cancellation point.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "That forgotten renewal isn't a bug; it's a feature. Companies bank on you valuing convenience more than the effort to actively stop.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "Next time you sign up, you'll see the invisible system working. You'll understand the quiet incentive and act with clear intention.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]
