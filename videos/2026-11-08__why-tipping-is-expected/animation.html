@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why We Feel Pressured to Tip</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue  -> system / rule
+var AMBER = "#F2A93B";              // warm amber   -> customer / desire
+var CORAL = "#FF5B5B";              // coral red    -> naive model / false signal
+
+var DUR = 60;
+window.__duration = DUR;
+
+// Scene-specific constants
+var CUSTOMER_X = CX - 200;
+var CUSTOMER_Y = BOT - 180; // Base of customer figure (feet on ground)
+var SERVER_BASE_Y = BOT - 180; // Base of server figure
+var TABLE_X = CX;
+var TABLE_Y = CUSTOMER_Y - 50 - 50; // Top of table (CUSTOMER_Y is ground, 50 chair height, 50 gap)
+var CHECK_W = 320;
+var CHECK_H = 180;
+var CHECK_X = CX;
+var CHECK_Y = TABLE_Y + 10; // Check placed slightly below table center
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* Stick figure customer (sitting) */
+function customer(x, y, headCol, bodyCol, armAngle, headTilt, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = 24;
+  var bodyW = 60; // Torso width
+  var bodyH = 100; // Torso height
+  var seatH = 50; // Height of chair seat from floor (y)
+  var headY = y - seatH - bodyH - headR - 10; // Center of head
+  var bodyTopY = y - seatH - bodyH;
+  var bodyBotY = y - seatH;
+
+  // Head (apply headTilt to Y for looking down)
+  g += dot(x, headY + headTilt * 15, headR, headCol);
+
+  // Body (torso)
+  g += rrect(x, bodyTopY + bodyH / 2, bodyW, bodyH, 10, bodyCol, 1);
+
+  // Arms (from shoulder area, slightly forward)
+  var shoulderY = bodyTopY + 20;
+  var armLen = 60;
+  g += line(x - bodyW / 2 + 10, shoulderY, x - bodyW / 2 + 10 + Math.cos(armAngle) * armLen, shoulderY + Math.sin(armAngle) * armLen, bodyCol, 8);
+  g += line(x + bodyW / 2 - 10, shoulderY, x + bodyW / 2 - 10 + Math.cos(Math.PI - armAngle) * armLen, shoulderY + Math.sin(Math.PI - armAngle) * armLen, bodyCol, 8);
+
+  // Legs (bent, simple representation)
+  g += line(x - 18, bodyBotY, x - 36, y + 40, bodyCol, 8); // Thigh to foot
+  g += line(x + 18, bodyBotY, x + 36, y + 40, bodyCol, 8);
+
+  g += '</g>';
+  return g;
+}
+
+/* Stick figure server (standing) */
+function server(x, y, headCol, bodyCol, armAngle, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = 24;
+  var bodyH = 100; // Torso height
+  var legH = 100; // Leg length
+  var headY = y - legH - bodyH - headR - 10; // Center of head
+  var bodyTopY = y - legH - bodyH;
+  var bodyBotY = y - legH;
+  var shoulderY = bodyTopY + 20;
+
+  // Head
+  g += dot(x, headY, headR, headCol);
+  // Body
+  g += line(x, bodyTopY, x, bodyBotY, bodyCol, 8);
+  // Arms
+  var armLen = 70;
+  g += line(x - 20, shoulderY, x - 20 + Math.cos(armAngle) * armLen, shoulderY + Math.sin(armAngle) * armLen, bodyCol, 8);
+  g += line(x + 20, shoulderY, x + 20 + Math.cos(Math.PI - armAngle) * armLen, shoulderY + Math.sin(Math.PI - armAngle) * armLen, bodyCol, 8);
+  // Legs
+  g += line(x - 15, bodyBotY, x - 15, y, bodyCol, 8);
+  g += line(x + 15, bodyBotY, x + 15, y, bodyCol, 8);
+
+  g += '</g>';
+  return g;
+}
+
+/* Table element */
+function table(cx, cy, w, h, legH, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  // Table top
+  g += rrect(cx, cy, w, h, 15, col, 1);
+  // Legs
+  g += line(cx - w / 2 + 30, cy + h / 2, cx - w / 2 + 30, cy + h / 2 + legH, col, sw);
+  g += line(cx + w / 2 - 30, cy + h / 2, cx + w / 2 - 30, cy + h / 2 + legH, col, sw);
+  g += '</g>';
+  return g;
+}
+
+/* Check/Bill element */
+function check(cx, cy, w, h, col, sw, fillCol, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  if (fillCol) {
+    g += rrect(cx, cy, w, h, 10, fillCol, op);
+  }
+  g += rrectStroke(cx, cy, w, h, 10, col, sw, op);
+  g += '</g>';
+  return g;
+}
+
+/* Glyph: Question Mark */
+function glyphQuestion(cx, cy, size, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var d = "M " + cx + " " + (cy - size * 0.4) +
+          " Q " + (cx + size * 0.4) + " " + (cy - size * 0.4) + " " + (cx + size * 0.4) + " " + (cy - size * 0.1) +
+          " C " + (cx + size * 0.4) + " " + (cy + size * 0.1) + " " + (cx + size * 0.1) + " " + (cy + size * 0.2) + " " + cx + " " + (cy + size * 0.05) +
+          " L " + cx + " " + (cy + size * 0.15); // main curve
+  d += " M " + cx + " " + (cy + size * 0.3) + " L " + cx + " " + (cy + size * 0.3 + 1); // dot
+  return pathTag(d, col, sw, op);
+}
+
+/* Glyph: Plus sign (for "Extra?") */
+function glyphPlus(cx, cy, size, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += line(cx - size / 2, cy, cx + size / 2, cy, col, sw);
+  g += line(cx, cy - size / 2, cx, cy + size / 2, col, sw);
+  g += '</g>';
+  return g;
+}
+
+/* Glyph: Simple rectangle for "Base Wage" or "Tips" label */
+function glyphLabelRect(cx, cy, w, h, col, sw, fillCol, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  if (fillCol) {
+    g += rrect(cx, cy, w, h, 4, fillCol, op);
+  }
+  g += rrectStroke(cx, cy, w, h, 4, col, sw, op);
+  g += '</g>';
+  return g;
+}
+
+/* Glyph: Business icon (simple building outline) */
+function glyphBusiness(cx, cy, size, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += line(cx - size / 2, cy + size / 2, cx + size / 2, cy + size / 2, col, sw); // Base
+  g += line(cx - size / 2, cy + size / 2, cx - size / 2, cy - size / 2, col, sw); // Left wall
+  g += line(cx + size / 2, cy + size / 2, cx + size / 2, cy - size / 2, col, sw); // Right wall
+  g += line(cx - size / 2, cy - size / 2, cx, cy - size, col, sw); // Left roof
+  g += line(cx + size / 2, cy - size / 2, cx, cy - size, col, sw); // Right roof
+  g += line(cx - size / 4, cy + size / 2, cx - size / 4, cy, col, sw); // Door
+  g += line(cx + size / 4, cy + size / 2, cx + size / 4, cy, col, sw); // Door
+  g += '</g>';
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var cameraPanX = lerp(0, 20, smooth(ramp(u, 0, 0.4))) - lerp(0, 20, smooth(ramp(u, 0.6, 1.0)));
+  s += '<g ' + camera(1.0, cameraPanX, 0) + '>';
+
+  s += table(TABLE_X, TABLE_Y, 600, 120, 300, WHITE, 8, 1);
+  s += customer(CUSTOMER_X, CUSTOMER_Y, AMBER, WHITE, Math.PI * 0.7, 0, 1); // Arms resting, head straight
+
+  // Server clearing plate
+  var serverEnterU = ramp(u, 0.05, 0.3); // Server enters
+  var serverExitU = ramp(u, 0.6, 0.9);   // Server exits
+  var serverX = lerp(W + 100, CUSTOMER_X + 280, serverEnterU) - lerp(0, W + 100, serverExitU);
+  serverX = clamp(serverX, CUSTOMER_X + 280, W + 100); // Server stays for a bit then exits
+
+  var serverOp = clamp(serverEnterU - serverExitU, 0, 1);
+  if (serverOp > 0.02) {
+    s += server(serverX, SERVER_BASE_Y, WHITE, WHITE, Math.PI * 0.7, serverOp);
+    // Plate in server's hand, moves with server
+    var plateY = TABLE_Y - 40;
+    var plateX = serverX - 60;
+    var plateOp = clamp(serverOp * 2, 0, 1);
+    s += ring(plateX, plateY, 40, WHITE, 6, plateOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var zoom = lerp(1.0, 1.2, smooth(ramp(u, 0.1, 0.5)));
+  var camY = lerp(0, (CHECK_Y - CY) * 0.2, smooth(ramp(u, 0.1, 0.5))); // Adjust camera Y to center check
+  s += '<g ' + camera(zoom, 0, camY) + '>';
+
+  s += table(TABLE_X, TABLE_Y, 600, 120, 300, WHITE, 8, 1);
+
+  // Check drops onto table
+  var checkDropU = ramp(u, 0.0, 0.3); // Check drops
+  var checkY = lerp(TOP, CHECK_Y, easeOut(checkDropU));
+  var checkOp = clamp(checkDropU * 2, 0, 1);
+
+  s += check(CHECK_X, checkY, CHECK_W, CHECK_H, WHITE, 7, null, checkOp);
+  // Blank line on check
+  var lineY = CHECK_Y + CHECK_H / 2 - 40;
+  s += line(CHECK_X - CHECK_W / 2 + 60, lineY, CHECK_X + CHECK_W / 2 - 60, lineY, DIM, 4, checkOp);
+
+  // Customer looks down
+  var headTilt = lerp(0, 1, smooth(ramp(u, 0.2, 0.6)));
+  s += customer(CUSTOMER_X, CUSTOMER_Y, AMBER, WHITE, Math.PI * 0.7, headTilt, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var zoom = 1.2;
+  var camY = (CHECK_Y - CY) * 0.2;
+  s += '<g ' + camera(zoom, 0, camY) + '>';
+
+  s += table(TABLE_X, TABLE_Y, 600, 120, 300, WHITE, 8, 1);
+  s += check(CHECK_X, CHECK_Y, CHECK_W, CHECK_H, WHITE, 7, null, 1);
+  var lineY = CHECK_Y + CHECK_H / 2 - 40;
+  s += line(CHECK_X - CHECK_W / 2 + 60, lineY, CHECK_X + CHECK_W / 2 - 60, lineY, DIM, 4, 1);
+
+  // Thought bubble with '?' and 'Extra?' glyphs
+  var bubblePop = smooth(ramp(u, 0.05, 0.2));
+  var bubbleOp = clamp(bubblePop * 2, 0, 1);
+  var bubbleScale = lerp(0.5, 1.0, bubblePop);
+  var bubbleShake = Math.sin(u * 40) * 4 * pulse(u, 0.5, 0.3);
+
+  var bubbleCX = CUSTOMER_X + 160;
+  var bubbleCY = TABLE_Y - 200;
+  var bubbleW = 200, bubbleH = 120;
+
+  if (bubbleOp > 0.02) {
+    s += '<g transform="translate(' + bubbleShake + ' 0) scale(' + bubbleScale + ')" transform-origin="' + bubbleCX + ' ' + bubbleCY + '">';
+    s += rrectStroke(bubbleCX, bubbleCY, bubbleW, bubbleH, 20, CORAL, 8, bubbleOp);
+    s += glyphQuestion(bubbleCX - 40, bubbleCY, 40, CORAL, 8, bubbleOp);
+    s += glyphPlus(bubbleCX + 40, bubbleCY, 40, CORAL, 8, bubbleOp);
+    s += '</g>';
+  }
+
+  // Customer head shake
+  var headShake = Math.sin(u * Math.PI * 8) * 5 * pulse(u, 0.5, 0.3);
+  s += customer(CUSTOMER_X + headShake, CUSTOMER_Y, AMBER, WHITE, Math.PI * 0.7, 1, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var zoom = lerp(1.2, 1.1, smooth(ramp(u, 0.0, 0.3)));
+  var camY = lerp((CHECK_Y - CY) * 0.2, (CHECK_Y - CY) * 0.1, smooth(ramp(u, 0.0, 0.3)));
+  s += '<g ' + camera(zoom, 0, camY) + '>';
+
+  s += table(TABLE_X, TABLE_Y, 600, 120, 300, WHITE, 8, 1);
+  s += customer(CUSTOMER_X, CUSTOMER_Y, AMBER, WHITE, Math.PI * 0.7, 1, 1);
+
+  // Check transforms and splits
+  var splitProg = smooth(ramp(u, 0.05, 0.4)); // Progress of splitting
+  var checkOp = 1 - splitProg; // Original check fades
+  var baseWageH = CHECK_H * 0.3; // 30% for base wage
+  var tipsH = CHECK_H * 0.7;     // 70% for tips
+
+  // Original check (fading out)
+  s += check(CHECK_X, CHECK_Y, CHECK_W, CHECK_H, WHITE, 7, null, checkOp);
+  var lineY = CHECK_Y + CHECK_H / 2 - 40;
+  s += line(CHECK_X - CHECK_W / 2 + 60, lineY, CHECK_X + CHECK_W / 2 - 60, lineY, DIM, 4, checkOp);
+
+  // Split parts
+  var baseWageY = CHECK_Y - tipsH / 2 - baseWageH / 2 - lerp(0, 10, splitProg);
+  var tipsY = CHECK_Y + baseWageH / 2 + tipsH / 2 + lerp(0, 10, splitProg);
+
+  var partsOp = splitProg;
+  if (partsOp > 0.02) {
+    s += rrectStroke(CHECK_X, baseWageY, CHECK_W, baseWageH, 10, BLUE, 8, partsOp);
+    s += rrectStroke(CHECK_X, tipsY, CHECK_W, tipsH, 10, BLUE, 8, partsOp);
+
+    // Labels (simple rectangles)
+    var labelW = 100, labelH = 30;
+    s += glyphLabelRect(CHECK_X, baseWageY, labelW, labelH, WHITE, 4, BLUE, partsOp);
+    s += glyphLabelRect(CHECK_X, tipsY, labelW, labelH, WHITE, 4, BLUE, partsOp);
+  }
+
+  // Business icon in background
+  var businessOp = smooth(ramp(u, 0.5, 0.8));
+  if (businessOp > 0.02) {
+    s += glyphBusiness(CX + 300, TOP + 300, 100, DIM, 8, businessOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var zoom = lerp(1.1, 1.0, smooth(ramp(u, 0.0, 0.3)));
+  var camY = lerp((CHECK_Y - CY) * 0.1, 0, smooth(ramp(u, 0.0, 0.3)));
+  s += '<g ' + camera(zoom, 0, camY) + '>';
+
+  s += table(TABLE_X, TABLE_Y, 600, 120, 300, WHITE, 8, 1);
+
+  // Check reforms
+  var reformProg = smooth(ramp(u, 0.05, 0.4)); // Progress of reforming
+  var baseWageH = CHECK_H * 0.3;
+  var tipsH = CHECK_H * 0.7;
+
+  // Split parts (fading out)
+  var baseWageY = CHECK_Y - tipsH / 2 - baseWageH / 2 - lerp(10, 0, reformProg);
+  var tipsY = CHECK_Y + baseWageH / 2 + tipsH / 2 + lerp(10, 0, reformProg);
+  var partsOp = 1 - reformProg;
+  if (partsOp > 0.02) {
+    s += rrectStroke(CHECK_X, baseWageY, CHECK_W, baseWageH, 10, BLUE, 8, partsOp);
+    s += rrectStroke(CHECK_X, tipsY, CHECK_W, tipsH, 10, BLUE, 8, partsOp);
+    var labelW = 100, labelH = 30;
+    s += glyphLabelRect(CHECK_X, baseWageY, labelW, labelH, WHITE, 4, BLUE, partsOp);
+    s += glyphLabelRect(CHECK_X, tipsY, labelW, labelH, WHITE, 4, BLUE, partsOp);
+  }
+
+  // Reformed check with amber highlight
+  var newCheckOp = reformProg;
+  if (newCheckOp > 0.02) {
+    s += check(CHECK_X, CHECK_Y, CHECK_W, CHECK_H, WHITE, 7, null, newCheckOp);
+    // Amber highlight for tips section
+    var amberH = tipsH * lerp(0.8, 1.0, smooth(ramp(u, 0.4, 0.8))); // Amber grows
+    var amberY = CHECK_Y + CHECK_H / 2 - amberH / 2;
+    s += rrect(CHECK_X, amberY, CHECK_W - 20, amberH - 20, 8, AMBER, newCheckOp);
+  }
+
+  // Customer burdened (slumped shoulders, head down more)
+  var burden = smooth(ramp(u, 0.3, 0.7));
+  var customerX = CUSTOMER_X + lerp(0, 10, burden);
+  var customerY = CUSTOMER_Y + lerp(0, 20, burden);
+  var armAngle = lerp(Math.PI * 0.7, Math.PI * 0.8, burden);
+  var headTilt = lerp(1, 1.5, burden); // More head tilt down
+  s += customer(customerX, customerY, AMBER, WHITE, armAngle, headTilt, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  s += table(TABLE_X, TABLE_Y, 600, 120, 300, WHITE, 8, 1);
+
+  // Check with amber highlight (fading out)
+  var amberFade = 1 - smooth(ramp(u, 0.0, 0.3));
+  s += check(CHECK_X, CHECK_Y, CHECK_W, CHECK_H, WHITE, 7, null, amberFade);
+  var tipsH = CHECK_H * 0.7;
+  var amberH = tipsH * lerp(1.0, 0.8, smooth(ramp(u, 0.0, 0.3)));
+  var amberY = CHECK_Y + CHECK_H / 2 - amberH / 2;
+  s += rrect(CHECK_X, amberY, CHECK_W - 20, amberH - 20, 8, AMBER, amberFade);
+
+  // Check with signed line
+  var signedCheckOp = smooth(ramp(u, 0.2, 0.5));
+  if (signedCheckOp > 0.02) {
+    s += check(CHECK_X, CHECK_Y, CHECK_W, CHECK_H, WHITE, 7, null, signedCheckOp);
+    var lineY = CHECK_Y + CHECK_H / 2 - 40;
+    // Signing animation
+    var signProg = smooth(ramp(u, 0.3, 0.6));
+    var signX2 = lerp(CHECK_X - CHECK_W / 2 + 60, CHECK_X + CHECK_W / 2 - 60, signProg);
+    s += line(CHECK_X - CHECK_W / 2 + 60, lineY, signX2, lineY + Math.sin(signProg * Math.PI * 3) * 5, AMBER, 4, signedCheckOp);
+  }
+
+  // Customer looks up, knowing expression
+  var headTilt = lerp(1.5, 0, smooth(ramp(u, 0.4, 0.7))); // Head comes up
+  var armAngle = lerp(Math.PI * 0.8, Math.PI * 0.7, smooth(ramp(u, 0.4, 0.7)));
+  s += customer(CUSTOMER_X, CUSTOMER_Y, AMBER, WHITE, armAngle, headTilt, 1);
+
+  // Server takes check
+  var serverEnterU = ramp(u, 0.7, 0.9); // Server enters to take check
+  var serverX = lerp(W + 100, CUSTOMER_X + 280, serverEnterU);
+  var serverOp = clamp(serverEnterU, 0, 1);
+  if (serverOp > 0.02) {
+    s += server(serverX, SERVER_BASE_Y, WHITE, WHITE, Math.PI * 0.7, serverOp);
+    // Check moves with server
+    var checkMoveX = lerp(CHECK_X, serverX - 60, serverEnterU);
+    var checkMoveY = lerp(CHECK_Y, TABLE_Y - 40, serverEnterU);
+    s += check(checkMoveX, checkMoveY, CHECK_W, CHECK_H, WHITE, 7, null, serverOp);
+    var signedLineY = checkMoveY + CHECK_H / 2 - 40;
+    s += line(checkMoveX - CHECK_W / 2 + 60, signedLineY, checkMoveX + CHECK_W / 2 - 60, signedLineY, AMBER, 4, serverOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

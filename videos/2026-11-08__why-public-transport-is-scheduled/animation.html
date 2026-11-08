@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Public Transport Runs on a Schedule</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var BLACK = "#000000";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue  -> system/order
+var AMBER = "#F2A93B";              // warm amber   -> hero/riders
+var CORAL = "#FF5B5B";              // coral red    -> chaos/naive model
+
+var DUR = 60;
+window.__duration = DUR;
+
+var STICK_H = 240; // Hero stick figure height
+var HERO_Y_FEET = BOT - 180; // Hero's feet position (bottom of feet)
+var BUS_W = 200;
+var BUS_H = 120;
+var BUS_STOP_X = CX - 250;
+var BUS_STOP_Y_TOP = TOP + 100;
+var BUS_STOP_Y_BOT = BOT - 100;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+// function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); } // Not used
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function chevron(x, y, size, col, op) {
+  var d = "M " + (x - size) + " " + (y + size * 0.55) + " L " + x + " " + (y - size * 0.55) + " L " + (x + size) + " " + (y + size * 0.55);
+  return pathTag(d, col, 14, op);
+}
+
+// Stick figure: h is height from feet to top of head. y is the base of the feet.
+function stickFigure(x, y, h, color, pose, op) {
+  var headR = h * 0.12;
+  var bodyLen = h * 0.4;
+  var armLen = h * 0.25;
+  var legLen = h * 0.35;
+  var sw = 8;
+  var g = '<g opacity="' + (op == null ? 1 : op) + '">';
+
+  var headY = y - h + headR;
+  var neckY = headY + headR;
+  var bodyTopY = neckY;
+  var bodyBotY = bodyTopY + bodyLen;
+  var crotchY = bodyBotY;
+
+  g += dot(x, headY, headR, color); // Head
+
+  // Body
+  g += line(x, bodyTopY, x, bodyBotY, color, sw);
+
+  // Arms and Legs depend on pose
+  switch (pose) {
+    case 'impatient': // Tapping foot, looking at watch
+      g += line(x, bodyTopY + armLen * 0.2, x - armLen * 0.8, bodyTopY + armLen * 0.8, color, sw); // Left arm down
+      g += line(x, bodyTopY + armLen * 0.2, x + armLen * 0.5, bodyTopY + armLen * 0.5, color, sw); // Right arm bent
+      g += line(x + armLen * 0.5, bodyTopY + armLen * 0.5, x + armLen * 0.5, bodyTopY + armLen * 0.8, color, sw); // Right forearm down (for watch)
+      g += line(x, crotchY, x - legLen * 0.4, crotchY + legLen, color, sw); // Left leg straight
+      g += line(x, crotchY, x + legLen * 0.2, crotchY + legLen * 0.8, color, sw); // Right leg bent (tapping)
+      g += line(x + legLen * 0.2, crotchY + legLen * 0.8, x + legLen * 0.2 + legLen * 0.2, crotchY + legLen * 0.8, color, sw); // Foot
+      break;
+    case 'frustrated': // Shaking head, arms akimbo
+      g += line(x, bodyTopY + armLen * 0.2, x - armLen * 0.8, bodyTopY + armLen * 0.2, color, sw); // Left arm out
+      g += line(x, bodyTopY + armLen * 0.2, x + armLen * 0.8, bodyTopY + armLen * 0.2, color, sw); // Right arm out
+      g += line(x, crotchY, x - legLen * 0.4, crotchY + legLen, color, sw); // Left leg
+      g += line(x, crotchY, x + legLen * 0.4, crotchY + legLen, color, sw); // Right leg
+      break;
+    case 'confused-wave': // Waving arms, slightly bent legs
+      g += line(x, bodyTopY + armLen * 0.2, x - armLen * 0.6, bodyTopY - armLen * 0.4, color, sw); // Left arm up
+      g += line(x, bodyTopY + armLen * 0.2, x + armLen * 0.6, bodyTopY - armLen * 0.4, color, sw); // Right arm up
+      g += line(x, crotchY, x - legLen * 0.2, crotchY + legLen * 0.8, color, sw); // Left leg bent
+      g += line(x, crotchY, x + legLen * 0.2, crotchY + legLen * 0.8, color, sw); // Right leg bent
+      break;
+    case 'confident-walk': // Striding forward
+      g += line(x, bodyTopY + armLen * 0.2, x - armLen * 0.6, bodyTopY + armLen * 0.6, color, sw); // Left arm back
+      g += line(x, bodyTopY + armLen * 0.2, x + armLen * 0.6, bodyTopY - armLen * 0.2, color, sw); // Right arm forward
+      g += line(x, crotchY, x - legLen * 0.2, crotchY + legLen * 0.8, color, sw); // Left leg bent
+      g += line(x, crotchY, x + legLen * 0.4, crotchY + legLen, color, sw); // Right leg forward
+      break;
+    case 'sitting-bus': // Sitting inside a bus
+      var sitY = y - headR * 0.5; // Adjusted for sitting
+      g += dot(x, sitY - headR, headR, color); // Head
+      g += line(x, sitY - headR * 0.5, x, sitY + bodyLen * 0.3, color, sw); // Body shorter
+      g += line(x, sitY + bodyLen * 0.3, x - armLen * 0.5, sitY + bodyLen * 0.3, color, sw); // Arms on lap
+      g += line(x, sitY + bodyLen * 0.3, x + armLen * 0.5, sitY + bodyLen * 0.3, color, sw);
+      g += line(x, sitY + bodyLen * 0.3, x - legLen * 0.4, sitY + bodyLen * 0.3 + legLen * 0.3, color, sw); // Legs bent
+      g += line(x, sitY + bodyLen * 0.3, x + legLen * 0.4, sitY + bodyLen * 0.3 + legLen * 0.3, color, sw);
+      break;
+    case 'disembarking': // Stepping off bus, happy
+      g += line(x, bodyTopY + armLen * 0.2, x - armLen * 0.4, bodyTopY - armLen * 0.2, color, sw); // Left arm slightly up
+      g += line(x, bodyTopY + armLen * 0.2, x + armLen * 0.4, bodyTopY - armLen * 0.2, color, sw); // Right arm slightly up
+      g += line(x, crotchY, x - legLen * 0.2, crotchY + legLen * 0.8, color, sw); // Left leg bent
+      g += line(x, crotchY, x + legLen * 0.4, crotchY + legLen, color, sw); // Right leg stepping down
+      break;
+    default: // Default standing pose
+      g += line(x, bodyTopY + armLen * 0.2, x - armLen * 0.6, bodyTopY + armLen * 0.6, color, sw);
+      g += line(x, bodyTopY + armLen * 0.2, x + armLen * 0.6, bodyTopY + armLen * 0.6, color, sw);
+      g += line(x, crotchY, x - legLen * 0.4, crotchY + legLen, color, sw);
+      g += line(x, crotchY, x + legLen * 0.4, crotchY + legLen, color, sw);
+      break;
+  }
+  g += '</g>';
+  return g;
+}
+
+// Bus icon
+function busIcon(x, y, w, h, color, op) {
+  var sw = 8;
+  var g = '<g opacity="' + (op == null ? 1 : op) + '">';
+  // Body
+  g += rrect(x, y, w, h, 16, color, op);
+  // Windows (simple rectangles)
+  g += rrect(x - w * 0.25, y - h * 0.2, w * 0.3, h * 0.3, 6, WHITE, op * 0.6);
+  g += rrect(x + w * 0.25, y - h * 0.2, w * 0.3, h * 0.3, 6, WHITE, op * 0.6);
+  // Wheels (circles)
+  g += dot(x - w * 0.3, y + h * 0.4, w * 0.1, BLACK); // Wheels are black
+  g += dot(x + w * 0.3, y + h * 0.4, w * 0.1, BLACK);
+  g += '</g>';
+  return g;
+}
+
+// Clock icon
+function clockIcon(x, y, r, t_local, color, op) {
+  var sw = 7;
+  var g = '<g opacity="' + (op == null ? 1 : op) + '">';
+  g += ring(x, y, r, color, sw);
+  // Hour hand (short): t_local in [0,1] for 10s, maps to 0-12 hours for visual effect.
+  var hourAngle = (t_local * 12 * Math.PI * 2) - Math.PI / 2;
+  g += line(x, y, x + r * 0.4 * Math.cos(hourAngle), y + r * 0.4 * Math.sin(hourAngle), color, sw * 0.8);
+  // Minute hand (long): t_local in [0,1] for 10s, maps to 0-60 minutes for visual effect.
+  var minuteAngle = (t_local * 60 * Math.PI * 2) - Math.PI / 2;
+  g += line(x, y, x + r * 0.7 * Math.cos(minuteAngle), y + r * 0.7 * Math.sin(minuteAngle), color, sw * 0.8);
+  g += dot(x, y, sw * 0.4, color); // Center dot
+  g += '</g>';
+  return g;
+}
+
+// Bus stop pole
+function busStopPole(x, y_top, y_bot, color, op) {
+  var sw = 10;
+  var g = '<g opacity="' + (op == null ? 1 : op) + '">';
+  g += line(x, y_top, x, y_bot, color, sw);
+  g += line(x, y_top + 40, x + 60, y_top + 40, color, sw); // Small horizontal sign
+  g += dot(x + 60 + 20, y_top + 40, 12, color); // Dot on sign
+  g += '</g>';
+  return g;
+}
+
+// System ground (morphing hero element)
+function systemGround(u, sceneIdx, op) {
+  var s = '';
+  var sw = 10;
+  var y_ground = BOT - 100;
+  var y_mid = CY;
+
+  switch (sceneIdx) {
+    case 0: // S1: Simple ground line
+    case 1: // S2: Simple ground line
+      s += line(CX - 400, y_ground, CX + 400, y_ground, WHITE, sw, op);
+      break;
+    case 2: // S3: Chaotic coral red lines
+      var chaos_op = op * lerp(0.2, 0.8, u);
+      var num_lines = 15;
+      for (var i = 0; i < num_lines; i++) {
+        var x1 = CX - 400 + rnd(i) * 800;
+        var y1 = TOP + rnd(i + 1) * (BOT - TOP);
+        var x2 = CX - 400 + rnd(i + 2) * 800;
+        var y2 = TOP + rnd(i + 3) * (BOT - TOP);
+        s += line(x1, y1, x2, y2, CORAL, sw * 0.6, chaos_op * rnd(i + 4));
+      }
+      break;
+    case 3: // S4: Signal blue grid of routes
+      var grid_op = op * lerp(0.2, 1, u);
+      var grid_sw = lerp(sw * 0.6, sw, u);
+      // Horizontal lines
+      for (var i = 0; i < 4; i++) {
+        s += line(CX - 400, TOP + 200 + i * 300, CX + 400, TOP + 200 + i * 300, BLUE, grid_sw, grid_op);
+      }
+      // Vertical lines
+      for (var i = 0; i < 3; i++) {
+        s += line(CX - 300 + i * 300, TOP + 100, CX - 300 + i * 300, BOT - 100, BLUE, grid_sw, grid_op);
+      }
+      break;
+    case 4: // S5: Single blue route, scrolling
+      var route_op = op * lerp(0.5, 1, u);
+      var route_sw = sw * 1.5;
+      var scroll_y = (u * 300) % 300; // Scrolls every 3 seconds
+      for (var i = -1; i < 5; i++) {
+        s += line(CX - 150, TOP + 100 + i * 300 + scroll_y, CX + 150, TOP + 100 + i * 300 + scroll_y, BLUE, route_sw, route_op * 0.4);
+        s += line(CX - 150, TOP + 100 + i * 300 + scroll_y, CX - 150, TOP + 100 + i * 300 + scroll_y + 100, BLUE, route_sw, route_op * 0.4);
+        s += line(CX + 150, TOP + 100 + i * 300 + scroll_y, CX + 150, TOP + 100 + i * 300 + scroll_y + 100, BLUE, route_sw, route_op * 0.4);
+      }
+      break;
+    case 5: // S6: Destination marker on a blue route
+      var dest_op = op * lerp(0.5, 1, u);
+      s += line(CX - 150, CY + 200, CX + 150, CY + 200, BLUE, sw * 1.5, dest_op * 0.4);
+      s += line(CX - 150, CY + 200, CX - 150, CY + 200 + 200, BLUE, sw * 1.5, dest_op * 0.4);
+      s += line(CX + 150, CY + 200, CX + 150, CY + 200 + 200, BLUE, sw * 1.5, dest_op * 0.4);
+      // Destination dot
+      s += dot(CX, CY + 100, 30, BLUE, dest_op);
+      s += chevron(CX, CY + 100, 40, WHITE, dest_op); // Arrow pointing down
+      break;
+  }
+  return s;
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1, 1.1, ramp(u, 0.2, 0.4)) * lerp(1.1, 1, ramp(u, 0.6, 0.8));
+  var tx = lerp(0, 100, ramp(u, 0.2, 0.4)) * lerp(1, 0, ramp(u, 0.6, 0.8));
+  var ty = lerp(0, -100, ramp(u, 0.2, 0.4)) * lerp(1, 0, ramp(u, 0.6, 0.8));
+  s += '<g ' + camera(scale, tx, ty) + '>';
+  s += systemGround(u, 0, 0.5);
+  s += busStopPole(BUS_STOP_X, BUS_STOP_Y_TOP, BUS_STOP_Y_BOT, WHITE, 1);
+  s += clockIcon(CX + 150, TOP + 200, 80, u * 0.3, WHITE, 1); // Clock hands move slowly
+  var foot_tap = Math.sin(u * Math.PI * 6) * 5; // Tapping foot animation
+  s += stickFigure(CX, HERO_Y_FEET + foot_tap, STICK_H, AMBER, 'impatient', 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += systemGround(u, 1, 0.5);
+  s += busStopPole(BUS_STOP_X, BUS_STOP_Y_TOP, BUS_STOP_Y_BOT, WHITE, 1);
+
+  // Empty bus zips past
+  var bus1_x = lerp(-BUS_W, W + BUS_W, easeIn(ramp(u, 0.0, 0.3)));
+  s += busIcon(bus1_x, CY - 100, BUS_W, BUS_H, WHITE, 1);
+
+  // Two buses appear close together
+  var bus_appear_t = ramp(u, 0.4, 0.7);
+  var bus_jiggle = Math.sin(u * Math.PI * 4) * 10;
+  var bus2_x = lerp(W + BUS_W, CX + 100, bus_appear_t);
+  var bus2_y = CY + 200;
+  s += busIcon(bus2_x, bus2_y, BUS_W, BUS_H, WHITE, bus_appear_t);
+  var bus3_x = lerp(W + BUS_W + 100, CX - 100 + bus_jiggle, bus_appear_t);
+  var bus3_y = CY + 200;
+  s += busIcon(bus3_x, bus3_y, BUS_W, BUS_H, WHITE, bus_appear_t);
+
+  var head_shake = Math.sin(u * Math.PI * 8) * 6 * ramp(u, 0.3, 0.5); // Hero shakes head
+  s += stickFigure(CX + head_shake, HERO_Y_FEET, STICK_H, AMBER, 'frustrated', 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var panX = Math.sin(u * Math.PI * 2) * 50;
+  var panY = Math.cos(u * Math.PI * 2) * 30;
+  s += '<g ' + camera(1.0, panX, panY) + '>';
+  s += systemGround(u, 2, 1); // Chaotic red lines
+
+  var num_chaos_buses = 10;
+  for (var i = 0; i < num_chaos_buses; i++) {
+    var bx = lerp(CX - 400 + rnd(i*2)*800, CX - 400 + rnd(i*2+1)*800, smooth(u));
+    var by = lerp(TOP + rnd(i*2+2)*(BOT-TOP), TOP + rnd(i*2+3)*(BOT-TOP), smooth(u));
+    s += rrect(bx, by, 100, 60, 10, CORAL, 0.8); // Smaller, simpler chaotic buses
+  }
+
+  // Multiple confused amber figures
+  var num_confused = 3;
+  for (var j = 0; j < num_confused; j++) {
+    var fx = CX - 300 + rnd(j*5) * 600;
+    var fy = HERO_Y_FEET - 100 + rnd(j*5+1) * 200;
+    s += stickFigure(fx, fy, 180, AMBER, 'confused-wave', 1);
+  }
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += systemGround(u, 3, 1); // Red lines untangle into blue grid
+
+  // White buses following grid lines
+  var num_grid_buses = 3;
+  for (var i = 0; i < num_grid_buses; i++) {
+    var bus_grid_x = CX - 300;
+    var bus_grid_y = TOP + 200 + (u * 300 + i * 300) % 900;
+    s += busIcon(bus_grid_x, bus_grid_y, BUS_W, BUS_H, WHITE, 1);
+    bus_grid_x = CX;
+    bus_grid_y = TOP + 200 + (u * 300 + i * 300 + 150) % 900;
+    s += busIcon(bus_grid_x, bus_grid_y, BUS_W, BUS_H, WHITE, 1);
+  }
+
+  // Hero walks confidently to a stop
+  var hero_walk_x = lerp(CX - 300, CX - 100, smooth(u));
+  var hero_walk_y_offset = Math.sin(u * Math.PI * 3) * 8; // Walking bob
+  s += stickFigure(hero_walk_x, HERO_Y_FEET + hero_walk_y_offset, STICK_H, AMBER, 'confident-walk', 1);
+  s += busStopPole(BUS_STOP_X, BUS_STOP_Y_TOP, BUS_STOP_Y_BOT, WHITE, 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var bus_scale = lerp(0.8, 1.0, smooth(u));
+  var bus_y_offset = Math.sin(u * Math.PI * 2) * 5; // Slight bus bob
+  s += '<g ' + camera(1.0, 0, bus_y_offset) + '>';
+  s += systemGround(u, 4, 0.4); // Scrolling blue route
+
+  // Large white bus with hero inside
+  s += busIcon(CX, CY, BUS_W * 2, BUS_H * 2, WHITE, 1);
+  s += stickFigure(CX - 50, CY + 100, STICK_H * 0.8, AMBER, 'sitting-bus', 1); // Hero sitting in bus
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += systemGround(u, 5, 0.4); // Destination marker on blue route
+
+  var bus_at_stop_x = CX;
+  var bus_at_stop_y = CY + 100;
+  var bus_depart_x = lerp(bus_at_stop_x, W + 300, ramp(u, 0.6, 0.9)); // Bus departs
+  s += busIcon(bus_depart_x, bus_at_stop_y, BUS_W * 2, BUS_H * 2, WHITE, 1);
+
+  // Hero disembarking
+  var hero_start_x = CX - 50;
+  var hero_start_y = CY + 100; // Sitting position
+  var hero_end_x = CX + 100;
+  var hero_end_y = HERO_Y_FEET; // Standing position
+  var hero_x = lerp(hero_start_x, hero_end_x, smooth(ramp(u, 0.0, 0.4)));
+  var hero_y = lerp(hero_start_y, hero_end_y, smooth(ramp(u, 0.0, 0.4)));
+  s += stickFigure(hero_x, hero_y, STICK_H, AMBER, 'disembarking', 1);
+
+  s += busStopPole(BUS_STOP_X, BUS_STOP_Y_TOP, BUS_STOP_Y_BOT, WHITE, 1);
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

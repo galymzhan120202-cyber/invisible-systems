@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Your Phone Battery Drains So Fast</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> invisible system/processes
+var AMBER = "#F2A93B";              // warm amber   -> user's desire/phone state
+var CORAL = "#FF5B5B";              // coral red    -> naive actions/depletion
+
+var DUR = 60;
+window.__duration = DUR;
+
+// Constants for stick figure and phone
+var PERSON_X = CX;
+var PERSON_Y = CY + 300; // Stick figure's body center. Feet around 1390, head around 1180.
+var PHONE_X = CX;
+var PHONE_HELD_Y = PERSON_Y - 280; // Phone center when held. Top 580, Bottom 1180.
+var PHONE_POCKET_Y = PERSON_Y + 100; // Phone center when in pocket.
+
+var PHONE_W = 320;
+var PHONE_H = 600;
+var PHONE_RX = 40;
+
+var BATTERY_W = 200;
+var BATTERY_H = 36;
+var BATTERY_X_OFFSET = 0;
+var BATTERY_Y_OFFSET = -220; // Relative to phone center
+var BATTERY_CAP_W = 15;
+var BATTERY_CAP_H = 24;
+
+// Stick figure dimensions
+var STICK_HEAD_R = 30;
+var STICK_BODY_H = 100;
+var STICK_LEG_L = 80;
+var STICK_ARM_L = 70;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+function hexToRgb(hex) {
+  var bigint = parseInt(hex.slice(1), 16);
+  return [(bigint >> 16) & 255, (bigint >> 8) & 255, bigint & 255];
+}
+function rgbToHex(r, g, b) {
+  return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
+}
+function lerpColor(c1, c2, t) {
+  var r1 = hexToRgb(c1), r2 = hexToRgb(c2);
+  var r = Math.round(lerp(r1[0], r2[0], t));
+  var g = Math.round(lerp(r1[1], r2[1], t));
+  var b = Math.round(lerp(r1[2], r2[2], t));
+  return rgbToHex(r, g, b);
+}
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom shape builders ---------- */
+function stickFigure(x, y, headTilt, armPose, op) { // armPose: 'up', 'down', 'pocket', 'confused', 'knowing'
+  var g = '<g opacity="' + op + '">';
+  var headX = x, headY = y - STICK_BODY_H / 2 - STICK_HEAD_R;
+
+  // Head
+  g += dot(headX + headTilt * 8, headY, STICK_HEAD_R, WHITE);
+
+  // Body
+  g += line(x, y - STICK_BODY_H / 2, x, y + STICK_BODY_H / 2, WHITE, 8);
+
+  // Legs
+  g += line(x, y + STICK_BODY_H / 2, x - 30, y + STICK_BODY_H / 2 + STICK_LEG_L, WHITE, 8);
+  g += line(x, y + STICK_BODY_H / 2, x + 30, y + STICK_BODY_H / 2 + STICK_LEG_L, WHITE, 8);
+
+  // Arms
+  var armY = y - STICK_BODY_H / 2 + 20;
+  var armX = x;
+  if (armPose === 'up') { // Happy, holding phone up
+    var angle = -Math.PI / 2.5;
+    g += line(armX, armY, armX + STICK_ARM_L * Math.cos(angle), armY + STICK_ARM_L * Math.sin(angle), WHITE, 8);
+    g += line(armX, armY, armX - STICK_ARM_L * Math.cos(angle), armY + STICK_ARM_L * Math.sin(angle), WHITE, 8);
+  } else if (armPose === 'down') { // Concerned, holding phone down
+    var angle = Math.PI / 4;
+    g += line(armX, armY, armX + STICK_ARM_L * Math.cos(angle), armY + STICK_ARM_L * Math.sin(angle), WHITE, 8);
+    g += line(armX, armY, armX - STICK_ARM_L * Math.cos(angle), armY + STICK_ARM_L * Math.sin(angle), WHITE, 8);
+  } else if (armPose === 'pocket') { // Phone in pocket
+    var angle = Math.PI / 2.5;
+    g += line(armX, armY, armX + STICK_ARM_L * Math.cos(angle) * 0.6, armY + STICK_ARM_L * Math.sin(angle) * 0.6, WHITE, 8);
+    g += line(armX, armY, armX - STICK_ARM_L * Math.cos(angle) * 0.6, armY + STICK_ARM_L * Math.sin(angle) * 0.6, WHITE, 8);
+  } else if (armPose === 'confused') { // Hand to head
+    g += line(armX, armY, armX + 50, armY - 30, WHITE, 8);
+    g += line(armX + 50, armY - 30, armX + 60, armY - 40, WHITE, 8);
+    g += line(armX, armY, armX - 50, armY + 30, WHITE, 8);
+  } else if (armPose === 'knowing') { // Arms relaxed
+    g += line(armX, armY, armX + 50, armY + 20, WHITE, 8);
+    g += line(armX, armY, armX - 50, armY + 20, WHITE, 8);
+  }
+
+  g += '</g>';
+  return g;
+}
+
+function phoneBody(x, y, op) {
+  return rrectStroke(x, y, PHONE_W, PHONE_H, PHONE_RX, WHITE, 10, op);
+}
+
+function batteryBar(x, y, level, color, op) {
+  var g = '<g opacity="' + op + '">';
+  var barW = BATTERY_W * clamp(level, 0, 1);
+  g += rrectStroke(x, y, BATTERY_W, BATTERY_H, 6, WHITE, 4); // Outline
+  g += rrect(x - (BATTERY_W - barW) / 2, y, barW, BATTERY_H - 8, 4, color); // Fill
+  g += rrect(x + BATTERY_W / 2 + BATTERY_CAP_W / 2, y, BATTERY_CAP_W, BATTERY_CAP_H, 4, WHITE); // Cap
+  g += '</g>';
+  return g;
+}
+
+function appIcon(x, y, size, color, op) {
+  return rrect(x, y, size, size, size * 0.2, color, op);
+}
+
+function closeX(x, y, size, color, sw, op) {
+  var s = '';
+  s += line(x - size / 2, y - size / 2, x + size / 2, y + size / 2, color, sw, op);
+  s += line(x - size / 2, y + size / 2, x + size / 2, y - size / 2, color, sw, op);
+  return s;
+}
+
+function networkNode(x, y, r, color, op) {
+  return dot(x, y, r, color, op);
+}
+
+function networkLine(x1, y1, x2, y2, color, sw, op) {
+  return line(x1, y1, x2, y2, color, sw, op);
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var batteryLevel = lerp(1, 0.5, smooth(u));
+  var headTilt = (u < 0.5) ? 0 : lerp(0, 0.5, smooth((u - 0.5) * 2));
+  var armPose = (u < 0.5) ? 'up' : 'down';
+
+  s += stickFigure(PERSON_X, PERSON_Y, headTilt, armPose, 1);
+  s += phoneBody(PHONE_X, PHONE_HELD_Y, 1);
+  s += batteryBar(PHONE_X + BATTERY_X_OFFSET, PHONE_HELD_Y + BATTERY_Y_OFFSET, batteryLevel, AMBER, 1);
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var phoneY = lerp(PHONE_HELD_Y, PHONE_POCKET_Y, smooth(u));
+  var batteryLevel = lerp(0.5, 0.4, smooth(u));
+  var stickFigureOpacity = lerp(1, 0.6, smooth(u)); // Fade out lower body as phone goes into pocket
+
+  s += stickFigure(PERSON_X, PERSON_Y, 0, 'pocket', stickFigureOpacity);
+  s += phoneBody(PHONE_X, phoneY, 1);
+  s += batteryBar(PHONE_X + BATTERY_X_OFFSET, phoneY + BATTERY_Y_OFFSET, batteryLevel, AMBER, 1);
+
+  // Faint background activity dots
+  var dotCount = 8;
+  var dotRadius = 8;
+  var dotSpeed = 100;
+  var dotsOp = ramp(u, 0.2, 0.8) * (1 - ramp(u, 0.7, 1.0)); // Fade in then out
+  for (var i = 0; i < dotCount; i++) {
+    var startY = phoneY + rnd(i * 3) * 100 - 50;
+    var startX = PHONE_X + rnd(i * 5) * 60 - 30;
+    var currentY = startY - (u * dotSpeed + rnd(i * 7) * 20) % 100;
+    var currentX = startX + Math.sin(u * 2 + i) * 10;
+    s += dot(currentX, currentY, dotRadius, DIM, dotsOp * ramp(currentY, phoneY - 100, phoneY + 100));
+  }
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var phoneY = lerp(PHONE_POCKET_Y, PHONE_HELD_Y, smooth(u));
+  var batteryLevel = lerp(0.4, 0.35, smooth(u));
+  var headTilt = lerp(0.5, 1, smooth(u)); // More confused
+  var armPose = 'confused';
+
+  s += stickFigure(PERSON_X, PERSON_Y, headTilt, armPose, 1);
+  s += phoneBody(PHONE_X, phoneY, 1);
+  s += batteryBar(PHONE_X + BATTERY_X_OFFSET, phoneY + BATTERY_Y_OFFSET, batteryLevel, AMBER, 1);
+
+  // App icons
+  var appIconsData = [
+    { x: PHONE_X - 50, y: phoneY - 80, color: BLUE },
+    { x: PHONE_X + 50, y: phoneY - 80, color: CORAL },
+    { x: PHONE_X - 50, y: phoneY + 20, color: AMBER },
+    { x: PHONE_X + 50, y: phoneY + 20, color: DIM }
+  ];
+  var appSize = 60;
+  var closePhase = ramp(u, 0.4, 0.9); // Phase for closing apps
+
+  for (var i = 0; i < appIconsData.length; i++) {
+    var app = appIconsData[i];
+    var appOp = 1 - ramp(closePhase, i * 0.2, i * 0.2 + 0.3);
+    s += appIcon(app.x, app.y, appSize, app.color, appOp);
+
+    var xOp = ramp(closePhase, i * 0.2 + 0.1, i * 0.2 + 0.4);
+    if (xOp > 0) {
+      s += closeX(app.x, app.y, appSize * 0.8, CORAL, 8, xOp);
+    }
+  }
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var zoom = lerp(1, 2.5, smooth(u));
+  var cameraShiftY = lerp(0, CY - (PHONE_HELD_Y + BATTERY_Y_OFFSET), smooth(u)); // Shift to center battery bar for zoom
+  var batteryLevel = lerp(0.35, 0.25, smooth(u));
+
+  s += '<g ' + camera(zoom, 0, cameraShiftY) + '>';
+  s += phoneBody(PHONE_X, PHONE_HELD_Y, 1);
+  s += batteryBar(PHONE_X + BATTERY_X_OFFSET, PHONE_HELD_Y + BATTERY_Y_OFFSET, batteryLevel, AMBER, 1);
+
+  // Internal blue network
+  var nodeCount = 10;
+  var nodeRadius = 10;
+  var networkOp = ramp(u, 0.2, 0.8);
+  var pulseFactor = Math.sin(u * Math.PI * 4) * 0.5 + 0.5; // Pulsing effect
+
+  var nodes = [];
+  var phoneInternalW = PHONE_W - 60;
+  var phoneInternalH = PHONE_H - 100;
+  for (var i = 0; i < nodeCount; i++) {
+    var nodeX = PHONE_X + rnd(i * 2) * phoneInternalW - phoneInternalW / 2;
+    var nodeY = PHONE_HELD_Y + rnd(i * 3) * phoneInternalH - phoneInternalH / 2;
+    nodes.push({ x: nodeX, y: nodeY });
+    s += networkNode(nodeX, nodeY, nodeRadius * (1 + pulseFactor * 0.3), BLUE, networkOp);
+  }
+
+  // Connect some nodes with lines
+  for (var i = 0; i < nodeCount; i++) {
+    var n1 = nodes[i];
+    var n2 = nodes[(i + 1) % nodeCount];
+    s += networkLine(n1.x, n1.y, n2.x, n2.y, BLUE, 6, networkOp * (0.5 + pulseFactor * 0.5));
+    if (i % 3 === 0) { // Add some more random connections
+      var n3 = nodes[(i + 3) % nodeCount];
+      s += networkLine(n1.x, n1.y, n3.x, n3.y, BLUE, 6, networkOp * (0.5 + pulseFactor * 0.5));
+    }
+  }
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var zoom = 2.5;
+  var cameraShiftY = CY - (PHONE_HELD_Y + BATTERY_Y_OFFSET); // Centered on battery bar
+  var batteryLevel = lerp(0.25, 0.05, smooth(u));
+  var batteryColor = lerpColor(AMBER, CORAL, smooth(u));
+
+  s += '<g ' + camera(zoom, 0, cameraShiftY) + '>';
+  s += phoneBody(PHONE_X, PHONE_HELD_Y, 1);
+  s += batteryBar(PHONE_X + BATTERY_X_OFFSET, PHONE_HELD_Y + BATTERY_Y_OFFSET, batteryLevel, batteryColor, 1);
+
+  // Internal blue network - more intense
+  var nodeCount = 12;
+  var nodeRadius = 12;
+  var networkOp = 1;
+  var pulseFactor = Math.sin(u * Math.PI * 8) * 0.5 + 0.5; // Faster pulsing
+
+  var nodes = [];
+  var phoneInternalW = PHONE_W - 60;
+  var phoneInternalH = PHONE_H - 100;
+  for (var i = 0; i < nodeCount; i++) {
+    var nodeX = PHONE_X + rnd(i * 2) * phoneInternalW - phoneInternalW / 2;
+    var nodeY = PHONE_HELD_Y + rnd(i * 3) * phoneInternalH - phoneInternalH / 2;
+    nodes.push({ x: nodeX, y: nodeY });
+    s += networkNode(nodeX, nodeY, nodeRadius * (1 + pulseFactor * 0.5), BLUE, networkOp);
+  }
+
+  // Connect nodes with lines - more lines, more intense
+  for (var i = 0; i < nodeCount; i++) {
+    var n1 = nodes[i];
+    var n2 = nodes[(i + 1) % nodeCount];
+    s += networkLine(n1.x, n1.y, n2.x, n2.y, BLUE, 8, networkOp * (0.7 + pulseFactor * 0.3));
+    if (i % 2 === 0) { // More random connections
+      var n3 = nodes[(i + 3) % nodeCount];
+      s += networkLine(n1.x, n1.y, n3.x, n3.y, BLUE, 8, networkOp * (0.7 + pulseFactor * 0.3));
+    }
+  }
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var zoom = lerp(2.5, 1, smooth(u));
+  var cameraShiftY = lerp(CY - (PHONE_HELD_Y + BATTERY_Y_OFFSET), 0, smooth(u));
+  var batteryLevel = lerp(0.05, 0.2, smooth(u));
+  var batteryColor = AMBER;
+  var networkOutlineOp = lerp(1, 0.3, smooth(u)); // Fade the outline slightly
+
+  s += '<g ' + camera(zoom, 0, cameraShiftY) + '>';
+  s += stickFigure(PERSON_X, PERSON_Y, -0.2, 'knowing', lerp(0, 1, smooth(u))); // Fade in stick figure
+  s += phoneBody(PHONE_X, PHONE_HELD_Y, 1);
+  s += batteryBar(PHONE_X + BATTERY_X_OFFSET, PHONE_HELD_Y + BATTERY_Y_OFFSET, batteryLevel, batteryColor, 1);
+
+  // Subtle blue network outline around the phone
+  s += rrectStroke(PHONE_X, PHONE_HELD_Y, PHONE_W + 20, PHONE_H + 20, PHONE_RX + 10, BLUE, 6, networkOutlineOp);
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
