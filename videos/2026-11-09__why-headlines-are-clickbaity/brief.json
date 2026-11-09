@@ -1,0 +1,15 @@
+{
+  "id": "why-headlines-are-clickbaity",
+  "slug": "2026-11-09__why-headlines-are-clickbaity",
+  "title_working": "Why News Headlines Are So Clickbaity",
+  "system": "attention economy metrics that prioritize clicks over content",
+  "cluster": "platforms-and-algorithms",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-11-09T15:59:12+00:00",
+  "produced_at": "2026-11-09T16:07:49+00:00",
+  "verify": "PASS",
+  "takeaway": "News headlines are clickbaity because platforms incentivize engagement metrics like clicks, forcing publishers to prioritize sensationalism over factual reporting.",
+  "animation_source": "llm"
+}

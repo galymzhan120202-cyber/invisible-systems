@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Coffee Shops Write Your Name on Cups</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / connection
+var AMBER = "#F2A93B";              // warm amber   -> YOU / desire / satisfaction
+var CORAL = "#FF5B5B";              // coral red    -> confusion / inefficiency
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom elements for this animation ---------- */
+
+// Stick figure (customer or barista)
+// pose: 'standing', 'walking', 'ordering', 'holdingCup', 'happy', 'confused', 'presenting'
+function stickFigure(x, y, col, pose, u, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = 30;
+  var bodyLen = 100;
+  var armLen = 60;
+  var legLen = 80;
+  var bodyX = x, bodyY = y - headR - bodyLen / 2;
+  var headY = y - headR - bodyLen;
+
+  g += dot(x, headY, headR, col); // Head
+
+  if (pose === 'walking') {
+    var armAngle = Math.sin(u * Math.PI * 4) * 0.4;
+    var legAngle = Math.sin(u * Math.PI * 4 + Math.PI / 2) * 0.4;
+    g += line(bodyX - 20, bodyY + 10, bodyX + 20, bodyY + 10, col, 10); // Shoulders
+    g += line(bodyX - 20, bodyY + 10, bodyX - 20 + armLen * Math.sin(armAngle), bodyY + 10 + armLen * Math.cos(armAngle), col, 10); // Arm L
+    g += line(bodyX + 20, bodyY + 10, bodyX + 20 - armLen * Math.sin(armAngle), bodyY + 10 + armLen * Math.cos(armAngle), col, 10); // Arm R
+    g += line(bodyX, bodyY + bodyLen / 2, bodyX - 15 + legLen * Math.sin(legAngle), bodyY + bodyLen / 2 + legLen * Math.cos(legAngle), col, 10); // Leg L
+    g += line(bodyX, bodyY + bodyLen / 2, bodyX + 15 - legLen * Math.sin(legAngle), bodyY + bodyLen / 2 + legLen * Math.cos(legAngle), col, 10); // Leg R
+  } else if (pose === 'ordering') {
+    g += line(bodyX, headY + headR, bodyX, bodyY + bodyLen / 2, col, 10); // Body
+    g += line(bodyX - 20, bodyY + 10, bodyX + 20, bodyY + 10, col, 10); // Shoulders
+    g += line(bodyX + 20, bodyY + 10, bodyX + 20 + armLen * 0.6, bodyY + 10 - armLen * 0.4, col, 10); // Arm R (raised)
+    g += line(bodyX - 20, bodyY + 10, bodyX - 20, bodyY + 10 + armLen * 0.8, col, 10); // Arm L (down)
+    g += line(bodyX, bodyY + bodyLen / 2, bodyX - 15, bodyY + bodyLen / 2 + legLen, col, 10); // Leg L
+    g += line(bodyX, bodyY + bodyLen / 2, bodyX + 15, bodyY + bodyLen / 2 + legLen, col, 10); // Leg R
+  } else if (pose === 'holdingCup') {
+    g += line(bodyX, headY + headR, bodyX, bodyY + bodyLen / 2, col, 10); // Body
+    g += line(bodyX - 20, bodyY + 10, bodyX + 20, bodyY + 10, col, 10); // Shoulders
+    g += line(bodyX - 20, bodyY + 10, bodyX - 20 + armLen * 0.4, bodyY + 10 + armLen * 0.6, col, 10); // Arm L
+    g += line(bodyX + 20, bodyY + 10, bodyX + 20 - armLen * 0.4, bodyY + 10 + armLen * 0.6, col, 10); // Arm R
+    g += line(bodyX, bodyY + bodyLen / 2, bodyX - 15, bodyY + bodyLen / 2 + legLen, col, 10); // Leg L
+    g += line(bodyX, bodyY + bodyLen / 2, bodyX + 15, bodyY + bodyLen / 2 + legLen, col, 10); // Leg R
+  } else if (pose === 'happy') {
+    g += line(bodyX, headY + headR, bodyX, bodyY + bodyLen / 2, col, 10); // Body
+    g += line(bodyX - 20, bodyY + 10, bodyX + 20, bodyY + 10, col, 10); // Shoulders
+    g += line(bodyX - 20, bodyY + 10, bodyX - 20 + armLen * 0.6, bodyY + 10 + armLen * 0.3, col, 10); // Arm L (slightly raised)
+    g += line(bodyX + 20, bodyY + 10, bodyX + 20 - armLen * 0.6, bodyY + 10 + armLen * 0.3, col, 10); // Arm R (slightly raised)
+    g += line(bodyX, bodyY + bodyLen / 2, bodyX - 15, bodyY + bodyLen / 2 + legLen, col, 10); // Leg L
+    g += line(bodyX, bodyY + bodyLen / 2, bodyX + 15, bodyY + bodyLen / 2 + legLen, col, 10); // Leg R
+    g += pathTag("M " + (x - 15) + " " + (headY + 10) + " Q " + x + " " + (headY + 25) + " " + (x + 15) + " " + (headY + 10), WHITE, 5); // Smile
+  } else if (pose === 'confused') {
+    g += line(bodyX, headY + headR, bodyX, bodyY + bodyLen / 2, col, 10); // Body
+    g += line(bodyX - 20, bodyY + 10, bodyX + 20, bodyY + 10, col, 10); // Shoulders
+    g += line(bodyX - 20, bodyY + 10, bodyX - 20, bodyY + 10 + armLen * 0.8, col, 10); // Arm L (down)
+    g += line(bodyX + 20, bodyY + 10, bodyX + 20, bodyY + 10 + armLen * 0.8, col, 10); // Arm R (down)
+    g += line(bodyX, bodyY + bodyLen / 2, bodyX - 15, bodyY + bodyLen / 2 + legLen, col, 10); // Leg L
+    g += line(bodyX, bodyY + bodyLen / 2, bodyX + 15, bodyY + bodyLen / 2 + legLen, col, 10); // Leg R
+    g += pathTag("M " + (x - 15) + " " + (headY + 20) + " Q " + x + " " + (headY + 5) + " " + (x + 15) + " " + (headY + 20), WHITE, 5); // Frown
+    g += pathTag("M " + (x - 10) + " " + (headY - 10) + " L " + (x + 10) + " " + (headY - 10), WHITE, 5); // Eyebrows
+  } else if (pose === 'presenting') {
+    g += line(bodyX, headY + headR, bodyX, bodyY + bodyLen / 2, col, 10); // Body
+    g += line(bodyX - 20, bodyY + 10, bodyX + 20, bodyY + 10, col, 10); // Shoulders
+    g += line(bodyX - 20, bodyY + 10, bodyX - 20 + armLen * 0.8, bodyY + 10 + armLen * 0.2, col, 10); // Arm L (outstretched)
+    g += line(bodyX + 20, bodyY + 10, bodyX + 20 - armLen * 0.8, bodyY + 10 + armLen * 0.2, col, 10); // Arm R (outstretched)
+    g += line(bodyX, bodyY + bodyLen / 2, bodyX - 15, bodyY + bodyLen / 2 + legLen, col, 10); // Leg L
+    g += line(bodyX, bodyY + bodyLen / 2, bodyX + 15, bodyY + bodyLen / 2 + legLen, col, 10); // Leg R
+  } else { // 'standing' or default
+    g += line(bodyX, headY + headR, bodyX, bodyY + bodyLen / 2, col, 10); // Body
+    g += line(bodyX - 20, bodyY + 10, bodyX + 20, bodyY + 10, col, 10); // Shoulders
+    g += line(bodyX - 20, bodyY + 10, bodyX - 20, bodyY + 10 + armLen, col, 10); // Arm L
+    g += line(bodyX + 20, bodyY + 10, bodyX + 20, bodyY + 10 + armLen, col, 10); // Arm R
+    g += line(bodyX, bodyY + bodyLen / 2, bodyX - 15, bodyY + bodyLen / 2 + legLen, col, 10); // Leg L
+    g += line(bodyX, bodyY + bodyLen / 2, bodyX + 15, bodyY + bodyLen / 2 + legLen, col, 10); // Leg R
+  }
+  g += '</g>';
+  return g;
+}
+
+// Coffee cup
+// nameGlyph: 0 (none), 1 (rectangle), 2 (brand dot)
+function coffeeCup(x, y, h, w, col, steam, nameGlyph, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var cupTop = y - h / 2;
+
+  // Cup body
+  g += rrect(x, y, w, h, w / 4, col, 1);
+  // Handle
+  g += ring(x + w / 2 + w / 8, y, w / 8, col, 8, 1);
+  // Rim
+  g += ring(x, cupTop + 5, w / 2 - 5, col, 8, 1);
+
+  // Steam
+  if (steam > 0) {
+    var sY = cupTop - 20;
+    for (var i = 0; i < 3; i++) {
+      var offset = (steam * 0.5 + i / 3) % 1;
+      var steamX = x + Math.sin(offset * Math.PI * 4) * 10;
+      var steamY = sY - offset * 80;
+      g += dot(steamX, steamY, 8 * (1 - offset), WHITE, 0.4 * (1 - offset));
+    }
+  }
+
+  // Name glyph
+  if (nameGlyph === 1) {
+    g += rrect(x - w / 4, y, w / 2, 30, 8, WHITE, 0.9); // Simple white rectangle
+  } else if (nameGlyph === 2) {
+    g += dot(x - w / 4, y, 12, WHITE, 0.9); // Simple white dot for brand
+  }
+
+  g += '</g>';
+  return g;
+}
+
+// Coffee shop counter
+function shopCounter(y, width, height, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(CX, y, width, height, 20, col, 1);
+  g += line(CX - width / 2, y - height / 2, CX - width / 2, TOP, col, 7); // Left support
+  g += line(CX + width / 2, y - height / 2, CX + width / 2, TOP, col, 7); // Right support
+  g += '</g>';
+  return g;
+}
+
+// Abstract connection lines
+function connectionLines(fromX, fromY, toX, toY, count, col, op, u) {
+  var g = '';
+  for (var i = 0; i < count; i++) {
+    var p = (u + i / count) % 1;
+    var x = lerp(fromX, toX, p);
+    var y = lerp(fromY, toY, p);
+    var size = 10 + Math.sin(p * Math.PI) * 15;
+    g += dot(x, y, size, col, op * (1 - p));
+  }
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var customerX = lerp(CX - 400, CX - 180, easeOut(ramp(u, 0, 0.6)));
+  var customerY = BOT - 280;
+  var baristaX = CX + 280;
+  var baristaY = BOT - 280;
+  var counterY = BOT - 400;
+  var cupY = counterY - 100;
+
+  s += shopCounter(counterY, 800, 120, WHITE, 1);
+  s += stickFigure(baristaX, baristaY, WHITE, 'standing', u, 1);
+  s += stickFigure(customerX, customerY, AMBER, 'walking', u, 1);
+
+  // Abstract coffee aroma wafting from a cup on the counter.
+  var steamOp = ramp(u, 0.1, 0.8);
+  s += coffeeCup(CX - 80, cupY, 120, 100, WHITE, steamOp, 0, 1);
+
+  // "Want" chevrons
+  for (var c = 0; c < 3; c++) {
+    var cp = (u * 1.5 + c / 3) % 1;
+    s += pathTag("M " + (CX - 80 - 20) + " " + (cupY - 60 - cp * 80) + " L " + (CX - 80) + " " + (cupY - 90 - cp * 80) + " L " + (CX - 80 + 20) + " " + (cupY - 60 - cp * 80), AMBER, 10, (1 - cp) * 0.7);
+  }
+
+  return s;
+}
+
+/* SCENE 2 (10-20): THE ORDER */
+function scene2(u) {
+  var s = '';
+  var customerX = CX - 180;
+  var customerY = BOT - 280;
+  var baristaX = CX + 280;
+  var baristaY = BOT - 280;
+  var counterY = BOT - 400;
+  var cupY = counterY - 100;
+
+  s += shopCounter(counterY, 800, 120, WHITE, 1);
+  s += stickFigure(baristaX, baristaY, WHITE, 'standing', u, 1);
+
+  var customerPose = u < 0.3 ? 'ordering' : 'standing';
+  s += stickFigure(customerX, customerY, AMBER, customerPose, u, 1);
+
+  // Barista picks up a blank cup
+  var cupPickupY = lerp(cupY, cupY - 120, easeOut(ramp(u, 0.3, 0.5)));
+  var cupPickupX = lerp(CX - 80, CX + 120, easeOut(ramp(u, 0.3, 0.5)));
+  var nameGlyphState = ramp(u, 0.6, 0.8);
+
+  s += coffeeCup(cupPickupX, cupPickupY, 120, 100, WHITE, 0, nameGlyphState > 0.1 ? 1 : 0, 1);
+
+  // Barista's hand motion to pick up cup
+  var baristaArmX = lerp(baristaX + 20, cupPickupX + 30, easeOut(ramp(u, 0.3, 0.5)));
+  var baristaArmY = lerp(baristaY - 270, cupPickupY, easeOut(ramp(u, 0.3, 0.5)));
+  s += line(baristaX + 20, baristaY - 270, baristaArmX, baristaArmY, WHITE, 10);
+
+  // A small rectangle (representing the name) appears on the cup.
+  if (nameGlyphState > 0) {
+    s += rrect(cupPickupX - 25, cupPickupY, 50, 20, 5, WHITE, nameGlyphState); // Name placeholder
+  }
+
+  return s;
+}
+
+/* SCENE 3 (20-30): THE WAIT/CONFUSION */
+function scene3(u) {
+  var s = '';
+  var customerX = CX - 180;
+  var customerY = BOT - 280;
+  var baristaX = CX + 280;
+  var baristaY = BOT - 280;
+  var counterY = BOT - 400;
+  var cupY = counterY - 100;
+
+  s += shopCounter(counterY, 800, 120, WHITE, 1);
+  s += stickFigure(baristaX, baristaY, WHITE, 'standing', u, 1);
+
+  var customerHeadShake = Math.sin(u * Math.PI * 4) * 10 * ramp(u, 0.3, 0.7);
+  s += '<g transform="translate(' + customerHeadShake + ' 0)">';
+  s += stickFigure(customerX, customerY, AMBER, 'confused', u, 1);
+  s += '</g>';
+
+  // Multiple cups appear on the counter, some with "names" (rectangles/dots), some without.
+  var numCups = 4;
+  for (var i = 0; i < numCups; i++) {
+    var cupOffset = i * 140;
+    var cupX = CX - 300 + cupOffset;
+    var cupOp = ramp(u, i * 0.1, i * 0.1 + 0.4);
+    var nameState = (i % 2 === 0) ? 1 : 0; // Alternate named/unnamed
+    s += coffeeCup(cupX, cupY, 120, 100, WHITE, 0, nameState, cupOp);
+  }
+
+  // Coral red "question mark" glyph over the customer's head
+  var qOp = ramp(u, 0.5, 0.9);
+  var qX = customerX + 60;
+  var qY = customerY - 300;
+  s += pathTag("M " + qX + " " + (qY - 30) + " A 30 30 0 1 1 " + (qX + 1) + " " + (qY - 30) + " M " + qX + " " + (qY + 10) + " V " + (qY + 30), CORAL, 10, qOp);
+
+  return s;
+}
+
+/* SCENE 4 (30-40): THE CONNECTION (SYSTEM) */
+function scene4(u) {
+  var s = '';
+  var customerX = CX - 180;
+  var customerY = BOT - 280;
+  var baristaX = CX + 280;
+  var baristaY = BOT - 280;
+  var counterY = BOT - 400;
+  var cupY = counterY - 100;
+
+  s += shopCounter(counterY, 800, 120, WHITE, 1);
+  s += stickFigure(baristaX, baristaY, WHITE, 'standing', u, 1);
+  s += stickFigure(customerX, customerY, AMBER, 'standing', u, 1);
+
+  // Focus on the customer's named cup, brought closer
+  var cupFocusX = lerp(CX - 80, CX, ramp(u, 0, 0.3));
+  var cupFocusY = lerp(cupY, cupY - 80, ramp(u, 0, 0.3));
+  s += coffeeCup(cupFocusX, cupFocusY, 120, 100, WHITE, 0, 1, 1);
+
+  // Blue lines (representing connection/system) emanate from the name on the cup towards the customer.
+  var connectionOp = ramp(u, 0.2, 0.8);
+  s += connectionLines(cupFocusX - 25, cupFocusY, customerX, customerY - 100, 5, BLUE, connectionOp, u * 0.8);
+
+  // A subtle "recognition" ring around the customer's head
+  var ringPulse = pulse(u, 0.6, 0.3);
+  s += ring(customerX, customerY - 270, 40 + ringPulse * 10, BLUE, 7, ringPulse * 0.8);
+
+  return s;
+}
+
+/* SCENE 5 (40-50): THE BENEFIT (LOYALTY) */
+function scene5(u) {
+  var s = '';
+  var customerX = CX - 180;
+  var customerY = BOT - 280;
+  var baristaX = CX + 280;
+  var baristaY = BOT - 280;
+  var counterY = BOT - 400;
+  var cupY = counterY - 100;
+
+  s += shopCounter(counterY, 800, 120, WHITE, 1);
+  s += stickFigure(baristaX, baristaY, WHITE, 'standing', u, 1);
+  s += stickFigure(customerX, customerY, AMBER, 'happy', u, 1);
+
+  // Customer's named cup
+  s += coffeeCup(CX, cupY, 120, 100, WHITE, 0, 1, 1);
+
+  // Blue connection lines become stronger and more encompassing
+  var connectionStrength = lerp(0.6, 1.0, smooth(u));
+  s += connectionLines(CX - 25, cupY, customerX, customerY - 100, 5, BLUE, 0.8 * connectionStrength, u * 0.8);
+
+  // Amber heart/star glyphs appear around the customer and the cup.
+  var glyphOp = ramp(u, 0.2, 0.8);
+  var heartX = customerX + 80, heartY = customerY - 200;
+  s += pathTag("M " + heartX + " " + heartY + " C " + (heartX + 30) + " " + (heartY - 40) + " " + (heartX + 60) + " " + (heartY - 10) + " " + heartX + " " + (heartY + 20) +
+               " C " + (heartX - 60) + " " + (heartY - 10) + " " + (heartX - 30) + " " + (heartY - 40) + " " + heartX + " " + heartY, AMBER, 8, glyphOp);
+
+  var starX = CX + 80, starY = cupY - 100;
+  s += pathTag("M " + starX + " " + (starY - 30) + " L " + (starX + 10) + " " + (starY - 10) + " L " + (starX + 30) + " " + (starY - 10) +
+               " L " + (starX + 15) + " " + (starY + 5) + " L " + (starX + 20) + " " + (starY + 25) + " L " + starX + " " + (starY + 15) +
+               " L " + (starX - 20) + " " + (starY + 25) + " L " + (starX - 15) + " " + (starY + 5) + " L " + (starX - 30) + " " + (starY - 10) +
+               " L " + (starX - 10) + " " + (starY - 10) + " Z", AMBER, 8, glyphOp);
+
+  return s;
+}
+
+/* SCENE 6 (50-60): THE BRAND */
+function scene6(u) {
+  var s = '';
+  var customerX = CX - 180;
+  var customerY = BOT - 280;
+  var baristaX = CX + 280;
+  var baristaY = BOT - 280;
+  var counterY = BOT - 400;
+  var cupY = counterY - 100;
+
+  s += shopCounter(counterY, 800, 120, WHITE, 1);
+  s += stickFigure(baristaX, baristaY, WHITE, 'presenting', u, 1);
+
+  // Customer receives the cup
+  var customerCupX = lerp(CX, customerX + 50, easeOut(ramp(u, 0.4, 0.8)));
+  var customerCupY = lerp(cupY, customerY - 150, easeOut(ramp(u, 0.4, 0.8)));
+  var nameGlyphMorph = ramp(u, 0.6, 0.9); // Morph from name rectangle to brand dot
+
+  s += stickFigure(customerX, customerY, AMBER, 'holdingCup', u, 1);
+  s += coffeeCup(customerCupX, customerCupY, 120, 100, WHITE, 0, nameGlyphMorph < 0.5 ? 1 : 2, 1);
+
+  // Blue connection lines solidify into a background pattern.
+  var patternOp = lerp(0.4, 0.8, smooth(u));
+  var patternSize = lerp(20, 50, smooth(u));
+  for (var i = 0; i < 8; i++) {
+    for (var j = 0; j < 5; j++) {
+      var px = CX - 400 + j * 200 + (i % 2) * 100;
+      var py = TOP + 100 + i * 200;
+      s += dot(px, py, patternSize / 2, BLUE, patternOp * 0.2);
+      s += ring(px, py, patternSize, BLUE, 5, patternOp);
+    }
+  }
+
+  // Final stable state for the cup and customer
+  if (u > 0.8) {
+    s += coffeeCup(customerX + 50, customerY - 150, 120, 100, WHITE, 0, 2, 1);
+    s += stickFigure(customerX, customerY, AMBER, 'holdingCup', u, 1);
+  }
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

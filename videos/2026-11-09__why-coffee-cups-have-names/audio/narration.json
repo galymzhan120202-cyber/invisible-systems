@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You step into your favorite coffee shop, the aroma pulling you in. All you want is that perfect morning brew, fast and just how you like it.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "You order, give your name, then join the waiting crowd. A name is called – it sounds like yours, but it's not your drink.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "You often wonder why they bother. Names are misspelled or mispronounced. It feels like an inefficient extra step creating confusion.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "But then it clicks. The name isn't just for identification. It's a tiny, personal interaction, a moment where the system acknowledges *you*.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "This gesture makes you feel seen and unique. It builds connection, making you more likely to return, even if the drink wasn't perfect.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "So next time you give your name, you'll still get your coffee. But now, you see the invisible system, turning transactions into subtle loyalty.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

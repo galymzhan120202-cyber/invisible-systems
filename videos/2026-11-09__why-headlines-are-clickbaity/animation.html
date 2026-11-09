@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why News Headlines Are So Clickbaity</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / the wave
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want
+var CORAL = "#FF5B5B";              // coral red    -> the naive model / false signal
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom elements ---------- */
+
+// Stick figure: body, head, arms, legs. Pose changes arm/head positions.
+// x, y = center of torso
+function stickFigure(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = 30;
+  var bodyH = 120;
+  var armL = 80;
+  var legL = 100;
+  var sw = 8;
+
+  // Head
+  g += dot(x, y - bodyH / 2 - headR, headR, col);
+
+  // Body
+  g += line(x, y - bodyH / 2, x, y + bodyH / 2, col, sw);
+
+  // Legs
+  g += line(x, y + bodyH / 2, x - 30, y + bodyH / 2 + legL, col, sw);
+  g += line(x, y + bodyH / 2, x + 30, y + bodyH / 2 + legL, col, sw);
+
+  // Arms and Gaze
+  var armX1 = x, armY1 = y - bodyH / 2 + 20; // Shoulder
+  var armX2, armY2, armX3, armY3;
+  var gazeX = x, gazeY = y - bodyH / 2 - headR; // Head center for gaze origin
+
+  switch (pose) {
+    case 'calm':
+      armX2 = x - armL; armY2 = armY1 + armL * 0.6;
+      armX3 = x + armL; armY3 = armY1 + armL * 0.6;
+      gazeY = gazeY - headR * 0.5; // Looking straight
+      break;
+    case 'tap':
+      armX2 = x - armL * 0.8; armY2 = armY1 + armL * 0.4;
+      armX3 = x + armL * 0.5; armY3 = armY1 - armL * 0.5; // Arm raised to tap
+      gazeY = gazeY - headR * 0.5; // Looking straight
+      break;
+    case 'frustrated':
+      armX2 = x - 40; armY2 = armY1 + 60;
+      armX3 = x + 40; armY3 = armY1 + 60;
+      g += line(armX2, armY2, armX3, armY3, col, sw); // Arms crossed
+      gazeY = gazeY + headR * 0.5; // Looking down
+      break;
+    case 'shrug':
+      armX2 = x - armL * 0.8; armY2 = armY1 - 20;
+      armX3 = x + armL * 0.8; armY3 = armY1 - 20;
+      g += line(armX2, armY2, armX2 + 20, armY2 + 30, col, sw); // Left arm up
+      g += line(armX3, armY3, armX3 - 20, armY3 + 30, col, sw); // Right arm up
+      gazeY = gazeY + headR * 0.2; // Head tilted slightly
+      break;
+    case 'observing':
+      armX2 = x - armL * 0.8; armY2 = armY1 + armL * 0.4;
+      // One arm down, other pointing
+      g += line(x + 20, armY1, x + 60, armY1 + 40, col, sw); // Pointing arm
+      gazeX = x + headR * 0.3; gazeY = gazeY - headR * 0.2; // Looking slightly to the side
+      break;
+    case 'disappointed':
+      armX2 = x - 40; armY2 = armY1 + 80;
+      armX3 = x + 40; armY3 = armY1 + 80;
+      g += line(armX2, armY2, armX2 + 20, armY2 + 20, col, sw); // Arms hanging
+      g += line(armX3, armY3, armX3 - 20, armY3 + 20, col, sw);
+      gazeY = gazeY + headR * 0.7; // Head down
+      break;
+    case 'knowing':
+      armX2 = x - armL * 0.8; armY2 = armY1 + armL * 0.4;
+      // One arm slightly raised
+      g += line(x + 20, armY1 + 10, x + 50, armY1 - 10, col, sw); // Gesture of understanding
+      gazeY = gazeY - headR * 0.3; // Looking forward, slightly up
+      break;
+    default: // calm
+      armX2 = x - armL; armY2 = armY1 + armL * 0.6;
+      armX3 = x + armL; armY3 = armY1 + armL * 0.6;
+      gazeY = gazeY - headR * 0.5;
+  }
+  if (pose !== 'frustrated') { // If not crossed, draw separate arms
+    g += line(armX1, armY1, armX2, armY2, col, sw);
+    if (pose !== 'tap' && pose !== 'observing' && pose !== 'knowing') { // Don't redraw right arm if already drawn or specific pose
+        g += line(armX1, armY1, armX3, armY3, col, sw);
+    }
+  }
+  g += line(gazeX, gazeY, gazeX, gazeY + 10, WHITE, 5, 0.9); // Gaze line
+  g += '</g>';
+  return g;
+}
+
+// Hero Element: News Feed Rectangle
+function newsFeedRect(x, y, w, h, rad, col, sw, op) {
+  return rrectStroke(x, y, w, h, rad, col, sw, op);
+}
+
+// Clickbait Headline (zig-zag)
+function clickbaitShape(x, y, w, h, u, col, sw, op) {
+  var zigZagIntensity = lerp(0, 100, smooth(u));
+  var numZigs = 5;
+  var d = "M " + (x - w/2) + " " + (y - h/2);
+  for (var i = 0; i <= numZigs; i++) {
+    var segY = (y - h/2) + (i / numZigs) * h;
+    var segX = (i % 2 === 0) ? (x + w/2) : (x - w/2);
+    if (i > 0 && i < numZigs) { // Add zig-zag in the middle
+      segX += (i % 2 === 0 ? 1 : -1) * zigZagIntensity;
+    }
+    d += " L " + segX + " " + segY;
+  }
+  d += " L " + (x + w/2) + " " + (y + h/2);
+  d += " L " + (x - w/2) + " " + (y + h/2);
+  d += " Z"; // Close the path
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+// System Grid (signal blue)
+function systemGrid(x, y, w, h, u, col, sw, op) {
+  var g = '';
+  var gridSize = 60;
+  var startX = x - w/2;
+  var startY = y - h/2;
+
+  // Vertical lines
+  for (var i = 0; i <= w / gridSize; i++) {
+    g += line(startX + i * gridSize, startY, startX + i * gridSize, startY + h, col, sw, op);
+  }
+  // Horizontal lines
+  for (var j = 0; j <= h / gridSize; j++) {
+    g += line(startX, startY + j * gridSize, startX + w, startY + j * gridSize, col, sw, op);
+  }
+
+  // "Click" animation: a blue circle moving and highlighting sections
+  var clickR = 20;
+  var clickX = lerp(startX + gridSize/2, startX + w - gridSize/2, (u * 0.7) % 1);
+  var clickY = lerp(startY + gridSize/2, startY + h - gridSize/2, (u * 0.9) % 1);
+  g += dot(clickX, clickY, clickR, col, op * 0.8);
+  g += ring(clickX, clickY, clickR * 1.5, col, sw/2, op * 0.4 * (1 - u % 0.2)); // Pulse effect
+
+  // Highlighted sections
+  var highlightOpacity = 0.2 + 0.3 * Math.sin(u * Math.PI * 4);
+  var activeCellX = Math.floor((clickX - startX) / gridSize);
+  var activeCellY = Math.floor((clickY - startY) / gridSize);
+  g += rrect(startX + (activeCellX + 0.5) * gridSize, startY + (activeCellY + 0.5) * gridSize,
+              gridSize, gridSize, 0, col, highlightOpacity);
+
+  return g;
+}
+
+// Fractured System Grid with Red Fragments
+function fracturedSystem(x, y, w, h, u, blueCol, redCol, sw, op) {
+  var g = '';
+  var gridSize = 60;
+  var startX = x - w/2;
+  var startY = y - h/2;
+
+  // Fractured grid lines
+  for (var i = 0; i <= w / gridSize; i++) {
+    var lineX = startX + i * gridSize;
+    var fractureAmount = lerp(0, 30, smooth(u));
+    var lineOp = lerp(op, op * 0.4, smooth(u));
+    for (var j = 0; j < h / gridSize; j++) {
+      var segY1 = startY + j * gridSize;
+      var segY2 = startY + (j + 1) * gridSize;
+      var offset = (rnd(i * 100 + j) - 0.5) * fractureAmount;
+      g += line(lineX + offset, segY1, lineX - offset, segY2, blueCol, sw, lineOp);
+    }
+  }
+  for (var j = 0; j <= h / gridSize; j++) {
+    var lineY = startY + j * gridSize;
+    var fractureAmount = lerp(0, 30, smooth(u));
+    var lineOp = lerp(op, op * 0.4, smooth(u));
+    for (var i = 0; i < w / gridSize; i++) {
+      var segX1 = startX + i * gridSize;
+      var segX2 = startX + (i + 1) * gridSize;
+      var offset = (rnd(j * 100 + i + 50) - 0.5) * fractureAmount;
+      g += line(segX1, lineY + offset, segX2, lineY - offset, blueCol, sw, lineOp);
+    }
+  }
+
+  // Red fragments (wasted time/misinformation)
+  var numFragments = 15;
+  var fragmentSize = lerp(0, 30, smooth(u));
+  var fragmentOp = lerp(0, 0.9, smooth(u));
+  for (var k = 0; k < numFragments; k++) {
+    var fragX = lerp(x - w/2, x + w/2, rnd(k * 7));
+    var fragY = lerp(y - h/2, y + h/2, rnd(k * 13));
+    var angle = rnd(k * 17) * Math.PI * 2;
+    var dx = Math.cos(angle) * fragmentSize;
+    var dy = Math.sin(angle) * fragmentSize;
+    g += line(fragX - dx, fragY - dy, fragX + dx, fragY + dy, redCol, sw * 0.8, fragmentOp);
+  }
+
+  return g;
+}
+
+// Insight Overlay (faint blue grid)
+function insightOverlay(x, y, w, h, u, col, sw, op) {
+  var g = '';
+  var gridSize = 60;
+  var startX = x - w/2;
+  var startY = y - h/2;
+  var fadeOp = lerp(0, op, smooth(u));
+
+  // Vertical lines
+  for (var i = 0; i <= w / gridSize; i++) {
+    g += line(startX + i * gridSize, startY, startX + i * gridSize, startY + h, col, sw, fadeOp);
+  }
+  // Horizontal lines
+  for (var j = 0; j <= h / gridSize; j++) {
+    g += line(startX, startY + j * gridSize, startX + w, startY + j * gridSize, col, sw, fadeOp);
+  }
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+var SF_Y = CY + 300; // Stick figure base Y position
+var RECT_W = 700, RECT_H = 800; // Hero element size
+var RECT_X = CX, RECT_Y = CY - 100; // Hero element position
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var sfX = CX - 200;
+  var rectX = RECT_X + lerp(0, 10, smooth(ramp(u, 0.2, 0.4))); // Slight tap reaction
+  var rectY = RECT_Y + lerp(0, 10, smooth(ramp(u, 0.2, 0.4)));
+
+  s += newsFeedRect(rectX, rectY, RECT_W, RECT_H, 20, DIM, 10, 0.9);
+  var stickFigurePose = 'calm';
+  if (u > 0.1 && u < 0.4) {
+    stickFigurePose = 'tap';
+  }
+  s += stickFigure(sfX, SF_Y, AMBER, stickFigurePose, 1);
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var sfX = CX - 200;
+  var rectW = RECT_W;
+  var rectH = RECT_H;
+  var rectX = RECT_X;
+  var rectY = RECT_Y;
+
+  var transformProgress = ramp(u, 0.05, 0.35); // Headline "jumps" into form
+  var shake = Math.sin(u * 42) * 8 * pulse(u, 0.2, 0.1); // Shake during transformation
+
+  // Hero element morphs from neutral to clickbaity
+  var neutralOp = lerp(0.9, 0, transformProgress);
+  var clickbaitOp = lerp(0, 0.9, transformProgress);
+
+  s += newsFeedRect(rectX + shake, rectY + shake, rectW, rectH, 20, DIM, 10, neutralOp);
+  s += clickbaitShape(rectX + shake, rectY + shake, rectW, rectH, transformProgress, CORAL, 12, clickbaitOp);
+
+  var stickFigurePose = 'calm';
+  if (u > 0.3 && u < 0.8) {
+    stickFigurePose = 'frustrated';
+  }
+  s += stickFigure(sfX, SF_Y, AMBER, stickFigurePose, 1);
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var sfX = CX - 200;
+  var rectW = RECT_W;
+  var rectH = RECT_H;
+  var rectX = RECT_X;
+  var rectY = RECT_Y;
+
+  var clusterGrow = smooth(ramp(u, 0.0, 0.4));
+  var cameraZoom = lerp(1.0, 1.1, smooth(ramp(u, 0.3, 0.7)));
+
+  s += '<g ' + camera(cameraZoom, 0, 0) + '>';
+
+  // Main clickbait headline
+  s += clickbaitShape(rectX, rectY, rectW, rectH, 1, CORAL, 12, 0.9);
+
+  // Smaller, chaotic clickbait shapes
+  var numSmallShapes = 5;
+  for (var i = 0; i < numSmallShapes; i++) {
+    var smallW = lerp(0, rectW * 0.4, clusterGrow);
+    var smallH = lerp(0, rectH * 0.4, clusterGrow);
+    var offsetX = Math.sin(u * 3 + i * 1.2) * lerp(0, 150, clusterGrow) + (rnd(i) - 0.5) * 100;
+    var offsetY = Math.cos(u * 2 + i * 0.8) * lerp(0, 200, clusterGrow) + (rnd(i + 10) - 0.5) * 100;
+    s += clickbaitShape(rectX + offsetX, rectY + offsetY, smallW, smallH, 1, CORAL, 8, lerp(0, 0.7, clusterGrow));
+  }
+  s += '</g>';
+
+  var stickFigurePose = 'frustrated';
+  if (u > 0.4) {
+    stickFigurePose = 'shrug';
+  }
+  s += stickFigure(sfX, SF_Y, AMBER, stickFigurePose, 1);
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var sfX = CX - 200;
+  var rectW = RECT_W;
+  var rectH = RECT_H;
+  var rectX = RECT_X;
+  var rectY = RECT_Y;
+
+  var dissolveProgress = smooth(ramp(u, 0.0, 0.3)); // Red dissolves
+  var systemEmergence = smooth(ramp(u, 0.2, 0.5)); // Blue system emerges
+
+  // Dissolving red clickbait
+  s += clickbaitShape(rectX, rectY, rectW, rectH, 1, CORAL, 12, lerp(0.9, 0, dissolveProgress));
+  // Emerging blue system grid
+  s += systemGrid(rectX, rectY, rectW, rectH, u, BLUE, 8, lerp(0, 0.9, systemEmergence));
+
+  var stickFigurePose = 'shrug';
+  if (u > 0.5) {
+    stickFigurePose = 'observing';
+  }
+  s += stickFigure(sfX, SF_Y, AMBER, stickFigurePose, 1);
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var sfX = CX - 200;
+  var rectW = RECT_W;
+  var rectH = RECT_H;
+  var rectX = RECT_X;
+  var rectY = RECT_Y;
+
+  var fractureProgress = smooth(ramp(u, 0.0, 0.4)); // Grid fractures
+  // Red fragments appear is handled within fracturedSystem based on u
+  
+  // Fractured blue system grid with red fragments
+  s += fracturedSystem(rectX, rectY, rectW, rectH, fractureProgress, BLUE, CORAL, 8, 0.9);
+
+  var stickFigurePose = 'observing';
+  if (u > 0.4) {
+    stickFigurePose = 'disappointed';
+  }
+  s += stickFigure(sfX, SF_Y, AMBER, stickFigurePose, 1);
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var sfX = CX - 200;
+  var rectW = RECT_W;
+  var rectH = RECT_H;
+  var rectX = RECT_X;
+  var rectY = RECT_Y;
+
+  var returnProgress = smooth(ramp(u, 0.0, 0.4)); // Return to neutral rect
+  var insightProgress = smooth(ramp(u, 0.5, 0.9)); // Blue overlay appears
+
+  // Neutral grey rectangle
+  s += newsFeedRect(rectX, rectY, rectW, rectH, 20, DIM, 10, lerp(0, 0.9, returnProgress));
+
+  // Faint blue insight overlay
+  s += insightOverlay(rectX, rectY, rectW, rectH, insightProgress, BLUE, 4, 0.2);
+
+  var stickFigurePose = 'disappointed';
+  if (u > 0.6) {
+    stickFigurePose = 'knowing';
+  }
+  s += stickFigure(sfX, SF_Y, AMBER, stickFigurePose, 1);
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

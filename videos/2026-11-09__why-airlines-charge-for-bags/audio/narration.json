@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "Bag packed, you're excited. You found a cheap flight online. All you want is to reach your destination with essentials, affordably.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "As you book, the price jumps. Your \"cheap\" flight now includes a fee just for your bag. What happened to that advertised fare?",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "It feels unfair, a hidden trap. Is this a trick? Or did the airline get greedier? You feel they're just charging more for everything.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "The system isn't pure greed; it's market strategy. Airlines *unbundled* services. Separating bag fees allows them to advertise a super low \"base fare.\"",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "This low price attracts flyers, but most still need bags. These fees become crucial \"ancillary revenue.\" The initial low price was an illusion.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "Next time you see a bargain flight, remember the true cost. Pack light, or factor in the total price. You now see the system.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

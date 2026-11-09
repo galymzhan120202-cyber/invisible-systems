@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Airlines Charge for Checked Bags</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary elements
+var BLUE  = "#4C86F0";              // signal blue  -> system / mechanism
+var AMBER = "#F2A93B";              // warm amber   -> YOU / desire
+var CORAL = "#FF5B5B";              // coral red    -> naive model / friction
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* stick figure: body, head, two arms, two legs */
+function stickFigure(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = 30;
+  var bodyH = 120;
+  var armL = 70;
+  var legL = 90;
+  var headY = y - bodyH / 2 - headR;
+  var bodyTop = y - bodyH / 2;
+  var bodyBot = y + bodyH / 2;
+
+  g += dot(x, headY, headR, col); // Head
+  g += line(x, bodyTop, x, bodyBot, col, 8); // Body
+
+  if (pose === 'frustrated') {
+    g += line(x, bodyTop + 20, x - armL * 0.8, bodyTop - 20, col, 8); // Left arm up
+    g += line(x, bodyTop + 20, x + armL * 0.8, bodyTop - 20, col, 8); // Right arm up
+    g += line(x, bodyBot, x - legL * 0.4, bodyBot + legL, col, 8); // Left leg
+    g += line(x, bodyBot, x + legL * 0.4, bodyBot + legL, col, 8); // Right leg
+    g += line(x - headR * 0.6, headY - headR * 0.2, x + headR * 0.6, headY - headR * 0.2, col, 6); // Frown
+  } else if (pose === 'confident') {
+    g += line(x, bodyTop + 20, x - armL * 0.6, bodyTop + armL * 0.4, col, 8); // Left arm on hip
+    g += line(x, bodyTop + 20, x + armL * 0.6, bodyTop + armL * 0.4, col, 8); // Right arm on hip
+    g += line(x, bodyBot, x - legL * 0.2, bodyBot + legL, col, 8); // Left leg
+    g += line(x, bodyBot, x + legL * 0.2, bodyBot + legL, col, 8); // Right leg
+    g += line(x - headR * 0.5, headY + headR * 0.2, x + headR * 0.5, headY + headR * 0.2, col, 6); // Smile
+  } else { // 'normal'
+    g += line(x, bodyTop + 20, x - armL, bodyTop + 60, col, 8); // Left arm
+    g += line(x, bodyTop + 20, x + armL, bodyTop + 60, col, 8); // Right arm
+    g += line(x, bodyBot, x - legL * 0.5, bodyBot + legL, col, 8); // Left leg
+    g += line(x, bodyBot, x + legL * 0.5, bodyBot + legL, col, 8); // Right leg
+  }
+  g += '</g>';
+  return g;
+}
+
+/* suitcase: main body, handle, wheels */
+function suitcase(x, y, w, h, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var rad = 12;
+  g += rrect(x, y, w, h, rad, col, op); // Body
+  g += line(x, y - h / 2, x, y - h / 2 - 40, col, 8, op); // Handle base
+  g += line(x - w / 4, y - h / 2 - 40, x + w / 4, y - h / 2 - 40, col, 8, op); // Handle top
+  g += dot(x - w / 3, y + h / 2 + 10, 10, col, op); // Left wheel
+  g += dot(x + w / 3, y + h / 2 + 10, 10, col, op); // Right wheel
+  g += '</g>';
+  return g;
+}
+
+/* simple airplane icon */
+function planeIcon(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var wingW = size * 0.8, wingH = size * 0.2;
+  var tailW = size * 0.3, tailH = size * 0.3;
+  var bodyL = size * 1.5;
+  var g = '<g opacity="' + op + '">';
+  g += line(x - bodyL / 2, y, x + bodyL / 2, y, col, 8, op); // Body
+  g += line(x - bodyL / 4, y - wingH, x + bodyL / 4, y + wingH, col, 8, op); // Left wing
+  g += line(x - bodyL / 4, y + wingH, x + bodyL / 4, y - wingH, col, 8, op); // Right wing (simplified)
+  g += line(x + bodyL / 2 - tailW / 2, y, x + bodyL / 2, y - tailH, col, 8, op); // Tail fin
+  g += '</g>';
+  return g;
+}
+
+/* simple dollar sign glyph (no text) */
+function dollarSign(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var sw = size / 6;
+  var g = '<g opacity="' + op + '">';
+  g += line(x, y - size / 2, x, y + size / 2, col, sw, op); // Vertical bar
+  g += pathTag("M " + (x - size * 0.3) + " " + (y - size * 0.3) +
+               " A " + (size * 0.3) + " " + (size * 0.3) + " 0 0 1 " + (x + size * 0.3) + " " + (y - size * 0.1) +
+               " A " + (size * 0.3) + " " + (size * 0.3) + " 0 0 0 " + (x - size * 0.3) + " " + (y + size * 0.3), col, sw, op);
+  g += '</g>';
+  return g;
+}
+
+/* simple question mark glyph (no text) */
+function questionMark(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var sw = size / 6;
+  var g = '<g opacity="' + op + '">';
+  g += pathTag("M " + (x - size * 0.2) + " " + (y - size * 0.3) +
+               " A " + (size * 0.3) + " " + (size * 0.3) + " 0 1 1 " + (x + size * 0.2) + " " + (y - size * 0.05) +
+               " L " + (x + size * 0.05) + " " + (y + size * 0.15), col, sw, op);
+  g += dot(x, y + size * 0.3, sw * 0.8, col, op); // Dot
+  g += '</g>';
+  return g;
+}
+
+/* simple digital scale */
+function digitalScale(x, y, w, h, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 8, col, op); // Base
+  g += rrect(x, y - h / 2 - 20, w * 0.8, 10, 4, col, op); // Platform
+  g += rrect(x + w * 0.3, y + h * 0.3, w * 0.3, h * 0.2, 4, DIM, op); // Display
+  g += '</g>';
+  return g;
+}
+
+/* simple screen for price display */
+function priceScreen(x, y, w, h, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 10, col, op); // Screen body
+  g += rrect(x, y, w * 0.8, h * 0.6, 6, '#000000', op); // Inner display area
+  return g;
+}
+
+/* simple abstract airline logo (stylized wing) */
+function airlineLogo(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var sw = size / 8;
+  var g = '<g opacity="' + op + '">';
+  g += pathTag("M " + (x - size * 0.6) + " " + y +
+               " Q " + (x - size * 0.2) + " " + (y - size * 0.8) + " " + x + " " + y +
+               " Q " + (x + size * 0.2) + " " + (y + size * 0.8) + " " + (x + size * 0.6) + " " + y, col, sw, op);
+  g += '</g>';
+  return g;
+}
+
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  var figureX = CX - 180;
+  var figureY = CY + 300;
+  var suitcaseX = CX + 180;
+  var suitcaseY = CY + 360;
+  var suitcaseW = 160, suitcaseH = 240;
+
+  s += stickFigure(figureX, figureY, AMBER, 'normal', 1);
+  s += suitcase(suitcaseX, suitcaseY, suitcaseW, suitcaseH, AMBER, 1);
+
+  // Faint plane icon appearing
+  var planeOp = ramp(u, 0.4, 0.9);
+  s += planeIcon(CX + 350, TOP + 100, 80, BLUE, planeOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14);
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+
+  var figureX = CX - 200;
+  var figureY = CY + 300;
+  var suitcaseX = CX + 180;
+  var suitcaseY = CY + 360; // Base position for suitcase, adjusted for scale
+
+  // Checkout counter
+  s += rrect(CX + 180, CY + 500, 400, 100, 10, DIM, 0.6); // Counter top
+  s += rrect(CX + 180, CY + 650, 400, 200, 10, DIM, 0.4); // Counter base
+
+  // Scale
+  var scaleY = CY + 450;
+  s += digitalScale(suitcaseX, scaleY, 200, 80, WHITE, 1);
+
+  // Suitcase on scale
+  var suitcaseW = 160, suitcaseH = 240;
+  s += suitcase(suitcaseX, scaleY - 100, suitcaseW, suitcaseH, AMBER, 1);
+
+  s += stickFigure(figureX, figureY, AMBER, 'normal', 1);
+
+  // Plane icon (persists)
+  s += planeIcon(CX - 400, TOP + 100, 80, BLUE, 0.8);
+
+  // Coral red dollar sign appearing above suitcase
+  var dollarOp = ramp(u, 0.2, 0.6);
+  var dollarY = lerp(suitcaseY - 100, suitcaseY - 200, easeOut(ramp(u, 0.2, 0.5)));
+  s += dollarSign(suitcaseX, dollarY, 80, CORAL, dollarOp);
+
+  // Price screen rapidly increasing
+  var screenX = CX + 400, screenY = CY - 100, screenW = 240, screenH = 160;
+  s += priceScreen(screenX, screenY, screenW, screenH, WHITE, 1);
+  var priceFill = easeIn(ramp(u, 0.4, 0.9));
+  // Represent price increase with dots filling the screen
+  for (var i = 0; i < 10; i++) {
+    if (i / 10 < priceFill) {
+      s += dot(screenX - screenW * 0.3 + (i % 3) * 50, screenY - screenH * 0.2 + Math.floor(i / 3) * 40, 10, CORAL, 0.9);
+    }
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH — is something targeting me? */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var figureX = CX - 200;
+  var figureY = CY + 300;
+  var suitcaseX = CX + 180;
+  var suitcaseY = CY + 360;
+  var suitcaseW = 160, suitcaseH = 240;
+
+  s += stickFigure(figureX, figureY, AMBER, 'frustrated', 1);
+  s += suitcase(suitcaseX, suitcaseY, suitcaseW, suitcaseH, AMBER, 1);
+
+  // Swirling coral red question marks
+  for (var i = 0; i < 5; i++) {
+    var angle = u * Math.PI * 4 + i * Math.PI * 2 / 5;
+    var qX = figureX + Math.cos(angle) * 150;
+    var qY = figureY - 200 + Math.sin(angle * 0.8) * 80;
+    s += questionMark(qX, qY, 60, CORAL, 0.8);
+  }
+
+  // Prominent coral red price tag on suitcase
+  var tagW = 120, tagH = 80;
+  var tagY = suitcaseY - suitcaseH / 2 - tagH / 2 - 30;
+  s += rrect(suitcaseX, tagY, tagW, tagH, 10, CORAL, 1);
+  s += dollarSign(suitcaseX, tagY, 40, WHITE, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND — unbundling services */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var suitcaseX = CX;
+  var suitcaseY = CY + 100;
+  var suitcaseW = 160, suitcaseH = 240;
+
+  // Suitcase unbundles into components
+  var unbundleProgress = smooth(ramp(u, 0.1, 0.6));
+
+  var bodyX = lerp(suitcaseX, CX, unbundleProgress);
+  var bodyY = lerp(suitcaseY, CY - 100, unbundleProgress);
+  var bodyW = lerp(suitcaseW, 120, unbundleProgress);
+  var bodyH = lerp(suitcaseH, 180, unbundleProgress);
+  s += rrect(bodyX, bodyY, bodyW, bodyH, 12, WHITE, 1); // Main body component
+
+  var handleX = lerp(suitcaseX, CX + 200, unbundleProgress);
+  var handleY = lerp(suitcaseY - suitcaseH / 2 - 40, CY - 300, unbundleProgress);
+  s += line(handleX - 40, handleY, handleX + 40, handleY, WHITE, 8, 1); // Handle top
+  s += line(handleX, handleY, handleX, handleY + 40, WHITE, 8, 1); // Handle base
+
+  var wheelLX = lerp(suitcaseX - suitcaseW / 3, CX - 100, unbundleProgress);
+  var wheelLY = lerp(suitcaseY + suitcaseH / 2 + 10, CY + 200, unbundleProgress);
+  s += dot(wheelLX, wheelLY, 10, WHITE, 1); // Left wheel
+
+  var wheelRX = lerp(suitcaseX + suitcaseW / 3, CX + 100, unbundleProgress);
+  var wheelRY = lerp(suitcaseY + suitcaseH / 2 + 10, CY + 200, unbundleProgress);
+  s += dot(wheelRX, wheelRY, 10, WHITE, 1); // Right wheel
+
+  // Central signal blue line for "base fare"
+  var baseFareY = BOT - 100;
+  var baseFareWidth = lerp(0, 400, ramp(u, 0.4, 0.8));
+  s += line(CX - baseFareWidth / 2, baseFareY, CX + baseFareWidth / 2, baseFareY, BLUE, 10, 0.8);
+  s += dollarSign(CX, baseFareY - 60, 40, WHITE, ramp(u, 0.5, 0.9)); // Tiny white dollar sign above base fare
+
+  // Signal blue lines branching off to components
+  var lineOp = ramp(u, 0.5, 0.9);
+  s += line(CX, baseFareY, bodyX, bodyY + bodyH / 2, BLUE, 4, lineOp);
+  s += line(CX, baseFareY, handleX, handleY + 40, BLUE, 4, lineOp);
+  s += line(CX, baseFareY, wheelLX, wheelLY, BLUE, 4, lineOp);
+  s += line(CX, baseFareY, wheelRX, wheelRY, BLUE, 4, lineOp);
+
+  // Tiny white dollar signs on components
+  var componentDollarOp = ramp(u, 0.6, 1.0);
+  s += dollarSign(bodyX - bodyW / 2 + 30, bodyY + bodyH / 2 - 30, 20, WHITE, componentDollarOp);
+  s += dollarSign(handleX + 20, handleY + 20, 20, WHITE, componentDollarOp);
+  s += dollarSign(wheelLX + 20, wheelLY - 20, 20, WHITE, componentDollarOp);
+  s += dollarSign(wheelRX - 20, wheelRY - 20, 20, WHITE, componentDollarOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE — ancillary revenue */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.8, smooth(u));
+  s += '<g ' + camera(scale, 0, lerp(0, 90, smooth(u))) + '>';
+
+  var revenueStreamX = CX;
+  var revenueStreamY = CY + 200;
+  var airlineLogoX = CX;
+  var airlineLogoY = TOP + 200;
+
+  // Small stick figures paying money
+  var numFigures = 5;
+  var figureMoveProgress = smooth(ramp(u, 0.05, 0.8));
+  for (var i = 0; i < numFigures; i++) {
+    var startX = CX - 400 + rnd(i) * 100;
+    var startY = BOT - 200 - rnd(i + 1) * 100;
+    var targetX = revenueStreamX + rnd(i + 2) * 50 - 25;
+    var targetY = revenueStreamY + 100 + rnd(i + 3) * 50 - 25;
+
+    var currentX = lerp(startX, targetX, figureMoveProgress);
+    var currentY = lerp(startY, targetY, figureMoveProgress);
+
+    var figureOp = 1 - easeIn(ramp(figureMoveProgress, 0.8, 1.0)); // Fade out after paying
+    s += stickFigure(currentX, currentY, WHITE, 'normal', figureOp);
+
+    // Dollar sign moving with figure
+    var dollarOp = figureOp;
+    s += dollarSign(currentX + 50, currentY - 80, 30, WHITE, dollarOp);
+  }
+
+  // Unbundled components coalesce into a single signal blue revenue stream
+  var streamWidth = 200;
+  var streamHeight = lerp(0, CY - revenueStreamY + 100, smooth(ramp(u, 0.2, 0.7)));
+  s += rrect(revenueStreamX, revenueStreamY + streamHeight / 2, streamWidth, streamHeight, 20, BLUE, 0.8);
+
+  // Airline logo at the top
+  s += airlineLogo(airlineLogoX, airlineLogoY, 120, BLUE, ramp(u, 0.7, 1.0));
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE — informed choices */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.8, 0.92, smooth(clamp(u / 0.7, 0, 1)));
+  s += '<g ' + camera(scale, 0, lerp(90, 0, smooth(u))) + '>';
+
+  var figureX = CX - 180;
+  var figureY = CY + 300;
+  var suitcaseX = CX + 180;
+  var suitcaseY = CY + 360;
+  var suitcaseW = 160, suitcaseH = 240;
+
+  // Stick figure and suitcase return, now with understanding
+  s += stickFigure(figureX, figureY, AMBER, 'confident', 1);
+  s += suitcase(suitcaseX, suitcaseY, suitcaseW, suitcaseH, AMBER, 1);
+
+  // Airplane icon from Scene 1, now clear signal blue, symbol of understanding
+  var planeOpacity = lerp(0.2, 1.0, smooth(ramp(u, 0.4, 0.8)));
+  s += planeIcon(CX + 350, TOP + 100, 80, BLUE, planeOpacity);
+
+  // Faint background elements to imply system awareness
+  var bgOpacity = lerp(0, 0.15, smooth(ramp(u, 0.6, 1.0)));
+  s += rrectStroke(CX, CY, W * 0.8, H * 0.8, 40, BLUE, 4, bgOpacity); // Faint blue rectangle
+  s += line(CX - 300, CY - 300, CX + 300, CY + 300, BLUE, 2, bgOpacity * 0.6); // Faint blue cross
+  s += line(CX + 300, CY - 300, CX - 300, CY + 300, BLUE, 2, bgOpacity * 0.6);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
