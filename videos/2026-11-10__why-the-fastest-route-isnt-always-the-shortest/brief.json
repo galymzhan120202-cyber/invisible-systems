@@ -1,0 +1,15 @@
+{
+  "id": "why-the-fastest-route-isnt-always-the-shortest",
+  "slug": "2026-11-10__why-the-fastest-route-isnt-always-the-shortest",
+  "title_working": "Why The Fastest Route Isn't Always The Shortest",
+  "system": "real-time traffic dynamics vs. static distance",
+  "cluster": "traffic-and-crowds",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-11-10T14:45:35+00:00",
+  "produced_at": "2026-11-10T14:49:45+00:00",
+  "verify": "PASS",
+  "takeaway": "The fastest route isn't always the shortest because real-time traffic dynamics, not static distance, determine travel time.",
+  "animation_source": "llm"
+}

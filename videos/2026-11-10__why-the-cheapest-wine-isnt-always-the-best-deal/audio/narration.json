@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You're out for dinner, scanning the wine list. You want to pick something nice, but also be smart with your money.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "Naturally, your eyes drift to the bottom. The cheapest bottle seems like the obvious choice for value, a smart move.",
+    "rate": "+5%",
+    "start": 10.5
+  },
+  {
+    "id": "scene-03",
+    "text": "But then a little voice whispers: \"Is it *too* cheap? Will others think I'm stingy, or that the wine is poor quality?\"",
+    "rate": "+5%",
+    "start": 20.7
+  },
+  {
+    "id": "scene-04",
+    "text": "This is where the system kicks in. Restaurants know most people avoid the absolute cheapest. So they price *that* bottle to make the *next* one up look like a much better, safer deal.",
+    "rate": "+5%",
+    "start": 30.9
+  },
+  {
+    "id": "scene-05",
+    "text": "You pay a little more, feeling smart for avoiding the bottom, but the restaurant profits by leveraging your subtle fears of looking cheap or making a bad choice.",
+    "rate": "+5%",
+    "start": 41.1
+  },
+  {
+    "id": "scene-06",
+    "text": "Next time you see a wine list, you'll spot this invisible system at work. The cheapest isn't always the best deal for *you*, but it often is for them.",
+    "rate": "+5%",
+    "start": 51.3
+  }
+]

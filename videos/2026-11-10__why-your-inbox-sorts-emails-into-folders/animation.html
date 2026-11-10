@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Your Inbox Sorts Emails Into Folders</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / the wave
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want
+var CORAL = "#FF5B5B";              // coral red    -> the naive model / false signal
+
+var DUR = 60;
+window.__duration = DUR;
+
+// Scene-specific constants
+var INBOX_W = 600, INBOX_H = 1200;
+var INBOX_X = CX, INBOX_Y = CY + 80;
+var SF_X = CX, SF_Y = BOT - 200; // Stick figure base position
+var EMAIL_H = 40;
+var EMAIL_MIN_W = 100, EMAIL_MAX_W = 400;
+var FOLDER_COUNT = 3;
+var FOLDER_COLORS = [AMBER, BLUE, DIM]; // Primary, Social, Promotions (no text, just distinct colors)
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+// Stick figure: simple lines and circles for body parts
+function stickFigure(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = 30;
+  var bodyLen = 100;
+  var armLen = 60;
+  var legLen = 80;
+
+  // Head
+  g += dot(x, y - headR - bodyLen / 2, headR, col);
+
+  // Body
+  g += line(x, y - bodyLen / 2, x, y + bodyLen / 2, col, 8);
+
+  // Legs
+  g += line(x, y + bodyLen / 2, x - 30, y + bodyLen / 2 + legLen, col, 8);
+  g += line(x, y + bodyLen / 2, x + 30, y + bodyLen / 2 + legLen, col, 8);
+
+  // Arms and specific poses
+  switch (pose) {
+    case 'scratch_head':
+      g += line(x, y - bodyLen / 2 + 20, x - armLen, y - bodyLen / 2 + 20, col, 8); // left arm out
+      g += line(x, y - bodyLen / 2 + 20, x + 20, y - headR - bodyLen / 2 - 10, col, 8); // right arm to head
+      break;
+    case 'surprise':
+      g += line(x, y - bodyLen / 2 + 20, x - armLen, y - bodyLen / 2 + 40, col, 8); // left arm down
+      g += line(x, y - bodyLen / 2 + 20, x + armLen, y - bodyLen / 2 + 40, col, 8); // right arm down
+      g += line(x + 20, y - bodyLen / 2 - 10, x + 50, y - bodyLen / 2 - 40, col, 8); // point up-right
+      break;
+    case 'nod':
+      g += line(x, y - bodyLen / 2 + 20, x - armLen, y - bodyLen / 2 + 40, col, 8);
+      g += line(x, y - bodyLen / 2 + 20, x + armLen, y - bodyLen / 2 + 40, col, 8);
+      break;
+    case 'crossed_arms':
+      g += line(x, y - bodyLen / 2 + 20, x - armLen / 2, y - bodyLen / 2 + 50, col, 8); // left arm across
+      g += line(x, y - bodyLen / 2 + 20, x + armLen / 2, y - bodyLen / 2 + 50, col, 8); // right arm across
+      g += line(x - armLen / 2, y - bodyLen / 2 + 50, x + armLen / 2, y - bodyLen / 2 + 50, col, 8); // cross line
+      break;
+    case 'focus_gaze': // Gaze line to a target
+      g += line(x, y - bodyLen / 2 + 20, x - armLen, y - bodyLen / 2 + 40, col, 8);
+      g += line(x, y - bodyLen / 2 + 20, x + armLen, y - bodyLen / 2 + 40, col, 8);
+      // Gaze line will be drawn separately in the scene
+      break;
+    case 'knowing_nod':
+      g += line(x, y - bodyLen / 2 + 20, x - armLen, y - bodyLen / 2 + 40, col, 8); // left arm down
+      g += line(x, y - bodyLen / 2 + 20, x + armLen, y - bodyLen / 2 + 40, col, 8); // right arm down
+      g += line(x + 20, y - bodyLen / 2 + 10, x + 50, y - bodyLen / 2 + 40, col, 8); // subtle gesture
+      break;
+    default: // default pose: arms down
+      g += line(x, y - bodyLen / 2 + 20, x - armLen, y + bodyLen / 2 - 20, col, 8);
+      g += line(x, y - bodyLen / 2 + 20, x + armLen, y + bodyLen / 2 - 20, col, 8);
+  }
+
+  g += '</g>';
+  return g;
+}
+
+function aiBrain(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  // Main brain shape (rounded rectangle with two bumps)
+  g += rrect(x, y, size * 1.2, size * 0.8, size * 0.2, col, op);
+  g += dot(x - size * 0.4, y - size * 0.2, size * 0.25, col, op);
+  g += dot(x + size * 0.4, y - size * 0.2, size * 0.25, col, op);
+  // Internal lines (neural network like)
+  g += line(x - size * 0.4, y, x + size * 0.4, y, WHITE, 3, op * 0.8);
+  g += line(x - size * 0.2, y - size * 0.3, x + size * 0.2, y + size * 0.3, WHITE, 3, op * 0.8);
+  g += line(x + size * 0.2, y - size * 0.3, x - size * 0.2, y + size * 0.3, WHITE, 3, op * 0.8);
+  g += '</g>';
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.0, 1.05, smooth(u * 0.8));
+  var inboxYOffset = lerp(0, -20, smooth(u * 0.8));
+  s += '<g ' + camera(scale, 0, inboxYOffset) + '>';
+
+  // Inbox rectangle
+  s += rrectStroke(INBOX_X, INBOX_Y, INBOX_W, INBOX_H, 20, WHITE, 10, 1);
+
+  // Emails piling up
+  var emailCount = 20;
+  var inboxTop = INBOX_Y - INBOX_H / 2;
+  var inboxBot = INBOX_Y + INBOX_H / 2;
+  var pileHeight = lerp(0, INBOX_H + 200, easeOut(u));
+  var emailDropSpeed = lerp(0, 500, u);
+
+  for (var i = 0; i < emailCount; i++) {
+    var emailSeed = i * 0.123 + u * 0.05;
+    var emailX = INBOX_X + (rnd(emailSeed + 10) - 0.5) * (INBOX_W - EMAIL_MAX_W);
+    var emailW = lerp(EMAIL_MIN_W, EMAIL_MAX_W, rnd(emailSeed + 20));
+    var emailColor = rnd(emailSeed + 30) < 0.3 ? CORAL : WHITE;
+
+    var baseEmailY = inboxBot - (i * (EMAIL_H * 0.8)) - pileHeight * (i / emailCount);
+    var currentEmailY = baseEmailY + Math.sin(u * 10 + i) * 5; // slight bobbing
+
+    // Only draw if within or slightly above inbox
+    if (currentEmailY > inboxTop - 100) {
+      s += line(emailX - emailW / 2, currentEmailY, emailX + emailW / 2, currentEmailY, emailColor, 8, 1);
+    }
+  }
+
+  // Stick figure
+  s += stickFigure(SF_X, SF_Y, AMBER, 'scratch_head', 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14);
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+
+  var inboxOutlineColor = lerpColor(WHITE, BLUE, ramp(u, 0.0, 0.2));
+  var inboxOutlineWidth = lerp(10, 12, ramp(u, 0.0, 0.2));
+  var segmentOpacity = ramp(u, 0.2, 0.5);
+
+  // Inbox rectangle outline
+  s += rrectStroke(INBOX_X, INBOX_Y, INBOX_W, INBOX_H, 20, inboxOutlineColor, inboxOutlineWidth, 1);
+
+  // Folder divisions
+  var folderWidth = INBOX_W / FOLDER_COUNT;
+  for (var i = 1; i < FOLDER_COUNT; i++) {
+    var dividerX = INBOX_X - INBOX_W / 2 + folderWidth * i;
+    s += line(dividerX, INBOX_Y - INBOX_H / 2, dividerX, INBOX_Y + INBOX_H / 2, BLUE, 8, segmentOpacity);
+  }
+
+  // Emails flowing into segments
+  var emailCount = 20;
+  var inboxTop = INBOX_Y - INBOX_H / 2;
+  var inboxBot = INBOX_Y + INBOX_H / 2;
+  var flowSpeed = lerp(0, 600, easeIn(u));
+
+  for (var i = 0; i < emailCount; i++) {
+    var emailSeed = i * 0.123 + u * 0.05;
+    var targetFolderIdx = Math.floor(rnd(emailSeed + 40) * FOLDER_COUNT);
+    var targetFolderX = INBOX_X - INBOX_W / 2 + folderWidth * (targetFolderIdx + 0.5);
+
+    var emailX = targetFolderX + (rnd(emailSeed + 10) - 0.5) * (folderWidth - EMAIL_MAX_W);
+    var emailW = lerp(EMAIL_MIN_W, EMAIL_MAX_W, rnd(emailSeed + 20));
+    var emailColor = WHITE; // All emails are white when sorted
+
+    var startY = inboxTop - 200 - rnd(emailSeed + 50) * 100;
+    var endY = inboxBot - (i % 5) * (EMAIL_H * 1.2) - 50; // stack a few in each folder
+    var currentEmailY = lerp(startY, endY, easeOut(clamp(u * 1.5 - rnd(emailSeed + 60) * 0.2, 0, 1)));
+
+    if (currentEmailY > inboxTop - 100 && currentEmailY < inboxBot + 100) {
+      s += line(emailX - emailW / 2, currentEmailY, emailX + emailW / 2, currentEmailY, emailColor, 8, 1);
+    }
+  }
+
+  // Stick figure
+  s += stickFigure(SF_X, SF_Y, AMBER, 'surprise', 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH — naive assumption of pure AI convenience is challenged. */
+function scene3(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.95, smooth(u * 0.8));
+  s += '<g ' + camera(scale, 0, 0) + '>';
+
+  // Inbox rectangle outline
+  s += rrectStroke(INBOX_X, INBOX_Y, INBOX_W, INBOX_H, 20, BLUE, 12, 1);
+
+  // Folder divisions
+  var folderWidth = INBOX_W / FOLDER_COUNT;
+  for (var i = 1; i < FOLDER_COUNT; i++) {
+    var dividerX = INBOX_X - INBOX_W / 2 + folderWidth * i;
+    s += line(dividerX, INBOX_Y - INBOX_H / 2, dividerX, INBOX_Y + INBOX_H / 2, BLUE, 8, 1);
+  }
+
+  // Emails continue to flow (similar to scene 2, but less dynamic)
+  var emailCount = 20;
+  var inboxTop = INBOX_Y - INBOX_H / 2;
+  var inboxBot = INBOX_Y + INBOX_H / 2;
+
+  for (var i = 0; i < emailCount; i++) {
+    var emailSeed = i * 0.123 + u * 0.02;
+    var targetFolderIdx = Math.floor(rnd(emailSeed + 40) * FOLDER_COUNT);
+    var targetFolderX = INBOX_X - INBOX_W / 2 + folderWidth * (targetFolderIdx + 0.5);
+
+    var emailX = targetFolderX + (rnd(emailSeed + 10) - 0.5) * (folderWidth - EMAIL_MAX_W);
+    var emailW = lerp(EMAIL_MIN_W, EMAIL_MAX_W, rnd(emailSeed + 20));
+    var emailColor = WHITE;
+
+    var currentEmailY = inboxBot - (i % 5) * (EMAIL_H * 1.2) - 50 - (u * 50 * rnd(emailSeed + 70)); // slight scroll
+    if (currentEmailY < inboxTop) currentEmailY += (inboxBot - inboxTop);
+
+    s += line(emailX - emailW / 2, currentEmailY, emailX + emailW / 2, currentEmailY, emailColor, 8, 1);
+  }
+
+  // Stick figure
+  s += stickFigure(SF_X, SF_Y, AMBER, 'nod', 1);
+
+  // Coral thought bubble
+  var bubbleScale = ramp(u, 0.0, 0.3);
+  var bubbleFade = 1 - ramp(u, 0.7, 1.0);
+  var bubbleOp = bubbleScale * bubbleFade;
+  if (bubbleOp > 0.02) {
+    var bubbleX = SF_X + 150, bubbleY = SF_Y - 250;
+    var bubbleSize = 100;
+    s += rrect(bubbleX, bubbleY, bubbleSize * 1.6, bubbleSize * 1.2, 30, CORAL, bubbleOp);
+    s += dot(bubbleX - 60, bubbleY + 60, 20, CORAL, bubbleOp);
+    s += dot(bubbleX - 90, bubbleY + 90, 10, CORAL, bubbleOp);
+    s += aiBrain(bubbleX, bubbleY, 40, WHITE, bubbleOp * 0.9);
+
+    // Cracks
+    var crackOp = ramp(u, 0.6, 0.8) * bubbleFade;
+    if (crackOp > 0.02) {
+      s += line(bubbleX - 50, bubbleY - 30, bubbleX + 50, bubbleY + 30, WHITE, 5, crackOp);
+      s += line(bubbleX + 20, bubbleY - 40, bubbleX - 20, bubbleY + 40, WHITE, 5, crackOp);
+    }
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND — the true mechanism of attention management is revealed. */
+function scene4(u) {
+  var s = '';
+  var scale = lerp(0.95, 1.0, smooth(u * 0.8));
+  var panX = lerp(0, 50, smooth(u * 0.8));
+  s += '<g ' + camera(scale, panX, 0) + '>';
+
+  // Inbox rectangle outline - transparent
+  var inboxOutlineOp = lerp(1, 0.4, ramp(u, 0.0, 0.2));
+  s += rrectStroke(INBOX_X, INBOX_Y, INBOX_W, INBOX_H, 20, BLUE, 12, inboxOutlineOp);
+
+  // Folder divisions
+  var folderWidth = INBOX_W / FOLDER_COUNT;
+  for (var i = 1; i < FOLDER_COUNT; i++) {
+    var dividerX = INBOX_X - INBOX_W / 2 + folderWidth * i;
+    s += line(dividerX, INBOX_Y - INBOX_H / 2, dividerX, INBOX_Y + INBOX_H / 2, BLUE, 8, inboxOutlineOp);
+  }
+
+  // Emails (faintly visible, as background)
+  var emailCount = 20;
+  var inboxTop = INBOX_Y - INBOX_H / 2;
+  var inboxBot = INBOX_Y + INBOX_H / 2;
+  for (var i = 0; i < emailCount; i++) {
+    var emailSeed = i * 0.123 + u * 0.02;
+    var targetFolderIdx = Math.floor(rnd(emailSeed + 40) * FOLDER_COUNT);
+    var targetFolderX = INBOX_X - INBOX_W / 2 + folderWidth * (targetFolderIdx + 0.5);
+    var emailX = targetFolderX + (rnd(emailSeed + 10) - 0.5) * (folderWidth - EMAIL_MAX_W);
+    var emailW = lerp(EMAIL_MIN_W, EMAIL_MAX_W, rnd(emailSeed + 20));
+    var currentEmailY = inboxBot - (i % 5) * (EMAIL_H * 1.2) - 50 - (u * 50 * rnd(emailSeed + 70));
+    if (currentEmailY < inboxTop) currentEmailY += (inboxBot - inboxTop);
+    s += line(emailX - emailW / 2, currentEmailY, emailX + emailW / 2, currentEmailY, WHITE, 8, 0.2 * (1 - ramp(u, 0.0, 0.3)));
+  }
+
+  // Signal blue 'pattern' lines (abstract sender types to segments)
+  var patternOp = ramp(u, 0.2, 0.7);
+  if (patternOp > 0.02) {
+    var senderCount = 6;
+    var startX = INBOX_X - INBOX_W / 2 - 150;
+    var endX = INBOX_X + INBOX_W / 2 + 150;
+    for (var i = 0; i < senderCount; i++) {
+      var senderSeed = i * 0.345 + u * 0.1;
+      var senderY = TOP + 100 + (i / senderCount) * (BOT - TOP - 200) + Math.sin(u * 5 + i) * 20;
+      var senderX = lerp(startX, INBOX_X - INBOX_W / 2 - 50, rnd(senderSeed + 1));
+      var targetFolderIdx = Math.floor(rnd(senderSeed + 2) * FOLDER_COUNT);
+      var targetFolderCenterX = INBOX_X - INBOX_W / 2 + folderWidth * (targetFolderIdx + 0.5);
+      var targetY = INBOX_Y - INBOX_H / 2 + 100 + (rnd(senderSeed + 3) * (INBOX_H - 200));
+
+      // Sender icon (simple dot)
+      s += dot(senderX, senderY, 12, BLUE, patternOp);
+
+      // Curved path to target folder
+      var controlX = lerp(senderX, targetFolderCenterX, 0.5);
+      var controlY = lerp(senderY, targetY, 0.5) - 100;
+      var d = "M " + senderX + " " + senderY + " Q " + controlX + " " + controlY + " " + targetFolderCenterX + " " + targetY;
+      s += pathTag(d, BLUE, 6, patternOp);
+    }
+  }
+
+  // Stick figure
+  s += stickFigure(SF_X, SF_Y, AMBER, 'crossed_arms', 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE — losing moments stack into a tall coral memory column */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.85, smooth(u * 0.8));
+  var inboxYOffset = lerp(0, 80, smooth(u * 0.8));
+  s += '<g ' + camera(scale, 0, inboxYOffset) + '>';
+
+  // Inbox segments as solid rectangles
+  var folderWidth = INBOX_W / FOLDER_COUNT;
+  var inboxTop = INBOX_Y - INBOX_H / 2;
+  var inboxBot = INBOX_Y + INBOX_H / 2;
+
+  for (var i = 0; i < FOLDER_COUNT; i++) {
+    var folderX = INBOX_X - INBOX_W / 2 + folderWidth * (i + 0.5);
+    var folderColor = (i === 0) ? AMBER : DIM; // Primary (idx 0) is AMBER, others DIM
+    var folderHeight = INBOX_H;
+
+    // Primary folder glowing
+    var primaryGlowOp = (i === 0) ? lerp(0.8, 1.0, Math.sin(u * Math.PI * 2) * 0.5 + 0.5) : 0.8;
+    s += rrect(folderX, INBOX_Y, folderWidth, folderHeight, 10, folderColor, primaryGlowOp);
+
+    // Emails inside segments, desaturated in DIM folders
+    var emailCountPerFolder = 5;
+    for (var j = 0; j < emailCountPerFolder; j++) {
+      var emailSeed = i * 100 + j * 0.123 + u * 0.02;
+      var emailX = folderX + (rnd(emailSeed + 10) - 0.5) * (folderWidth - EMAIL_MAX_W);
+      var emailW = lerp(EMAIL_MIN_W, EMAIL_MAX_W, rnd(emailSeed + 20));
+      var currentEmailY = inboxBot - j * (EMAIL_H * 1.2) - 50 - (u * 50 * rnd(emailSeed + 70));
+      if (currentEmailY < inboxTop) currentEmailY += (inboxBot - inboxTop);
+      s += line(emailX - emailW / 2, currentEmailY, emailX + emailW / 2, currentEmailY, WHITE, 8, (i === 0) ? 1 : 0.3);
+    }
+  }
+
+  // Small 'collapse' visual for ignored sections (subtle lines closing in)
+  var collapseOp = ramp(u, 0.3, 0.7);
+  if (collapseOp > 0.02) {
+    for (var i = 1; i < FOLDER_COUNT; i++) { // For non-primary folders
+      var folderX = INBOX_X - INBOX_W / 2 + folderWidth * (i + 0.5);
+      var collapseY = lerp(inboxBot - 100, inboxBot - 50, easeOut(collapseOp));
+      s += line(folderX - folderWidth * 0.4, collapseY, folderX + folderWidth * 0.4, collapseY, DIM, 6, collapseOp * 0.8);
+      s += line(folderX - folderWidth * 0.4, collapseY + 20, folderX + folderWidth * 0.4, collapseY + 20, DIM, 6, collapseOp * 0.6);
+    }
+  }
+
+  // Stick figure
+  s += stickFigure(SF_X, SF_Y, AMBER, 'focus_gaze', 1);
+  // Gaze line fixed on primary folder
+  var gazeTargetX = INBOX_X - INBOX_W / 2 + folderWidth * 0.5;
+  var gazeTargetY = INBOX_Y - INBOX_H / 2 + 200;
+  s += line(SF_X, SF_Y - 140, gazeTargetX, gazeTargetY, AMBER, 5, 0.8);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE — seeing the system at play, shaping digital habits. */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.85, 1.0, smooth(clamp(u / 0.7, 0, 1)));
+  var inboxYOffset = lerp(80, 0, smooth(u * 0.8));
+  s += '<g ' + camera(scale, 0, inboxYOffset) + '>';
+
+  // Inbox segments back to outlines
+  var folderWidth = INBOX_W / FOLDER_COUNT;
+  var inboxTop = INBOX_Y - INBOX_H / 2;
+  var inboxBot = INBOX_Y + INBOX_H / 2;
+
+  // Outer inbox outline
+  s += rrectStroke(INBOX_X, INBOX_Y, INBOX_W, INBOX_H, 20, BLUE, 12, 1);
+
+  // Folder divisions
+  for (var i = 1; i < FOLDER_COUNT; i++) {
+    var dividerX = INBOX_X - INBOX_W / 2 + folderWidth * i;
+    s += line(dividerX, INBOX_Y - INBOX_H / 2, dividerX, INBOX_Y + INBOX_H / 2, BLUE, 8, 1);
+  }
+
+  // Emails (subtly visible)
+  var emailCount = 20;
+  for (var i = 0; i < emailCount; i++) {
+    var emailSeed = i * 0.123 + u * 0.02;
+    var targetFolderIdx = Math.floor(rnd(emailSeed + 40) * FOLDER_COUNT);
+    var targetFolderX = INBOX_X - INBOX_W / 2 + folderWidth * (targetFolderIdx + 0.5);
+    var emailX = targetFolderX + (rnd(emailSeed + 10) - 0.5) * (folderWidth - EMAIL_MAX_W);
+    var emailW = lerp(EMAIL_MIN_W, EMAIL_MAX_W, rnd(emailSeed + 20));
+    var currentEmailY = inboxBot - (i % 5) * (EMAIL_H * 1.2) - 50 - (u * 50 * rnd(emailSeed + 70));
+    if (currentEmailY < inboxTop) currentEmailY += (inboxBot - inboxTop);
+    s += line(emailX - emailW / 2, currentEmailY, emailX + emailW / 2, currentEmailY, WHITE, 8, 0.4);
+  }
+
+  // Signal blue 'flow lines' (subtly visible, showing underlying system)
+  var flowOp = ramp(u, 0.3, 0.8);
+  if (flowOp > 0.02) {
+    var flowLineCount = 8;
+    for (var i = 0; i < flowLineCount; i++) {
+      var flowSeed = i * 0.456 + u * 0.1;
+      var startX = INBOX_X - INBOX_W / 2 - 80;
+      var endX = INBOX_X + INBOX_W / 2 + 80;
+      var startY = inboxTop + (i / flowLineCount) * INBOX_H;
+      var targetFolderIdx = Math.floor(rnd(flowSeed + 1) * FOLDER_COUNT);
+      var targetFolderCenterX = INBOX_X - INBOX_W / 2 + folderWidth * (targetFolderIdx + 0.5);
+      var targetY = startY + (rnd(flowSeed + 2) - 0.5) * 50;
+
+      var controlX = lerp(startX, targetFolderCenterX, 0.5);
+      var controlY = lerp(startY, targetY, 0.5) - 50;
+      var d = "M " + startX + " " + startY + " Q " + controlX + " " + controlY + " " + targetFolderCenterX + " " + targetY;
+      s += pathTag(d, BLUE, 4, flowOp * 0.4);
+    }
+  }
+
+  // Stick figure
+  s += stickFigure(SF_X, SF_Y, AMBER, 'knowing_nod', 1);
+
+  s += '</g>';
+  return s;
+}
+
+// Helper for color interpolation (simple RGB for now)
+function lerpColor(c1, c2, t) {
+  var r1 = parseInt(c1.substring(1, 3), 16), g1 = parseInt(c1.substring(3, 5), 16), b1 = parseInt(c1.substring(5, 7), 16);
+  var r2 = parseInt(c2.substring(1, 3), 16), g2 = parseInt(c2.substring(3, 5), 16), b2 = parseInt(c2.substring(5, 7), 16);
+  var r = Math.round(lerp(r1, r2, t)), g = Math.round(lerp(g1, g2, t)), b = Math.round(lerp(b1, b2, t));
+  return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
+}
+
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
