@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Your Food Order is Split Between Two Apps</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / the apps
+var AMBER = "#F2A93B";              // warm amber   -> YOU / your order / food
+var CORAL = "#FF5B5B";              // coral red    -> confusion / inefficiency
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* stick figure: x, y is base of feet */
+function stickFigure(x, y, scale, col, pose, op) {
+  scale = scale == null ? 1 : scale;
+  col = col == null ? WHITE : col;
+  op = op == null ? 1 : op;
+  var sw = 8 * scale;
+  var headR = 24 * scale;
+  var bodyH = 100 * scale;
+  var armL = 60 * scale;
+  var legL = 80 * scale;
+
+  var g = '<g opacity="' + op + '">';
+  g += dot(x, y - legL - bodyH - headR, headR, col); // Head
+
+  // Body
+  g += line(x, y - legL, x, y - legL - bodyH, col, sw);
+
+  // Legs
+  g += line(x, y - legL, x - 20 * scale, y, col, sw);
+  g += line(x, y - legL, x + 20 * scale, y, col, sw);
+
+  // Arms
+  var armY = y - legL - bodyH * 0.6;
+  if (pose === 'phone') {
+    g += line(x, armY, x + 30 * scale, armY - armL * 0.5, col, sw); // Right arm up
+    g += line(x, armY, x - 20 * scale, armY + armL * 0.2, col, sw); // Left arm down
+  } else if (pose === 'driving') {
+    g += line(x, armY, x - 30 * scale, armY - 10 * scale, col, sw);
+    g += line(x, armY, x + 30 * scale, armY - 10 * scale, col, sw);
+  } else if (pose === 'confused') {
+    g += line(x, armY, x - 40 * scale, armY - 20 * scale, col, sw);
+    g += line(x, armY, x + 40 * scale, armY - 20 * scale, col, sw);
+    g += ring(x, y - legL - bodyH - headR * 1.8, headR * 0.8, col, sw * 0.8, 0.7); // Question mark
+  } else if (pose === 'handing') {
+    g += line(x, armY, x - 30 * scale, armY + 20 * scale, col, sw);
+    g += line(x, armY, x + 50 * scale, armY + 10 * scale, col, sw); // Arm extended
+  } else { // Standing / default
+    g += line(x, armY, x - armL * 0.7, armY + armL * 0.3, col, sw);
+    g += line(x, armY, x + armL * 0.7, armY + armL * 0.3, col, sw);
+  }
+  g += '</g>';
+  return g;
+}
+
+/* phone: simple rounded rectangle */
+function phone(x, y, w, h, col, op) {
+  return rrect(x, y, w, h, 10, col, op);
+}
+
+/* foodOrderIcon: simple amber dot/card */
+function foodOrderIcon(x, y, r, col, op) {
+  return rrect(x, y, r * 2.2, r * 1.6, r * 0.5, col, op);
+}
+
+/* deliveryBag: amber outline, white fill, optional split, optional items */
+function deliveryBag(x, y, w, h, col, split, items, op) {
+  op = op == null ? 1 : op;
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 20, WHITE); // White fill
+  g += rrectStroke(x, y, w, h, 20, col, 10); // Amber outline
+  g += line(x - w * 0.4, y - h * 0.5 - 20, x + w * 0.4, y - h * 0.5 - 20, col, 10); // Handle base
+  g += pathTag("M " + (x - w * 0.3) + " " + (y - h * 0.5 - 20) + " Q " + (x - w * 0.2) + " " + (y - h * 0.5 - 60) + " " + x + " " + (y - h * 0.5 - 60), col, 10);
+  g += pathTag("M " + (x + w * 0.3) + " " + (y - h * 0.5 - 20) + " Q " + (x + w * 0.2) + " " + (y - h * 0.5 - 60) + " " + x + " " + (y - h * 0.5 - 60), col, 10);
+
+  if (split) {
+    g += line(x, y - h * 0.4, x, y + h * 0.4, col, 6, 0.7); // Internal divider
+  }
+  if (items === 1) {
+    g += foodOrderIcon(x, y, 20, AMBER, 0.9);
+  } else if (items === 2) {
+    g += foodOrderIcon(x - w * 0.2, y, 18, AMBER, 0.9);
+    g += foodOrderIcon(x + w * 0.2, y, 18, AMBER, 0.9);
+  } else if (items === 3) { // Merged item
+    g += foodOrderIcon(x, y, 28, AMBER, 0.9);
+  }
+  g += '</g>';
+  return g;
+}
+
+/* car: simple delivery vehicle */
+function car(x, y, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += '<rect x="' + (x - 60) + '" y="' + (y - 30) + '" width="120" height="60" rx="18" fill="none" stroke="' + col + '" stroke-width="10"/>';
+  g += dot(x - 35, y + 35, 12, col);
+  g += dot(x + 35, y + 35, 12, col);
+  g += rrect(x + 20, y - 10, 50, 25, 6, col); // Window
+  g += '</g>';
+  return g;
+}
+
+/* restaurant: simple building with a roof */
+function restaurant(x, y, w, h, col, op) {
+  op = op == null ? 1 : op;
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 10, col, 0.1);
+  g += rrectStroke(x, y, w, h, 10, col, 8);
+  g += line(x - w / 2 - 10, y - h / 2, x + w / 2 + 10, y - h / 2, col, 8); // Roof base
+  g += line(x - w / 2 - 10, y - h / 2, x, y - h / 2 - 40, col, 8); // Left roof
+  g += line(x + w / 2 + 10, y - h / 2, x, y - h / 2 - 40, col, 8); // Right roof
+  g += dot(x, y + h * 0.2, 12, col); // Door knob / detail
+  g += '</g>';
+  return g;
+}
+
+/* system box: blue container */
+function systemBox(x, y, w, h, col, op) {
+  return rrect(x, y, w, h, 30, col, op);
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + ORDER */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.96, smooth(u));
+  var sy = lerp(0, -20, smooth(u));
+  s += '<g ' + camera(scale, 0, sy) + '>';
+
+  var figureY = BOT - 200;
+  var phoneX = CX + 120, phoneY = figureY - 180;
+  var bagX = CX - 180, bagY = figureY - 100;
+
+  s += stickFigure(CX, figureY, 1.0, WHITE, 'phone', 1);
+  s += phone(phoneX, phoneY, 100, 160, DIM, 1);
+
+  var orderTravel = ramp(u, 0.1, 0.7);
+  var orderFade = ramp(u, 0.0, 0.2);
+  var orderX = lerp(phoneX, bagX, easeOut(orderTravel));
+  var orderY = lerp(phoneY, bagY, easeOut(orderTravel));
+  var orderR = lerp(20, 24, easeOut(orderTravel));
+  s += foodOrderIcon(orderX, orderY, orderR, AMBER, orderFade * (1 - ramp(u, 0.8, 1.0)));
+
+  var bagScale = lerp(1.0, 1.05, pulse(u, 0.75, 0.2));
+  var bagW = 240 * bagScale, bagH = 300 * bagScale;
+  s += deliveryBag(bagX, bagY, bagW, bagH, AMBER, false, u > 0.8 ? 1 : 0, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): PLATFORM SPLIT */
+function scene2(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var systemBoxY = CY - 200;
+  var systemBoxW = 400, systemBoxH = 300;
+  s += systemBox(CX, systemBoxY, systemBoxW, systemBoxH, BLUE, 0.8);
+
+  var bagX = CX - 300, bagY = BOT - 300;
+  s += deliveryBag(bagX, bagY, 240, 300, AMBER, u > 0.5, u > 0.8 ? 2 : 1, 1);
+
+  var orderEnter = ramp(u, 0.0, 0.3);
+  var orderSplit = ramp(u, 0.4, 0.6);
+  var orderExit = ramp(u, 0.7, 1.0);
+
+  var entryX = lerp(bagX, CX, orderEnter);
+  var entryY = lerp(bagY, systemBoxY - systemBoxH * 0.3, orderEnter);
+  s += foodOrderIcon(entryX, entryY, 24, AMBER, 1 - orderSplit);
+
+  // Split items inside system box
+  if (orderSplit > 0) {
+    var item1X = lerp(CX, CX - 100, orderExit);
+    var item1Y = lerp(systemBoxY, TOP + 200, orderExit);
+    s += foodOrderIcon(item1X, item1Y, 20, AMBER, orderSplit);
+
+    var item2X = lerp(CX, CX + 100, orderExit);
+    var item2Y = lerp(systemBoxY, TOP + 200, orderExit);
+    s += foodOrderIcon(item2X, item2Y, 20, AMBER, orderSplit);
+
+    // Paths for split items
+    if (orderExit > 0) {
+      s += line(CX, systemBoxY, item1X, item1Y, BLUE, 6, orderExit * 0.6);
+      s += line(CX, systemBoxY, item2X, item2Y, BLUE, 6, orderExit * 0.6);
+    }
+  }
+
+  var driver1X = lerp(CX - 100, CX - 250, orderExit);
+  var driver1Y = lerp(systemBoxY + 100, BOT - 200, orderExit);
+  s += stickFigure(driver1X, driver1Y, 0.8, WHITE, 'driving', orderExit);
+
+  var driver2X = lerp(CX + 100, CX + 250, orderExit);
+  var driver2Y = lerp(systemBoxY + 100, BOT - 200, orderExit);
+  s += stickFigure(driver2X, driver2Y, 0.8, WHITE, 'driving', orderExit);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): TWO RESTAURANTS */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var bagY = BOT - 300;
+  s += deliveryBag(CX, bagY, 240, 300, AMBER, true, 2, 1);
+
+  var rest1X = CX - 300, rest1Y = CY - 200;
+  var rest2X = CX + 300, rest2Y = CY - 200;
+  s += restaurant(rest1X, rest1Y, 200, 200, BLUE, 0.8);
+  s += restaurant(rest2X, rest2Y, 200, 200, BLUE, 0.8);
+
+  var driverStartX = CX, driverStartY = BOT - 200;
+  var driverTravel = smooth(ramp(u, 0.0, 0.7));
+
+  // Driver 1 path
+  var d1X = lerp(driverStartX, rest1X, driverTravel);
+  var d1Y = lerp(driverStartY, rest1Y + 100, driverTravel);
+  s += stickFigure(d1X, d1Y, 0.8, WHITE, 'driving', 1);
+  s += line(driverStartX, driverStartY - 50, d1X, d1Y - 50, BLUE, 6, 0.5);
+  if (driverTravel > 0.8) s += foodOrderIcon(rest1X, rest1Y + 20, 20, AMBER, ramp(u, 0.8, 1.0));
+
+  // Driver 2 path
+  var d2X = lerp(driverStartX, rest2X, driverTravel);
+  var d2Y = lerp(driverStartY, rest2Y + 100, driverTravel);
+  s += stickFigure(d2X, d2Y, 0.8, WHITE, 'driving', 1);
+  s += line(driverStartX, driverStartY - 50, d2X, d2Y - 50, BLUE, 6, 0.5);
+  if (driverTravel > 0.8) s += foodOrderIcon(rest2X, rest2Y + 20, 20, AMBER, ramp(u, 0.8, 1.0));
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): TWO DELIVERIES */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var bagY = BOT - 300;
+  s += deliveryBag(CX, bagY, 240, 300, AMBER, true, 2, 1);
+
+  var userX = CX, userY = BOT - 200;
+  s += stickFigure(userX, userY, 1.0, WHITE, 'standing', 1);
+
+  var driver1StartX = CX - 300, driver1StartY = TOP + 200;
+  var driver2StartX = CX + 300, driver2StartY = TOP + 200;
+
+  var path1End = ramp(u, 0.0, 0.6);
+  var path2End = ramp(u, 0.2, 0.9); // Second driver is slower
+
+  var d1X = lerp(driver1StartX, userX - 100, easeIn(path1End));
+  var d1Y = lerp(driver1StartY, userY - 100, easeIn(path1End));
+  s += car(d1X, d1Y, BLUE, 1);
+  s += foodOrderIcon(d1X, d1Y - 60, 18, AMBER, 1);
+
+  var d2X = lerp(driver2StartX, userX + 100, easeIn(path2End));
+  var d2Y = lerp(driver2StartY, userY - 100, easeIn(path2End));
+  s += car(d2X, d2Y, BLUE, 1);
+  s += foodOrderIcon(d2X, d2Y - 60, 18, AMBER, 1);
+
+  // Indicate delay for driver 2
+  if (path2End > 0.3 && path2End < 0.7) {
+    var delayPulse = pulse(u, 0.5, 0.2);
+    s += ring(d2X, d2Y - 100, 30, CORAL, 10, delayPulse * 0.8);
+    s += line(d2X - 20, d2Y - 100 - 20, d2X + 20, d2Y - 100 + 20, CORAL, 10, delayPulse * 0.8);
+    s += line(d2X - 20, d2Y - 100 + 20, d2X + 20, d2Y - 100 - 20, CORAL, 10, delayPulse * 0.8);
+  }
+
+  // Paths
+  s += line(driver1StartX, driver1StartY, userX - 100, userY - 100, BLUE, 6, 0.3);
+  s += line(driver2StartX, driver2StartY, userX + 100, userY - 100, BLUE, 6, 0.3);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): CONFUSION AT YOUR DOOR */
+function scene5(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var userX = CX, userY = BOT - 200;
+  var bagX = userX + 150, bagY = userY - 100;
+  s += deliveryBag(bagX, bagY, 240, 300, AMBER, true, 2, 1);
+
+  var arrival1 = ramp(u, 0.0, 0.4);
+  var arrival2 = ramp(u, 0.3, 0.8);
+
+  var driver1X = lerp(CX - 400, CX - 150, arrival1);
+  var driver1Y = lerp(TOP + 100, userY - 100, arrival1);
+  s += stickFigure(driver1X, driver1Y, 0.8, WHITE, 'handing', 1);
+  s += foodOrderIcon(driver1X + 50, driver1Y - 100, 18, AMBER, arrival1);
+
+  var driver2X = lerp(CX + 400, CX + 150, arrival2);
+  var driver2Y = lerp(TOP + 100, userY - 100, arrival2);
+  s += stickFigure(driver2X, driver2Y, 0.8, WHITE, 'handing', 1);
+  s += foodOrderIcon(driver2X - 50, driver2Y - 100, 18, AMBER, arrival2);
+
+  var confusion = pulse(u, 0.6, 0.3);
+  s += stickFigure(userX, userY, 1.0, WHITE, u > 0.4 && u < 0.9 ? 'confused' : 'standing', 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE — one shared finish line, then snap back to plain lanes */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.9, smooth(u));
+  var ty = lerp(0, -50, smooth(u));
+  s += '<g ' + camera(scale, 0, ty) + '>';
+
+  var systemGridOp = ramp(u, 0.0, 0.4);
+  var gridX = CX, gridY = CY - 200;
+  var cellSize = 80;
+  for (var i = -2; i <= 2; i++) {
+    for (var j = -2; j <= 2; j++) {
+      s += rrect(gridX + i * cellSize, gridY + j * cellSize, cellSize * 0.8, cellSize * 0.8, 10, BLUE, 0.08 * systemGridOp);
+    }
+  }
+  s += rrectStroke(gridX, gridY, cellSize * 5, cellSize * 5, 20, BLUE, 8, 0.6 * systemGridOp);
+
+  var bagX = CX, bagY = BOT - 300;
+  var bagSplit = lerp(1, 0, ramp(u, 0.6, 0.9));
+  var bagItems = u > 0.8 ? 3 : 2; // 3 means merged item
+  s += deliveryBag(bagX, bagY, 240, 300, AMBER, bagSplit > 0.5, bagItems, 1);
+
+  var pathMerge = ramp(u, 0.2, 0.7);
+  var path1StartX = CX - 250, path1StartY = TOP + 200;
+  var path2StartX = CX + 250, path2StartY = TOP + 200;
+  var mergePointX = CX, mergePointY = CY - 100;
+
+  s += line(path1StartX, path1StartY, lerp(path1StartX, mergePointX, pathMerge), lerp(path1StartY, mergePointY, pathMerge), BLUE, 8, 0.7);
+  s += line(path2StartX, path2StartY, lerp(path2StartX, mergePointX, pathMerge), lerp(path2StartY, mergePointY, pathMerge), BLUE, 8, 0.7);
+
+  // "Efficiency" vs "Experience" scales
+  var scaleY = CY + 300;
+  var balancePoint = CX;
+  var balanceTilt = lerp(0, -60, smooth(ramp(u, 0.4, 0.8)));
+
+  s += line(balancePoint - 200, scaleY, balancePoint + 200, scaleY, WHITE, 6, 0.5); // Base
+  s += line(balancePoint, scaleY, balancePoint, scaleY - 60, WHITE, 6, 0.5); // Fulcrum
+  s += line(balancePoint - 150 - balanceTilt, scaleY - 60, balancePoint + 150 - balanceTilt, scaleY - 60, WHITE, 8, 1); // Beam
+
+  s += rrect(balancePoint - 150 - balanceTilt, scaleY - 120, 80, 80, 10, BLUE, 0.9); // System efficiency
+  s += rrect(balancePoint + 150 - balanceTilt, scaleY - 120, 80, 80, 10, AMBER, 0.9); // User experience
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final scene is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

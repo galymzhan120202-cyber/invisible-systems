@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Quick Reply Buttons Are So Addictive</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue  -> system / rules
+var AMBER = "#F2A93B";              // warm amber   -> YOU / desire
+var CORAL = "#FF5B5B";              // coral red    -> friction / cost
+
+var DUR = 60;
+window.__duration = DUR;
+
+// Stick figure dimensions
+var SF_H = 200; // height
+var SF_STROKE = 9;
+var SF_HEAD_R = 30;
+
+// Phone dimensions
+var PHONE_W = 380;
+var PHONE_H = 720;
+var PHONE_RAD = 40;
+var SCREEN_W = PHONE_W - 40;
+var SCREEN_H = PHONE_H - 100;
+var SCREEN_RAD = 20;
+var PHONE_X = CX;
+var PHONE_Y = CY - 100; // Adjusted to be higher, so stick figure holds it comfortably and it's not too low.
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, fill) {
+  return '<path d="' + d + '" fill="' + (fill || 'none') + '" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+// Stick figure builder
+function stickFigure(x, y, headTilt, armAngle, legAngle, bodyScaleY, op, color) {
+  color = color || WHITE;
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" stroke="' + color + '" stroke-width="' + SF_STROKE + '" stroke-linecap="round">';
+  var headY = y - SF_H / 2 + SF_HEAD_R;
+  var bodyY = headY + SF_HEAD_R;
+  var bodyH = SF_H - SF_HEAD_R * 2 - SF_HEAD_R / 2; // Body length
+  bodyScaleY = bodyScaleY || 1;
+
+  // Head
+  g += '<circle cx="' + x + '" cy="' + headY + '" r="' + SF_HEAD_R + '" fill="none" transform="rotate(' + (headTilt * 180 / Math.PI) + ' ' + x + ' ' + headY + ')"/>';
+
+  // Body
+  g += line(x, bodyY, x, bodyY + bodyH * bodyScaleY);
+
+  // Arms (shoulder at bodyY + 20, elbow/hand position based on angle)
+  var shoulderY = bodyY + 20;
+  var armLength = bodyH * 0.45;
+  var arm1X = x - Math.cos(armAngle) * armLength;
+  var arm1Y = shoulderY + Math.sin(armAngle) * armLength;
+  var arm2X = x + Math.cos(armAngle) * armLength;
+  var arm2Y = shoulderY + Math.sin(armAngle) * armLength;
+  g += line(x, shoulderY, arm1X, arm1Y);
+  g += line(x, shoulderY, arm2X, arm2Y);
+
+  // Legs (hip at bodyY + bodyH, knee/foot position based on angle)
+  var hipY = bodyY + bodyH * bodyScaleY;
+  var legLength = bodyH * 0.5;
+  var leg1X = x - Math.cos(legAngle) * legLength;
+  var leg1Y = hipY + Math.sin(legAngle) * legLength;
+  var leg2X = x + Math.cos(legAngle) * legLength;
+  var leg2Y = hipY + Math.sin(legAngle) * legLength;
+  g += line(x, hipY, leg1X, leg1Y);
+  g += line(x, hipY, leg2X, leg2Y);
+
+  g += '</g>';
+  return g;
+}
+
+// Phone builder
+function phone(x, y, w, h, rad, screenW, screenH, screenRad, bgColor, screenColor, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, rad, bgColor); // Phone body
+  g += rrect(x, y, screenW, screenH, screenRad, screenColor); // Screen
+  g += '</g>';
+  return g;
+}
+
+// Message bubble
+function messageBubble(x, y, w, h, rad, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, rad, col);
+  // Tail
+  g += pathTag("M " + (x + w / 2 - 20) + " " + (y + h / 2 - 10) + " L " + (x + w / 2 + 10) + " " + (y + h / 2 + 20) + " L " + (x + w / 2 - 40) + " " + (y + h / 2) + " Z", col, 0, op, col);
+  g += '</g>';
+  return g;
+}
+
+// Thought bubble with a simple keyboard icon
+function thoughtBubble(x, y, size, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" fill="none" stroke="' + WHITE + '" stroke-width="6" stroke-linecap="round">';
+  // Main bubble
+  g += ring(x, y, size, WHITE, 6);
+  // Smaller bubbles for thought trail
+  g += ring(x - size * 0.8, y + size * 0.8, size * 0.4, WHITE, 4);
+  g += ring(x - size * 1.2, y + size * 1.4, size * 0.2, WHITE, 3);
+  // Keyboard icon inside
+  var kx = x, ky = y + size * 0.1;
+  var kw = size * 1.2, kh = size * 0.8;
+  g += rrectStroke(kx, ky, kw, kh, 8, WHITE, 6);
+  g += line(kx - kw * 0.3, ky - kh * 0.2, kx - kw * 0.3, ky + kh * 0.2);
+  g += line(kx + kw * 0.3, ky - kh * 0.2, kx + kw * 0.3, ky + kh * 0.2);
+  g += line(kx - kw * 0.3, ky, kx + kw * 0.3, ky);
+  g += '</g>';
+  return g;
+}
+
+// Quick reply button (simple glyph: dot, bar)
+function quickReplyButton(x, y, w, h, rad, col, glyphType, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, rad, col);
+  // Glyph (e.g., a dot for "Okay!", two dots for "Haha!", a bar for "Yes!")
+  if (glyphType === 'dot') {
+    g += dot(x, y, h * 0.2, WHITE);
+  } else if (glyphType === 'two-dots') {
+    g += dot(x - w * 0.15, y, h * 0.2, WHITE);
+    g += dot(x + w * 0.15, y, h * 0.2, WHITE);
+  } else if (glyphType === 'bar') {
+    g += rrect(x, y, w * 0.4, h * 0.15, 4, WHITE);
+  }
+  g += '</g>';
+  return g;
+}
+
+// Arrow for diagrams
+function arrow(x1, y1, x2, y2, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var headSize = sw * 1.8;
+  var angle = Math.atan2(y2 - y1, x2 - x1);
+  var dx = Math.cos(angle);
+  var dy = Math.sin(angle);
+  var arrowPath = "M " + x1 + " " + y1 + " L " + x2 + " " + y2 +
+                  " M " + x2 + " " + y2 + " L " + (x2 - headSize * Math.cos(angle - Math.PI / 6)) + " " + (y2 - headSize * Math.sin(angle - Math.PI / 6)) +
+                  " M " + x2 + " " + y2 + " L " + (x2 - headSize * Math.cos(angle + Math.PI / 6)) + " " + (y2 - headSize * Math.sin(angle + Math.PI / 6));
+  return pathTag(arrowPath, col, sw, op);
+}
+
+// Wavy line for reward loop
+function wavyLine(x1, y1, x2, y2, col, sw, waveHeight, numWaves, op) {
+  op = (op == null ? 1 : op);
+  var path = "M " + x1 + " " + y1;
+  var dx = (x2 - x1);
+  var dy = (y2 - y1);
+  var len = Math.sqrt(dx * dx + dy * dy);
+  var angle = Math.atan2(dy, dx);
+
+  for (var i = 0; i <= numWaves; i++) {
+    var p = i / numWaves;
+    var currentX = x1 + p * dx;
+    var currentY = y1 + p * dy;
+    var perpX = -dy / len * waveHeight;
+    var perpY = dx / len * waveHeight;
+
+    if (i > 0 && i < numWaves) {
+      path += " Q " + (currentX + (i % 2 === 0 ? perpX : -perpX)) + " " + (currentY + (i % 2 === 0 ? perpY : -perpY)) + " " + currentX + " " + currentY;
+    } else if (i === 0) {
+      // Start point
+    } else {
+      path += " L " + currentX + " " + currentY; // End point
+    }
+  }
+  return pathTag(path, col, sw, op);
+}
+
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var sfX = CX + 280, sfY = CY + 400; // Stick figure position
+  var phoneScale = lerp(1, 1.05, smooth(u * 0.5));
+  var phoneShiftY = lerp(0, -20, smooth(u * 0.5));
+  var msgOp = ramp(u, 0.1, 0.4);
+  var kbOp = ramp(u, 0.5, 0.8);
+
+  s += '<g ' + camera(phoneScale, 0, phoneShiftY) + '>';
+  // Stick figure holding phone
+  s += stickFigure(sfX, sfY, 0, Math.PI * 0.6, Math.PI * 0.5, 1, 1); // Arms holding phone
+  s += phone(PHONE_X, PHONE_Y, PHONE_W, PHONE_H, PHONE_RAD, SCREEN_W, SCREEN_H, SCREEN_RAD, DIM, '#111111', 1);
+
+  // Message bubble on screen
+  var msgY = PHONE_Y - SCREEN_H / 2 + 100;
+  s += messageBubble(PHONE_X, msgY, SCREEN_W * 0.7, 100, 20, WHITE, msgOp);
+
+  // Thought bubble with keyboard icon
+  var headTilt = lerp(0, Math.PI / 12, smooth(u * 0.7)); // Head tilt
+  var thoughtX = sfX - 100;
+  var thoughtY = sfY - SF_H / 2 - 100;
+  s += thoughtBubble(thoughtX, thoughtY, 40, kbOp);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var sfX = CX + 280, sfY = CY + 400;
+  var tapX = PHONE_X + 80;
+  var tapY = PHONE_Y + SCREEN_H / 2 - 100;
+
+  s += '<g ' + camera(1, 0, 0) + '>';
+  s += stickFigure(sfX, sfY, 0, Math.PI * 0.6, Math.PI * 0.5, 1, 1);
+  s += phone(PHONE_X, PHONE_Y, PHONE_W, PHONE_H, PHONE_RAD, SCREEN_W, SCREEN_H, SCREEN_RAD, DIM, '#111111', 1);
+
+  // Message bubble (persists briefly, then shrinks and flies off)
+  var msgScale = lerp(1, 0, easeOut(ramp(u, 0.7, 1.0)));
+  var msgFlyY = lerp(PHONE_Y - SCREEN_H / 2 + 100, PHONE_Y - SCREEN_H / 2 - 300, easeOut(ramp(u, 0.7, 1.0)));
+  s += '<g transform="translate(0 ' + (msgFlyY - (PHONE_Y - SCREEN_H / 2 + 100)) + ') scale(' + msgScale + ')">';
+  s += messageBubble(PHONE_X, PHONE_Y - SCREEN_H / 2 + 100, SCREEN_W * 0.7, 100, 20, WHITE, 1);
+  s += '</g>';
+
+  // Quick reply buttons appear
+  var btnOp = ramp(u, 0.1, 0.4);
+  var btnY1 = PHONE_Y + SCREEN_H / 2 - 160;
+  var btnY2 = PHONE_Y + SCREEN_H / 2 - 100;
+  var btnY3 = PHONE_Y + SCREEN_H / 2 - 40;
+  var btnW = SCREEN_W * 0.5;
+  var btnH = 40;
+  var btnRad = 10;
+
+  s += quickReplyButton(PHONE_X, btnY1, btnW, btnH, btnRad, AMBER, 'two-dots', btnOp); // Haha!
+  s += quickReplyButton(PHONE_X, btnY2, btnW, btnH, btnRad, AMBER, 'dot', btnOp);      // Okay!
+  s += quickReplyButton(PHONE_X, btnY3, btnW, btnH, btnRad, AMBER, 'bar', btnOp);      // Yes!
+
+  // Finger tap animation
+  var fingerTap = ramp(u, 0.3, 0.5);
+  if (fingerTap > 0 && fingerTap < 1) {
+    var fingerX = lerp(sfX - 10, tapX, easeOut(fingerTap));
+    var fingerY = lerp(sfY + 10, tapY, easeOut(fingerTap));
+    s += line(sfX - 10, sfY + 10, fingerX, fingerY, WHITE, SF_STROKE, 1);
+  } else if (fingerTap >= 1) {
+    s += line(sfX - 10, sfY + 10, tapX, tapY, WHITE, SF_STROKE, 1);
+    // Button flash
+    var flashOp = pulse(u, 0.5, 0.05);
+    s += rrect(tapX, tapY, btnW, btnH, btnRad, AMBER, flashOp * 0.8);
+  }
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH — why is this so hard to resist? */
+function scene3(u) {
+  var s = '';
+  var sfX = CX + 280, sfY = CY + 400;
+  var headTilt = Math.sin(u * Math.PI * 2) * Math.PI / 30; // Slight head shake
+  var fingerShake = Math.sin(u * 20) * 5; // Finger shake
+  var fingerX = PHONE_X + 80 + fingerShake;
+  var fingerY = PHONE_Y + SCREEN_H / 2 - 100 + fingerShake;
+
+  s += '<g ' + camera(1, 0, 0) + '>';
+  s += stickFigure(sfX, sfY, headTilt, Math.PI * 0.6, Math.PI * 0.5, 1, 1);
+  s += phone(PHONE_X, PHONE_Y, PHONE_W, PHONE_H, PHONE_RAD, SCREEN_W, SCREEN_H, SCREEN_RAD, DIM, '#111111', 1);
+
+  // Rapid cycling messages and quick replies
+  var cycle = Math.floor(u * 3); // Cycle through 3 states
+  var cycleU = (u * 3) % 1; // Local time within a cycle
+  var msgOp = ramp(cycleU, 0.0, 0.3) * (1 - ramp(cycleU, 0.7, 1.0));
+  var btnOp = ramp(cycleU, 0.1, 0.4) * (1 - ramp(cycleU, 0.6, 0.9));
+
+  var msgY = PHONE_Y - SCREEN_H / 2 + 100;
+  s += messageBubble(PHONE_X, msgY, SCREEN_W * 0.7, 100, 20, WHITE, msgOp);
+
+  var btnY1 = PHONE_Y + SCREEN_H / 2 - 160;
+  var btnY2 = PHONE_Y + SCREEN_H / 2 - 100;
+  var btnY3 = PHONE_Y + SCREEN_H / 2 - 40;
+  var btnW = SCREEN_W * 0.5;
+  var btnH = 40;
+  var btnRad = 10;
+
+  // Coral tint on buttons when finger hovers
+  var btnColor = (ramp(u, 0.5, 0.8) > 0.5) ? CORAL : AMBER;
+  var btnStroke = (ramp(u, 0.5, 0.8) > 0.5) ? CORAL : 'none';
+  var btnStrokeW = (ramp(u, 0.5, 0.8) > 0.5) ? 5 : 0;
+
+  s += quickReplyButton(PHONE_X, btnY1, btnW, btnH, btnRad, btnColor, 'two-dots', btnOp);
+  s += quickReplyButton(PHONE_X, btnY2, btnW, btnH, btnRad, btnColor, 'dot', btnOp);
+  s += quickReplyButton(PHONE_X, btnY3, btnW, btnH, btnRad, btnColor, 'bar', btnOp);
+  if (btnStroke !== 'none') {
+    s += rrectStroke(PHONE_X, btnY2, btnW, btnH, btnRad, btnStroke, btnStrokeW, btnOp);
+  }
+
+  // Finger hovering
+  s += line(sfX - 10, sfY + 10, fingerX, fingerY, WHITE, SF_STROKE, 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND — friction reduction & intermittent rewards */
+function scene4(u) {
+  var s = '';
+  var sfX = CX + 280, sfY = CY + 400;
+  s += '<g ' + camera(1, 0, 0) + '>';
+  s += stickFigure(sfX, sfY, 0, Math.PI * 0.6, Math.PI * 0.5, 1, 1);
+  s += phone(PHONE_X, PHONE_Y, PHONE_W, PHONE_H, PHONE_RAD, SCREEN_W, SCREEN_H, SCREEN_RAD, DIM, '#111111', 1);
+
+  // Screen transforms into diagram
+  var diagramOp = ramp(u, 0.1, 0.4);
+  var screenCX = PHONE_X;
+  var screenCY = PHONE_Y;
+
+  // Friction arrow
+  var frictionArrowStart = screenCY - SCREEN_H / 4;
+  var frictionArrowEnd = screenCY - SCREEN_H / 4 + lerp(SCREEN_H * 0.3, SCREEN_H * 0.1, smooth(ramp(u, 0.3, 0.6)));
+  s += arrow(screenCX - SCREEN_W * 0.3, frictionArrowStart, screenCX - SCREEN_W * 0.3, frictionArrowEnd, BLUE, 10, diagramOp);
+  s += rrect(screenCX - SCREEN_W * 0.3, frictionArrowStart - 40, 100, 30, 5, BLUE, diagramOp); // Label box
+  s += dot(screenCX - SCREEN_W * 0.3, frictionArrowStart - 40, 8, WHITE, diagramOp); // Label glyph (dot)
+
+  // Reward loop wavy line
+  var waveHeight = lerp(0, 40, smooth(ramp(u, 0.4, 0.7)));
+  var numWaves = lerp(0, 5, smooth(ramp(u, 0.4, 0.7)));
+  var pulseOp = pulse(u, 0.7, 0.1) * 0.5 + 0.5; // Visual pulse
+  s += wavyLine(screenCX + SCREEN_W * 0.3 - 50, screenCY + SCREEN_H / 4, screenCX + SCREEN_W * 0.3 + 50, screenCY + SCREEN_H / 4, BLUE, 10, waveHeight, numWaves, diagramOp * pulseOp);
+  s += rrect(screenCX + SCREEN_W * 0.3, screenCY + SCREEN_H / 4 - 40, 100, 30, 5, BLUE, diagramOp); // Label box
+  s += rrect(screenCX + SCREEN_W * 0.3 - 20, screenCY + SCREEN_H / 4 - 40, 40, 10, 4, WHITE, diagramOp); // Label glyph (bar)
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE — losing moments stack into a tall coral memory column */
+function scene5(u) {
+  var s = '';
+  var sfX = CX + 280, sfY = CY + 400;
+  var sfDismayTilt = lerp(0, Math.PI / 10, smooth(u));
+  var sfDismayArm = lerp(Math.PI * 0.6, Math.PI * 0.75, smooth(u));
+  var sfDismayLeg = lerp(Math.PI * 0.5, Math.PI * 0.55, smooth(u));
+
+  s += '<g ' + camera(1, 0, 0) + '>';
+  s += stickFigure(sfX, sfY, sfDismayTilt, sfDismayArm, sfDismayLeg, 1, 1);
+  s += phone(PHONE_X, PHONE_Y, PHONE_W, PHONE_H, PHONE_RAD, SCREEN_W, SCREEN_H, SCREEN_RAD, DIM, '#111111', 1);
+
+  // Coral red data streams and generic bubbles
+  var numBubbles = 10;
+  var streamOp = ramp(u, 0.1, 0.4);
+  var pileOp = ramp(u, 0.4, 0.7);
+
+  for (var i = 0; i < numBubbles; i++) {
+    var streamProgress = (u * 0.8 + rnd(i) * 0.2) % 1;
+    var startX = PHONE_X;
+    var startY = PHONE_Y + SCREEN_H / 2 - 100;
+    var endX = sfX - 200 + rnd(i + 10) * 100;
+    var endY = sfY + 100 + i * 30 + rnd(i + 20) * 20;
+
+    if (streamProgress < 0.8) {
+      var currentX = lerp(startX, endX, easeIn(streamProgress * 1.2));
+      var currentY = lerp(startY, endY, easeIn(streamProgress * 1.2));
+      s += line(startX, startY, currentX, currentY, CORAL, 6, streamOp * (1 - streamProgress));
+    } else {
+      // Stacked bubbles
+      var bubbleY = endY - (1 - streamProgress) * 200; // Bubbles appear to settle
+      s += messageBubble(endX, bubbleY, 80, 40, 10, CORAL, pileOp);
+    }
+  }
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE — playing on your own terms */
+function scene6(u) {
+  var s = '';
+  var sfX = CX + 280, sfY = CY + 400;
+  var sfEmpowerTilt = lerp(Math.PI / 10, 0, smooth(u));
+  var sfEmpowerArm = lerp(Math.PI * 0.75, Math.PI * 0.5, smooth(u));
+  var sfEmpowerLeg = lerp(Math.PI * 0.55, Math.PI * 0.5, smooth(u));
+  var sfEmpowerBodyScale = lerp(1, 1.1, smooth(u)); // Taller posture
+
+  s += '<g ' + camera(1, 0, 0) + '>';
+  s += stickFigure(sfX, sfY, sfEmpowerTilt, sfEmpowerArm, sfEmpowerLeg, sfEmpowerBodyScale, 1, 1);
+  s += phone(PHONE_X, PHONE_Y, PHONE_W, PHONE_H, PHONE_RAD, SCREEN_W, SCREEN_H, SCREEN_RAD, DIM, '#111111', 1);
+
+  // Quick reply buttons with subtle signal blue glow
+  var btnY1 = PHONE_Y + SCREEN_H / 2 - 160;
+  var btnY2 = PHONE_Y + SCREEN_H / 2 - 100;
+  var btnY3 = PHONE_Y + SCREEN_H / 2 - 40;
+  var btnW = SCREEN_W * 0.5;
+  var btnH = 40;
+  var btnRad = 10;
+
+  var glowOp = Math.sin(u * Math.PI * 4) * 0.3 + 0.7; // Pulsating glow
+  s += quickReplyButton(PHONE_X, btnY1, btnW, btnH, btnRad, AMBER, 'two-dots', 1);
+  s += rrectStroke(PHONE_X, btnY1, btnW + 10, btnH + 10, btnRad + 5, BLUE, 5, glowOp);
+  s += quickReplyButton(PHONE_X, btnY2, btnW, btnH, btnRad, AMBER, 'dot', 1);
+  s += rrectStroke(PHONE_X, btnY2, btnW + 10, btnH + 10, btnRad + 5, BLUE, 5, glowOp);
+  s += quickReplyButton(PHONE_X, btnY3, btnW, btnH, btnRad, AMBER, 'bar', 1);
+  s += rrectStroke(PHONE_X, btnY3, btnW + 10, btnH + 10, btnRad + 5, BLUE, 5, glowOp);
+
+  // Stick figure's gaze
+  var gazeX = lerp(sfX - 20, PHONE_X, smooth(u));
+  var gazeY = lerp(sfY - SF_HEAD_R * 2, PHONE_Y - SCREEN_H / 2 + 100, smooth(u));
+  s += line(sfX, sfY - SF_HEAD_R * 2, gazeX, gazeY, WHITE, 7, 0.9);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
