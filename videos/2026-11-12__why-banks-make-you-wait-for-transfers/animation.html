@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Banks Make You Wait for Transfers</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band
+var MID_Y = (TOP + BOT) / 2;
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue  -> system / rules
+var AMBER = "#F2A93B";              // warm amber   -> YOU / money
+var CORAL = "#FF5B5B";              // coral red    -> naive idea / wrong signal
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, fill) {
+  return '<path d="' + d + '" fill="' + (fill || 'none') + '" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* stick figure: head, body, arms, legs. pose: 'idle', 'tapping', 'frustrated', 'gesturing', 'nodding', 'checking' */
+function stickFigure(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = 30;
+  var bodyLen = 100;
+  var armLen = 60;
+  var legLen = 70;
+
+  // Head
+  g += dot(x, y - headR - bodyLen / 2, headR, col);
+
+  // Body
+  g += line(x, y - bodyLen / 2, x, y + bodyLen / 2, col, 8);
+
+  // Arms and Legs based on pose
+  switch (pose) {
+    case 'tapping':
+      g += line(x, y - 30, x - 40, y - 10, col, 8); // Left arm
+      g += line(x, y - 30, x + 30, y - 50, col, 8); // Right arm bent for tapping
+      g += line(x + 30, y - 50, x + 50, y - 70, col, 8); // Hand on phone
+      g += line(x, y + bodyLen / 2, x - 30, y + bodyLen / 2 + legLen, col, 8); // Left leg
+      g += line(x, y + bodyLen / 2, x + 30, y + bodyLen / 2 + legLen, col, 8); // Right leg
+      break;
+    case 'frustrated':
+      g += line(x, y - 30, x - 50, y + 10, col, 8); // Left arm slumped
+      g += line(x, y - 30, x + 50, y + 10, col, 8); // Right arm slumped
+      g += line(x, y + bodyLen / 2, x - 30, y + bodyLen / 2 + legLen, col, 8);
+      g += line(x, y + bodyLen / 2, x + 30, y + bodyLen / 2 + legLen, col, 8);
+      break;
+    case 'gesturing':
+      g += line(x, y - 30, x - 60, y - 10, col, 8); // Left arm pointing
+      g += line(x, y - 30, x + 40, y - 50, col, 8); // Right arm slightly raised
+      g += line(x, y + bodyLen / 2, x - 30, y + bodyLen / 2 + legLen, col, 8);
+      g += line(x, y + bodyLen / 2, x + 30, y + bodyLen / 2 + legLen, col, 8);
+      break;
+    case 'nodding':
+      g += line(x, y - 30, x - 40, y, col, 8); // Arms relaxed
+      g += line(x, y - 30, x + 40, y, col, 8);
+      g += line(x, y + bodyLen / 2, x - 30, y + bodyLen / 2 + legLen, col, 8);
+      g += line(x, y + bodyLen / 2, x + 30, y + bodyLen / 2 + legLen, col, 8);
+      // Head slightly tilted for nodding effect
+      g += line(x, y - headR - bodyLen / 2, x - 10, y - headR - bodyLen / 2 + 15, col, 8); // Neck for tilt
+      break;
+    case 'checking': // Arms forward, looking at something
+      g += line(x, y - 30, x - 20, y - 50, col, 8);
+      g += line(x - 20, y - 50, x - 40, y - 70, col, 8); // Hand out
+      g += line(x, y - 30, x + 20, y - 50, col, 8);
+      g += line(x + 20, y - 50, x + 40, y - 70, col, 8); // Hand out
+      g += line(x, y + bodyLen / 2, x - 30, y + bodyLen / 2 + legLen, col, 8);
+      g += line(x, y + bodyLen / 2, x + 30, y + bodyLen / 2 + legLen, col, 8);
+      break;
+    default: // idle
+      g += line(x, y - 30, x - 40, y, col, 8); // Arms relaxed
+      g += line(x, y - 30, x + 40, y, col, 8);
+      g += line(x, y + bodyLen / 2, x - 30, y + bodyLen / 2 + legLen, col, 8);
+      g += line(x, y + bodyLen / 2, x + 30, y + bodyLen / 2 + legLen, col, 8);
+      break;
+  }
+  g += '</g>';
+  return g;
+}
+
+function phone(x, y, col, op) {
+  op = (op == null ? 1 : op);
+  var w = 80, h = 140, r = 16;
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, r, col, 8);
+  g += dot(x, y + h / 2 - 18, 5, col); // Home button
+  g += dot(x, y - h / 2 + 18, 4, col); // Speaker
+  g += '</g>';
+  return g;
+}
+
+function moneyBlock(x, y, w, h, col, op) {
+  return rrect(x, y, w, h, 12, col, op);
+}
+
+function dashedLine(x1, y1, x2, y2, phase, col, sw, op) {
+  var len = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+  var dash = 30, gap = 20;
+  var dasharray = dash + ',' + gap;
+  var offset = (phase % 1) * (dash + gap);
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) +
+         '" stroke-dasharray="' + dasharray + '" stroke-dashoffset="' + offset + '"/>';
+}
+
+function pendingSymbol(x, y, u, col, op) {
+  op = (op == null ? 1 : op);
+  var r = 40;
+  var g = '<g opacity="' + op + '">';
+  // Spinning arrow loop
+  var angle = u * 360 * 2; // Spin twice per scene
+  g += '<path d="M ' + (x + r) + ' ' + y +
+       ' A ' + r + ' ' + r + ' 0 1 1 ' + (x - r * Math.cos(Math.PI / 4)) + ' ' + (y - r * Math.sin(Math.PI / 4)) +
+       '" fill="none" stroke="' + col + '" stroke-width="10" stroke-linecap="round" ' +
+       'transform="rotate(' + angle + ' ' + x + ' ' + y + ')"/>';
+  // Small arrow head
+  var arrowX = x + r * Math.cos(Math.PI / 4);
+  var arrowY = y + r * Math.sin(Math.PI / 4);
+  g += line(arrowX, arrowY, arrowX - 15, arrowY + 10, col, 10, op);
+  g += line(arrowX, arrowY, arrowX + 10, arrowY + 15, col, 10, op);
+  g += '</g>';
+  return g;
+}
+
+function questionMark(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var d = "M " + x + " " + (y - size) +
+          " A " + (size / 2) + " " + (size / 2) + " 0 1 1 " + (x - size / 2) + " " + (y - size / 2) +
+          " L " + (x - size / 2) + " " + (y + size / 4) +
+          " M " + x + " " + (y + size / 2);
+  return pathTag(d, col, 10, op);
+}
+
+function bankVault(x, y, w, h, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 20, col, 0.2); // Outer wall
+  g += rrectStroke(x, y, w, h, 20, col, 8); // Outline
+  g += rrect(x - w / 4, y, w / 2, h * 0.8, 10, col, 0.4); // Door
+  g += dot(x - w / 4 + w / 8, y, 15, col); // Handle
+  g += '</g>';
+  return g;
+}
+
+function ledgerBlock(x, y, w, h, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, 8, col, 6);
+  g += line(x - w / 2 + 15, y - h / 4, x + w / 2 - 15, y - h / 4, col, 4);
+  g += line(x - w / 2 + 15, y, x + w / 2 - 15, y, col, 4);
+  g += line(x - w / 2 + 15, y + h / 4, x + w / 2 - 15, y + h / 4, col, 4);
+  g += '</g>';
+  return g;
+}
+
+function gear(x, y, r, teeth, u, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var rotation = u * 360 * 0.5; // Half rotation per scene
+  var d = '';
+  for (var i = 0; i < teeth; i++) {
+    var angle = (i / teeth) * Math.PI * 2;
+    var innerR = r * 0.7;
+    var outerR = r * 1.1;
+    var x1 = x + innerR * Math.cos(angle);
+    var y1 = y + innerR * Math.sin(angle);
+    var x2 = x + outerR * Math.cos(angle + Math.PI / (teeth * 2));
+    var y2 = y + outerR * Math.sin(angle + Math.PI / (teeth * 2));
+    var x3 = x + outerR * Math.cos(angle + Math.PI / teeth);
+    var y3 = y + outerR * Math.sin(angle + Math.PI / teeth);
+    var x4 = x + innerR * Math.cos(angle + Math.PI / (teeth * 2) * 3);
+    var y4 = y + innerR * Math.sin(angle + Math.PI / (teeth * 2) * 3);
+    d += 'M ' + x1 + ' ' + y1 + ' L ' + x2 + ' ' + y2 + ' L ' + x3 + ' ' + y3 + ' L ' + x4 + ' ' + y4 + ' Z ';
+  }
+  g += '<circle cx="' + x + '" cy="' + y + '" r="' + (r * 0.6) + '" fill="none" stroke="' + col + '" stroke-width="6"/>';
+  g += '<path d="' + d + '" fill="' + col + '" stroke="' + col + '" stroke-width="2" transform="rotate(' + rotation + ' ' + x + ' ' + y + ')"/>';
+  g += '</g>';
+  return g;
+}
+
+function crossMark(x, y, size, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += line(x - size / 2, y - size / 2, x + size / 2, y + size / 2, col, sw);
+  g += line(x + size / 2, y - size / 2, x - size / 2, y + size / 2, col, sw);
+  g += '</g>';
+  return g;
+}
+
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  var youX = CX - 200, youY = MID_Y + 200;
+  var phoneX = youX + 60, phoneY = youY - 100;
+  var moneyBlockX = phoneX + 180, moneyBlockY = phoneY;
+  var recipientPhoneX = CX + 300, recipientPhoneY = phoneY;
+
+  var moneyBlockW = 100, moneyBlockH = 80;
+
+  s += stickFigure(youX, youY, AMBER, 'tapping', 1);
+  s += phone(phoneX, phoneY, WHITE, 1);
+  s += phone(recipientPhoneX, recipientPhoneY, DIM, 0.8);
+
+  var moneyAppear = ramp(u, 0.1, 0.4);
+  s += moneyBlock(moneyBlockX, moneyBlockY, moneyBlockW, moneyBlockH, AMBER, moneyAppear);
+
+  var pathDraw = ramp(u, 0.3, 0.8);
+  var pathX = lerp(moneyBlockX, recipientPhoneX, pathDraw);
+  var pathY = lerp(moneyBlockY, recipientPhoneY, pathDraw);
+  s += dashedLine(moneyBlockX, moneyBlockY, pathX, pathY, u * 0.8, AMBER, 8, moneyAppear);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14);
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+
+  var youX = CX - 200, youY = MID_Y + 200;
+  var phoneX = youX + 60, phoneY = youY - 100;
+  var moneyBlockX = lerp(phoneX + 180, CX, easeOut(ramp(u, 0.0, 0.2)));
+  var moneyBlockY = phoneY;
+  var moneyBlockW = 100, moneyBlockH = 80;
+  var recipientPhoneX = CX + 300, recipientPhoneY = phoneY;
+
+  s += stickFigure(youX, youY, AMBER, u < 0.3 ? 'tapping' : 'frustrated', 1);
+  s += phone(phoneX, phoneY, WHITE, 1);
+  s += phone(recipientPhoneX, recipientPhoneY, DIM, 0.8);
+
+  var stopEffect = ramp(u, 0.2, 0.4);
+  var blockOp = lerp(1, 0.8, stopEffect);
+  s += moneyBlock(moneyBlockX, moneyBlockY, moneyBlockW, moneyBlockH, AMBER, blockOp);
+
+  // Dashed line to the stopped block
+  s += dashedLine(phoneX + 180, phoneY, moneyBlockX, moneyBlockY, u * 0.8, AMBER, 8, blockOp);
+
+  // Pending icon appears
+  var pendingOp = ramp(u, 0.3, 0.6);
+  s += pendingSymbol(moneyBlockX, moneyBlockY - moneyBlockH / 2 - 60, u, CORAL, pendingOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH — naive guesses about bank slowness */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var youX = CX - 200, youY = MID_Y + 200;
+  var moneyBlockX = CX, moneyBlockY = MID_Y - 100;
+  var moneyBlockW = 100, moneyBlockH = 80;
+
+  s += stickFigure(youX, youY, AMBER, 'gesturing', 1);
+  s += moneyBlock(moneyBlockX, moneyBlockY, moneyBlockW, moneyBlockH, CORAL, 0.8); // Now coral, stuck
+
+  // Question marks around YOU's head
+  var qOp = ramp(u, 0.0, 0.3);
+  s += questionMark(youX + 100, youY - 180, 40, CORAL, qOp);
+  s += questionMark(youX + 160, youY - 220, 30, CORAL, qOp * 0.7);
+
+  // Bank vault and dripping money
+  var vaultX = CX + 200, vaultY = MID_Y;
+  var vaultW = 200, vaultH = 300;
+  var vaultOp = ramp(u, 0.2, 0.6);
+  s += bankVault(vaultX, vaultY, vaultW, vaultH, DIM, vaultOp);
+
+  var dripAmount = ramp(u, 0.5, 0.9);
+  var dripY = lerp(vaultY - vaultH / 2 + 50, vaultY + vaultH / 2 - 50, dripAmount);
+  s += dot(vaultX - vaultW / 4, dripY, 15, CORAL, vaultOp * 0.8); // Dripping money
+  s += line(vaultX - vaultW / 4, vaultY - vaultH / 2 + 50, vaultX - vaultW / 4, dripY, CORAL, 6, vaultOp * 0.8);
+
+  // Naive graph
+  var graphX = CX + 200, graphY = MID_Y + 200;
+  var graphW = 200, graphH = 100;
+  var graphOp = ramp(u, 0.4, 0.8);
+  s += rrectStroke(graphX, graphY, graphW, graphH, 10, CORAL, 4, graphOp * 0.6);
+  s += line(graphX - graphW / 2, graphY + graphH / 2, graphX - graphW / 2, graphY - graphH / 2, CORAL, 4, graphOp * 0.6);
+  s += line(graphX - graphW / 2, graphY + graphH / 2, graphX + graphW / 2, graphY + graphH / 2, CORAL, 4, graphOp * 0.6);
+  var graphPath = "M " + (graphX - graphW / 2) + " " + (graphY + graphH / 2 - graphH * 0.2);
+  graphPath += " L " + (graphX - graphW / 4) + " " + (graphY + graphH / 2 - graphH * 0.6);
+  graphPath += " L " + (graphX + graphW / 4) + " " + (graphY + graphH / 2 - graphH * 0.4);
+  graphPath += " L " + (graphX + graphW / 2) + " " + (graphY + graphH / 2 - graphH * 0.8);
+  s += pathTag(graphPath, CORAL, 6, graphOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND — the real system: promises and batches */
+function scene4(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.9, smooth(u * 0.8));
+  s += '<g ' + camera(scale, 0, 0) + '>';
+
+  // Coral elements dissolve
+  var coralFade = 1 - ramp(u, 0.0, 0.2);
+  // s += moneyBlock(CX, MID_Y - 100, 100, 80, CORAL, coralFade * 0.8); // Fading out from S3
+
+  // Signal blue network appears
+  var blueAppear = ramp(u, 0.1, 0.4);
+  var networkOpacity = blueAppear;
+
+  var mainBlockX = lerp(CX, CX - 150, easeOut(ramp(u, 0.2, 0.5)));
+  var mainBlockY = lerp(MID_Y - 100, MID_Y - 100, easeOut(ramp(u, 0.2, 0.5)));
+  var moneyBlockW = 100, moneyBlockH = 80;
+
+  // Ledger blocks
+  s += ledgerBlock(CX - 250, MID_Y - 200, 180, 120, BLUE, networkOpacity);
+  s += ledgerBlock(CX + 250, MID_Y - 200, 180, 120, BLUE, networkOpacity);
+  s += ledgerBlock(CX, MID_Y + 100, 180, 120, BLUE, networkOpacity);
+
+  // Gears
+  s += gear(CX - 50, MID_Y - 50, 60, 12, u, BLUE, networkOpacity);
+  s += gear(CX + 150, MID_Y + 50, 50, 10, -u, BLUE, networkOpacity);
+
+  // Connecting lines
+  s += line(CX - 150, MID_Y - 140, CX - 50, MID_Y - 50, BLUE, 4, networkOpacity);
+  s += line(CX + 150, MID_Y - 140, CX + 150, MID_Y + 50, BLUE, 4, networkOpacity);
+  s += line(CX - 50, MID_Y - 50, CX, MID_Y + 100, BLUE, 4, networkOpacity);
+  s += line(CX + 150, MID_Y + 50, CX, MID_Y + 100, BLUE, 4, networkOpacity);
+
+  // Amber money block navigating the system
+  var blockTravel = ramp(u, 0.2, 0.9);
+  var currentX, currentY;
+  if (blockTravel < 0.3) {
+    currentX = lerp(CX, CX - 150, easeIn(blockTravel / 0.3));
+    currentY = lerp(MID_Y - 100, MID_Y - 140, easeIn(blockTravel / 0.3));
+  } else if (blockTravel < 0.6) {
+    currentX = lerp(CX - 150, CX + 150, easeOut((blockTravel - 0.3) / 0.3));
+    currentY = lerp(MID_Y - 140, MID_Y - 140, easeOut((blockTravel - 0.3) / 0.3));
+  } else {
+    currentX = lerp(CX + 150, CX, easeIn((blockTravel - 0.6) / 0.4));
+    currentY = lerp(MID_Y - 140, MID_Y + 100, easeIn((blockTravel - 0.6) / 0.4));
+  }
+  s += moneyBlock(currentX, currentY, moneyBlockW, moneyBlockH, AMBER, blueAppear);
+
+  // "Promises" and "Ledgers" visual cues
+  var promiseDotY = lerp(TOP + 60, TOP + 100, Math.sin(u * Math.PI * 2));
+  s += dot(CX - 100, promiseDotY, 12, BLUE, networkOpacity * 0.7);
+  s += dot(CX + 100, promiseDotY, 12, BLUE, networkOpacity * 0.7);
+  s += line(CX - 100, promiseDotY - 30, CX - 100, promiseDotY + 30, BLUE, 6, networkOpacity * 0.7);
+  s += line(CX + 100, promiseDotY - 30, CX + 100, promiseDotY + 30, BLUE, 6, networkOpacity * 0.7);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE — delay for risk management, not greed */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(0.9, 1.0, smooth(u * 0.8));
+  s += '<g ' + camera(scale, 0, 0) + '>';
+
+  var networkOpacity = 1;
+  var moneyBlockW = 100, moneyBlockH = 80;
+
+  // Ledger blocks (fixed positions)
+  s += ledgerBlock(CX - 250, MID_Y - 200, 180, 120, BLUE, networkOpacity * 0.8);
+  s += ledgerBlock(CX + 250, MID_Y - 200, 180, 120, BLUE, networkOpacity * 0.8);
+  s += ledgerBlock(CX, MID_Y + 100, 180, 120, BLUE, networkOpacity * 0.8);
+
+  // Gears (fixed positions, still animating)
+  s += gear(CX - 50, MID_Y - 50, 60, 12, u, BLUE, networkOpacity * 0.8);
+  s += gear(CX + 150, MID_Y + 50, 50, 10, -u, BLUE, networkOpacity * 0.8);
+
+  // Connecting lines
+  s += line(CX - 150, MID_Y - 140, CX - 50, MID_Y - 50, BLUE, 4, networkOpacity * 0.8);
+  s += line(CX + 150, MID_Y - 140, CX + 150, MID_Y + 50, BLUE, 4, networkOpacity * 0.8);
+  s += line(CX - 50, MID_Y - 50, CX, MID_Y + 100, BLUE, 4, networkOpacity * 0.8);
+  s += line(CX + 150, MID_Y + 50, CX, MID_Y + 100, BLUE, 4, networkOpacity * 0.8);
+
+  // Checker figures
+  var checkerOp = ramp(u, 0.0, 0.3);
+  s += stickFigure(CX - 100, MID_Y - 250, BLUE, 'checking', checkerOp);
+  s += stickFigure(CX + 100, MID_Y + 50, BLUE, 'checking', checkerOp);
+
+  // Main amber money block path
+  var mainBlockTravel = ramp(u, 0.0, 0.9);
+  var mainBlockX = lerp(CX, CX + 200, easeIn(mainBlockTravel));
+  var mainBlockY = lerp(MID_Y + 100, MID_Y + 400, easeIn(mainBlockTravel));
+  s += moneyBlock(mainBlockX, mainBlockY, moneyBlockW, moneyBlockH, AMBER, 1);
+
+  // Diverted blocks
+  var divertOp = ramp(u, 0.3, 0.7);
+  for (var i = 0; i < 3; i++) {
+    var divertProgress = (u * 0.8 + i * 0.2) % 1;
+    var divX = lerp(CX - 250, CX - 400, easeOut(divertProgress));
+    var divY = lerp(MID_Y - 200 + i * 30, MID_Y + 100 + i * 50, easeOut(divertProgress));
+    var blockOp = (1 - divertProgress) * divertOp;
+    if (blockOp > 0.05) {
+      s += moneyBlock(divX, divY, moneyBlockW * 0.7, moneyBlockH * 0.7, DIM, blockOp);
+      s += crossMark(divX, divY, 60, CORAL, 8, blockOp);
+    }
+  }
+
+  // Risk management "shield"
+  var shieldOp = ramp(u, 0.5, 0.9);
+  s += ring(CX, MID_Y, 400, BLUE, 10, shieldOp * 0.2);
+  s += ring(CX, MID_Y, 380, BLUE, 10, shieldOp * 0.2);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE — user understands the hidden system */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.9, smooth(u));
+  s += '<g ' + camera(scale, 0, lerp(0, 50, smooth(u))) + '>';
+
+  var youX = CX - 250, youY = MID_Y + 200;
+  var moneyBlockW = 100, moneyBlockH = 80;
+
+  // YOU observing the simplified system
+  s += stickFigure(youX, youY, AMBER, 'nodding', 1);
+
+  // Simplified, transparent signal blue network
+  var networkOpacity = lerp(0.8, 0.3, smooth(u));
+
+  s += ledgerBlock(CX - 150, MID_Y - 100, 180, 120, BLUE, networkOpacity);
+  s += ledgerBlock(CX + 150, MID_Y - 100, 180, 120, BLUE, networkOpacity);
+  s += ledgerBlock(CX, MID_Y + 150, 180, 120, BLUE, networkOpacity);
+
+  s += line(CX - 50, MID_Y - 100, CX + 50, MID_Y - 100, BLUE, 4, networkOpacity);
+  s += line(CX, MID_Y - 100, CX, MID_Y + 150, BLUE, 4, networkOpacity);
+
+  // Amber money block moving clearly
+  var moneyTravel = ramp(u, 0.0, 0.8);
+  var currentX = lerp(CX - 150, CX + 150, easeIn(moneyTravel));
+  var currentY = lerp(MID_Y - 100, MID_Y + 150, easeOut(moneyTravel));
+  s += moneyBlock(currentX, currentY, moneyBlockW, moneyBlockH, AMBER, 1);
+
+  // Destination phone
+  var destPhoneX = CX + 350, destPhoneY = MID_Y + 200;
+  s += phone(destPhoneX, destPhoneY, WHITE, 0.8);
+  s += dashedLine(currentX, currentY, destPhoneX, destPhoneY, u * 0.5, AMBER, 6, 0.6);
+
+  // Subtle "understanding" glow around YOU
+  var glowOp = Math.sin(u * Math.PI * 2) * 0.2 + 0.3;
+  s += ring(youX, youY - 100, 100, AMBER, 5, glowOp * ramp(u, 0.1, 0.9));
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

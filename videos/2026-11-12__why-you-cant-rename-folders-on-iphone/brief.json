@@ -1,0 +1,15 @@
+{
+  "id": "why-you-cant-rename-folders-on-iphone",
+  "slug": "2026-11-12__why-you-cant-rename-folders-on-iphone",
+  "title_working": "Why you can't rename iPhone folders",
+  "system": "opinionated design / user segmentation",
+  "cluster": "rules-and-defaults",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-11-12T15:02:07+00:00",
+  "produced_at": "2026-11-12T15:09:44+00:00",
+  "verify": "PASS",
+  "takeaway": "iPhone folder names are short by design, a deliberate choice prioritizing a clean, standardized user experience over full customization.",
+  "animation_source": "fallback"
+}
