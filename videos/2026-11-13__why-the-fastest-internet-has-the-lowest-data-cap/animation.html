@@ -1,0 +1,574 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why the Fastest Internet Has the Lowest Data Cap</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> system/network/rules
+var AMBER = "#F2A93B";              // warm amber   -> YOU / your connection
+var CORAL = "#FF5B5B";              // coral red    -> frustration/cap/naive model
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function chevron(x, y, size, col, op) {
+  var d = "M " + (x - size) + " " + (y + size * 0.55) + " L " + x + " " + (y - size * 0.55) + " L " + (x + size) + " " + (y + size * 0.55);
+  return pathTag(d, col, 14, op);
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom shape builders for this animation ---------- */
+
+// Stick figure helper
+function stickFigure(x, y, scale, pose, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g transform="translate(' + x + ' ' + y + ') scale(' + scale + ')" opacity="' + op + '">';
+  g += dot(0, -70, 18, col); // Head
+  g += line(0, -50, 0, 0, col, 8); // Body
+  g += line(0, 0, -30, 50, col, 8); // Left Leg
+  g += line(0, 0, 30, 50, col, 8); // Right Leg
+
+  // Arms and pose
+  if (pose === 'pointing') {
+    g += line(0, -40, 50, -20, col, 8); // Right arm
+    g += line(50, -20, 65, -10, col, 8); // Hand/finger
+    g += line(0, -40, -40, -10, col, 8); // Left arm bent
+  } else if (pose === 'confused') {
+    g += line(0, -40, -40, -60, col, 8); // Left arm raised
+    g += line(0, -40, 40, -60, col, 8); // Right arm raised
+  } else if (pose === 'frustrated') {
+    g += line(0, -40, -30, -10, col, 8); // Left arm crossed
+    g += line(0, -40, 30, -10, col, 8); // Right arm crossed
+  } else if (pose === 'understanding') {
+    g += line(0, -40, -30, -20, col, 8); // Arms relaxed
+    g += line(0, -40, 30, -20, col, 8);
+  } else { // default standing
+    g += line(0, -40, -40, 0, col, 8);
+    g += line(0, -40, 40, 0, col, 8);
+  }
+  g += '</g>';
+  return g;
+}
+
+// Internet plan icon (rectangle with internal speed lines)
+function planIcon(x, y, w, h, speedLevel, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, 12, col, 6);
+  var innerW = w * 0.6;
+  var innerH = h * 0.6;
+  for (var i = 0; i < speedLevel; i++) {
+    var lineY = y - innerH / 2 + (innerH / (speedLevel + 1)) * (i + 1);
+    g += line(x - innerW / 2, lineY, x + innerW / 2, lineY, col, 4);
+  }
+  g += '</g>';
+  return g;
+}
+
+// Data pipeline (a wide filled rrect, representing the connection)
+function pipelineRect(x, y, w, h, rad, col, op) {
+  return rrect(x, y, w, h, rad, col, op);
+}
+
+// Data cap (a blocky barrier)
+function dataCap(x, y, w, h, col, op) {
+  return rrect(x, y, w, h, 8, col, op);
+}
+
+// Data packet (a small square dot)
+function dataPacket(x, y, size, col, op) {
+  return rrect(x, y, size, size, 4, col, op);
+}
+
+// Network hub (a ring with a central dot)
+function networkHub(x, y, r, col, sw, op) {
+  return ring(x, y, r, col, sw, op) + dot(x, y, r / 3, col, op);
+}
+
+// Shattered thought bubble (a path with jagged edges)
+function shatteredBubble(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var d = "M " + (x - size * 0.8) + " " + (y - size * 0.2) +
+          " L " + (x - size * 0.4) + " " + (y - size * 0.7) +
+          " L " + (x + size * 0.2) + " " + (y - size * 0.8) +
+          " L " + (x + size * 0.7) + " " + (y - size * 0.4) +
+          " L " + (x + size * 0.8) + " " + (y + size * 0.2) +
+          " L " + (x + size * 0.3) + " " + (y + size * 0.7) +
+          " L " + (x - size * 0.2) + " " + (y + size * 0.8) +
+          " L " + (x - size * 0.7) + " " + (y + size * 0.3) + " Z";
+  // Add internal cracks
+  d += " M " + (x - size * 0.2) + " " + (y - size * 0.5) + " L " + (x + size * 0.1) + " " + (y - size * 0.2);
+  d += " M " + (x + size * 0.4) + " " + (y - size * 0.1) + " L " + (x + size * 0.1) + " " + (y + size * 0.3);
+  d += " M " + (x - size * 0.3) + " " + (y + size * 0.2) + " L " + (x) + " " + (y + size * 0.5);
+  return pathTag(d, col, 7, op);
+}
+
+// Data valve (a small cap that opens/closes visually)
+function dataValve(x, y, w, h, col, op, openFactor) {
+  op = (op == null ? 1 : op);
+  openFactor = clamp(openFactor, 0, 1); // 0 = closed, 1 = fully open
+  var g = '<g opacity="' + op + '">';
+  // Main body of the valve
+  g += rrect(x, y, w, h, 8, col);
+  // Opening/closing mechanism (two halves moving apart)
+  var move = w * 0.2 * openFactor; // How much it 'opens'
+  g += rrect(x - w / 2 - move, y, w * 0.4, h * 0.8, 4, col); // Left part
+  g += rrect(x + w / 2 + move, y, w * 0.4, h * 0.8, 4, col); // Right part
+  g += dot(x, y, 8, WHITE, 0.6); // Central indicator
+  g += '</g>';
+  return g;
+}
+
+// Data flow lines (for network diagram with moving dots)
+function flowLine(x1, y1, x2, y2, col, sw, op, phase, speed) {
+  op = (op == null ? 1 : op);
+  var g = line(x1, y1, x2, y2, col, sw, op * 0.3); // Base line
+  var len = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+  var numDots = Math.floor(len / 80);
+  for (var i = 0; i < numDots; i++) {
+    var p = (phase * speed + i / numDots) % 1;
+    var currentX = lerp(x1, x2, p);
+    var currentY = lerp(y1, y2, p);
+    g += dot(currentX, currentY, sw * 0.4, col, op * 0.8);
+  }
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var figX = lerp(CX - 200, CX - 100, smooth(u * 0.8));
+  var figY = CY + 300;
+  var figScale = 1.0;
+
+  // Camera effect: slight right pan and zoom
+  var camTx = lerp(0, -100, smooth(u * 0.8));
+  var camScale = lerp(1.0, 1.05, smooth(u * 0.8));
+  s += '<g ' + camera(camScale, camTx, 0) + '>';
+
+  // Stick figure
+  s += stickFigure(figX, figY, figScale, 'pointing', AMBER);
+
+  // Internet plan icons
+  var planY_base = CY - 200;
+  var planH = 180;
+  var planW = 300;
+  var planGap = 220;
+
+  // Plans: Slow, Medium, Fast
+  s += planIcon(CX + 200, planY_base + planGap, planW, planH, 2, WHITE, 0.4); // Slow
+  s += planIcon(CX + 200, planY_base, planW, planH, 4, WHITE, 0.6); // Medium
+  s += planIcon(CX + 200, planY_base - planGap, planW, planH, 6, AMBER, 1); // Fast, highlighted
+
+  // "Data pipeline" hero element
+  var pipeStartX = figX + figScale * 60;
+  var pipeStartY = figY - figScale * 40;
+  var pipeEndX = CX + 200 - planW / 2;
+  var pipeEndY = planY_base - planGap;
+  var pipeWidth = lerp(20, 80, smooth(u * 0.9)); // Widens
+  
+  // Use a wide line for the pipeline for flexibility in angle
+  s += line(pipeStartX, pipeStartY, pipeEndX, pipeEndY, AMBER, pipeWidth, 1);
+
+  // "Want" chevrons (like reference)
+  for (var c = 0; c < 3; c++) {
+    var cp = (u * 2 + c / 3) % 1;
+    s += chevron(pipeEndX + 60, pipeEndY - 60 - cp * 120, 26, AMBER, (1 - cp) * 0.7);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var figX = CX - 100;
+  var figY = CY + 300;
+  var figScale = 1.0;
+
+  // Camera effect: zoom to cap
+  var capY = CY - 100;
+  var camScale = lerp(1.05, 1.2, smooth(u * 0.7));
+  var camTy = lerp(0, CY - capY, smooth(u * 0.7)); // Adjust Y to center the cap
+  s += '<g ' + camera(camScale, 0, camTy) + '>';
+
+  // Stick figure (fades out slightly due to zoom/pan)
+  s += stickFigure(figX, figY, figScale, 'confused', AMBER, 1 - smooth(u * 0.8));
+
+  // Amber pipeline as a single rrect
+  var pipeWidth = 80;
+  var pipeHeight = BOT - TOP - 200;
+  var pipeY = CY;
+  s += pipelineRect(CX, pipeY, pipeWidth, pipeHeight, 40, AMBER, 1);
+
+  // Data cap barrier
+  var capW = pipeWidth + 20;
+  var capH = 80;
+  var capAppear = smooth(ramp(u, 0.1, 0.3));
+  s += dataCap(CX, capY, capW, capH, CORAL, capAppear);
+
+  // Data packets hitting the cap
+  var numPackets = 5;
+  for (var i = 0; i < numPackets; i++) {
+    var packetU = (u * 1.5 + i / numPackets) % 1;
+    var packetY = lerp(capY + capH / 2 + 100, capY - capH / 2 - 100, packetU);
+    var packetX = CX + Math.sin(packetU * Math.PI * 4 + i) * 10; // Slight wiggle
+    var packetSize = 20;
+
+    // Bounce effect
+    var bounceFactor = 0;
+    if (packetU > 0.4 && packetU < 0.6) { // Around the cap
+      bounceFactor = Math.sin((packetU - 0.4) / 0.2 * Math.PI); // Arc for bounce
+    }
+    packetY += bounceFactor * 40; // Lift up during bounce
+    var packetOp = 1;
+    if (packetU > 0.8) packetOp = 1 - smooth(ramp(packetU, 0.8, 1)); // Fade out
+    s += dataPacket(packetX, packetY, packetSize, AMBER, packetOp * capAppear);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var figX = CX - 100;
+  var figY = CY + 300;
+  var figScale = 1.0;
+
+  // Camera effect: pull back
+  var camScale = lerp(1.2, 1.0, smooth(u * 0.8));
+  var camTy = lerp(CY - (CY - 100), 0, smooth(u * 0.8)); // Un-center cap
+  s += '<g ' + camera(camScale, 0, camTy) + '>';
+
+  // Stick figure
+  s += stickFigure(figX, figY, figScale, 'frustrated', AMBER, smooth(u * 0.8));
+
+  // Amber pipeline (before the cap)
+  var pipeTopY = TOP + 100;
+  var capY = CY - 100;
+  var pipeWidth = 80;
+  s += pipelineRect(CX, (pipeTopY + capY - 40) / 2, pipeWidth, capY - 40 - pipeTopY, 40, AMBER, 1);
+
+  // Data cap barrier
+  var capW = pipeWidth + 20;
+  var capH = 80;
+  var capPulse = Math.sin(u * Math.PI * 6) * 8; // Continuous pulse
+  s += dataCap(CX + capPulse, capY, capW, capH, CORAL, 1);
+
+  // Small trickle of data escaping the cap
+  var trickleOp = smooth(ramp(u, 0.3, 0.7));
+  for (var i = 0; i < 3; i++) {
+    var packetU = (u * 0.8 + i / 3) % 1;
+    var packetY = lerp(capY + capH / 2 + 10, BOT - 100, packetU);
+    var packetX = CX + Math.sin(packetU * Math.PI * 2 + i) * 15;
+    s += dataPacket(packetX, packetY, 16, AMBER, trickleOp * (1 - packetU));
+  }
+
+  // Shattered thought bubble
+  var bubbleSize = 200;
+  var bubbleX = CX + 200;
+  var bubbleY = CY - 300;
+  var bubbleOp = smooth(ramp(u, 0.2, 0.7));
+  s += shatteredBubble(bubbleX, bubbleY, bubbleSize, CORAL, bubbleOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  // Transition from frustrated figure to network diagram
+  var networkOpacity = smooth(ramp(u, 0.1, 0.5));
+  var figOpacity = 1 - networkOpacity;
+
+  // Stick figure (fades out)
+  s += stickFigure(CX - 100, CY + 300, 1.0, 'frustrated', AMBER, figOpacity);
+  s += shatteredBubble(CX + 200, CY - 300, 200, CORAL, figOpacity);
+
+  // Network grid (signal blue)
+  var gridX1 = CX - 400, gridX2 = CX + 400;
+  var gridY1 = TOP + 100, gridY2 = BOT - 100;
+  var numLines = 5;
+  var lineSpacingX = (gridX2 - gridX1) / (numLines - 1);
+  var lineSpacingY = (gridY2 - gridY1) / (numLines - 1);
+
+  var assembleFactor = smooth(ramp(u, 0.2, 0.8));
+
+  // Horizontal lines
+  for (var i = 0; i < numLines; i++) {
+    var y = gridY1 + i * lineSpacingY;
+    s += line(gridX1, y, lerp(gridX1, gridX2, assembleFactor), y, BLUE, 7, networkOpacity);
+  }
+  // Vertical lines
+  for (var i = 0; i < numLines; i++) {
+    var x = gridX1 + i * lineSpacingX;
+    s += line(x, gridY1, x, lerp(gridY1, gridY2, assembleFactor), BLUE, 7, networkOpacity);
+  }
+
+  // Network hubs
+  for (var i = 0; i < numLines; i++) {
+    for (var j = 0; j < numLines; j++) {
+      var hubX = gridX1 + i * lineSpacingX;
+      var hubY = gridY1 + j * lineSpacingY;
+      if (assembleFactor > 0.5) { // Hubs appear after lines
+        s += networkHub(hubX, hubY, 20, BLUE, 6, networkOpacity);
+      }
+    }
+  }
+
+  // Your amber pipeline (wide, with coral valve)
+  var yourPipeX = CX - 100;
+  var yourPipeY1 = gridY1 + lineSpacingY * 1.5;
+  var yourPipeY2 = gridY2 - lineSpacingY * 1.5;
+  var yourPipeWidth = lerp(0, 70, networkOpacity); // Widens as it appears
+
+  s += pipelineRect(yourPipeX, (yourPipeY1 + yourPipeY2) / 2, yourPipeWidth, yourPipeY2 - yourPipeY1, 35, AMBER, networkOpacity);
+
+  // Coral valve integrated into your pipeline
+  var valveY = lerp(yourPipeY1 + (yourPipeY2 - yourPipeY1) * 0.4, (yourPipeY1 + yourPipeY2) / 2, smooth(ramp(u, 0.6, 0.9)));
+  var valveW = yourPipeWidth + 10;
+  var valveH = 60;
+  s += dataValve(yourPipeX, valveY, valveW, valveH, CORAL, networkOpacity, 0); // Starts closed
+
+  // Other amber pipelines (other users)
+  var otherPipeX1 = CX + 100, otherPipeX2 = CX + 300;
+  var otherPipeY_base = gridY1 + lineSpacingY * 0.5;
+  var otherPipeLength = gridY2 - otherPipeY_base;
+
+  // Narrow pipe
+  s += pipelineRect(otherPipeX1, otherPipeY_base + otherPipeLength / 2, 30, otherPipeLength, 15, AMBER, networkOpacity * 0.6);
+  // Wide pipe (but not as wide as yours)
+  s += pipelineRect(otherPipeX2, otherPipeY_base + otherPipeLength / 2, 50, otherPipeLength, 25, AMBER, networkOpacity * 0.8);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+
+  // Camera focuses on your pipeline
+  var camScale = lerp(1.0, 1.1, smooth(u * 0.5));
+  var camTx = lerp(0, -50, smooth(u * 0.5));
+  var camTy = lerp(0, -50, smooth(u * 0.5));
+  s += '<g ' + camera(camScale, camTx, camTy) + '>';
+
+  // Main signal blue network line (hero element)
+  var mainNetworkX = CX + 250;
+  var mainNetworkY1 = TOP + 100;
+  var mainNetworkY2 = BOT - 100;
+  s += flowLine(mainNetworkX, mainNetworkY1, mainNetworkX, mainNetworkY2, BLUE, 10, 1, u * 0.5, 1);
+
+  // Your amber pipeline (wide, with coral valve)
+  var yourPipeX = CX - 100;
+  var yourPipeY1 = TOP + 180;
+  var yourPipeY2 = BOT - 180;
+  var yourPipeWidth = 70;
+  s += pipelineRect(yourPipeX, (yourPipeY1 + yourPipeY2) / 2, yourPipeWidth, yourPipeY2 - yourPipeY1, 35, AMBER, 1);
+
+  // Coral valve
+  var valveY = CY;
+  var valveW = yourPipeWidth + 10;
+  var valveH = 60;
+  var openFactor = (Math.sin(u * Math.PI * 8) * 0.5 + 0.5); // Rapid opening/closing
+  s += dataValve(yourPipeX, valveY, valveW, valveH, CORAL, 1, openFactor);
+
+  // Connection line from your pipeline to main network
+  var connX1 = yourPipeX + yourPipeWidth / 2;
+  var connY1 = valveY;
+  var connX2 = mainNetworkX - 50; // Connects to the side
+  var connY2 = valveY;
+  s += flowLine(connX1, connY1, connX2, connY2, BLUE, 8, 1, u * 0.7, 1);
+
+  // Data bursts through your valve
+  for (var i = 0; i < 4; i++) {
+    var packetU = (u * 3 + i / 4) % 1;
+    if (packetU > 0.4 && packetU < 0.6 && openFactor > 0.5) { // Only burst when valve is open
+      var packetX = lerp(connX1, connX2, easeOut(ramp(packetU, 0.4, 0.6)));
+      var packetY = connY1;
+      s += dataPacket(packetX, packetY, 20, AMBER, 1 - ramp(packetU, 0.5, 0.7));
+    }
+  }
+
+  // Other blue lines carrying steady, moderate data
+  var otherLineX1 = mainNetworkX + 100;
+  var otherLineX2 = mainNetworkX + 200;
+  s += flowLine(otherLineX1, mainNetworkY1, otherLineX1, mainNetworkY2, BLUE, 6, 0.7, u * 0.4, 0.5);
+  s += flowLine(otherLineX2, mainNetworkY1, otherLineX2, mainNetworkY2, BLUE, 6, 0.7, u * 0.6, 0.5);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+
+  // Camera zooms out to show the whole system
+  var camScale = lerp(1.1, 0.9, smooth(u * 0.8));
+  var camTx = lerp(-50, 0, smooth(u * 0.8));
+  var camTy = lerp(-50, 0, smooth(u * 0.8));
+  s += '<g ' + camera(camScale, camTx, camTy) + '>';
+
+  // Full network grid (signal blue)
+  var gridX1 = CX - 400, gridX2 = CX + 400;
+  var gridY1 = TOP + 100, gridY2 = BOT - 100;
+  var numLines = 5;
+  var lineSpacingX = (gridX2 - gridX1) / (numLines - 1);
+  var lineSpacingY = (gridY2 - gridY1) / (numLines - 1);
+
+  var glowFactor = Math.sin(u * Math.PI * 2) * 0.2 + 0.8; // Gentle pulsation
+  var glowColor = BLUE;
+
+  // Horizontal lines
+  for (var i = 0; i < numLines; i++) {
+    var y = gridY1 + i * lineSpacingY;
+    s += line(gridX1, y, gridX2, y, glowColor, 7, glowFactor);
+  }
+  // Vertical lines
+  for (var i = 0; i < numLines; i++) {
+    var x = gridX1 + i * lineSpacingX;
+    s += line(x, gridY1, x, gridY2, glowColor, 7, glowFactor);
+  }
+
+  // Network hubs
+  for (var i = 0; i < numLines; i++) {
+    for (var j = 0; j < numLines; j++) {
+      var hubX = gridX1 + i * lineSpacingX;
+      var hubY = gridY1 + j * lineSpacingY;
+      s += networkHub(hubX, hubY, 20, glowColor, 6, glowFactor);
+    }
+  }
+
+  // Your amber pipeline (wide, with coral valve)
+  var yourPipeX = CX - 100;
+  var yourPipeY1 = gridY1 + lineSpacingY * 1.5;
+  var yourPipeY2 = gridY2 - lineSpacingY * 1.5;
+  var yourPipeWidth = 70;
+  s += pipelineRect(yourPipeX, (yourPipeY1 + yourPipeY2) / 2, yourPipeWidth, yourPipeY2 - yourPipeY1, 35, AMBER, 1);
+
+  // Coral valve (now understood, stable)
+  var valveY = lerp(CY, (yourPipeY1 + yourPipeY2) / 2, smooth(ramp(u, 0.2, 0.6))); // Reposition slightly
+  var valveW = yourPipeWidth + 10;
+  var valveH = 60;
+  s += dataValve(yourPipeX, valveY, valveW, valveH, CORAL, 1, 0.5); // Stable, half-open
+
+  // Connection line from your pipeline to main network (now integrated)
+  var connX1 = yourPipeX + yourPipeWidth / 2;
+  var connY1 = valveY;
+  var connX2 = CX + 250 - 50; // Connects to the side
+  var connY2 = valveY;
+  s += flowLine(connX1, connY1, connX2, connY2, BLUE, 8, glowFactor, u * 0.7, 0.5);
+
+  // Stick figure (reappears, understanding)
+  var figX = CX + 200;
+  var figY = BOT - 200;
+  var figScale = 1.0;
+  var figOpacity = smooth(ramp(u, 0.4, 0.9));
+  s += stickFigure(figX, figY, figScale, 'understanding', AMBER, figOpacity);
+  // Nodding motion
+  var nod = Math.sin(u * Math.PI * 2) * 5 * pulse(u, 0.7, 0.2);
+  s += line(figX, figY - 70, figX + nod, figY - 90, WHITE, 7, figOpacity); // Gaze line
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

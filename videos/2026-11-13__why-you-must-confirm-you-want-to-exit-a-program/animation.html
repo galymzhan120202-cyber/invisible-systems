@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why You Must Confirm You Want to Exit a Program</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+var USER_X = CX + 200;              // General x-position for the user
+var USER_Y = 1400;                  // General y-position for the user and desk
+var DOC_X = CX - 200;               // General x-position for the document
+var DOC_Y = 600;                    // General y-position for the document
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue -> system / rule
+var AMBER = "#F2A93B";              // warm amber  -> user / saved state
+var CORAL = "#FF5B5B";              // coral red   -> naive model / friction / unsaved / lost
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+/* Custom shapes for this animation */
+
+// Stick Figure
+function stickFigure(x, y, scale, pose, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ') scale(' + scale + ')">';
+  var sw = 8 / scale; // Adjust stroke width for scaling
+
+  // Head
+  g += dot(0, -70, 20, col);
+
+  // Body
+  g += line(0, -50, 0, 0, col, sw);
+
+  // Arms and Legs based on pose
+  switch (pose) {
+    case 'working': // Sitting at desk, hands on keyboard/table
+      g += line(-30, 20, 0, 0, col, sw); // Left leg
+      g += line(30, 20, 0, 0, col, sw);  // Right leg
+      g += line(0, -30, -40, -10, col, sw); // Left arm
+      g += line(0, -30, 40, -10, col, sw);  // Right arm
+      break;
+    case 'reaching': // Reaching forward/up
+      g += line(-20, 20, 0, 0, col, sw);
+      g += line(20, 20, 0, 0, col, sw);
+      g += line(0, -30, -50, -60, col, sw); // Left arm up
+      g += line(0, -30, 50, -60, col, sw);  // Right arm up
+      break;
+    case 'surprised': // Arms up, slightly recoiling
+      g += line(-10, 20, 0, 0, col, sw);
+      g += line(10, 20, 0, 0, col, sw);
+      g += line(0, -30, -60, -80, col, sw); // Arms wide up
+      g += line(0, -30, 60, -80, col, sw);
+      g += line(0, -70, 10, -75, col, sw); // Gaze up-right
+      break;
+    case 'sad': // Head down, slumped
+      g += line(-10, 20, 0, 0, col, sw);
+      g += line(10, 20, 0, 0, col, sw);
+      g += line(0, -30, -30, 10, col, sw); // Arms down
+      g += line(0, -30, 30, 10, col, sw);
+      g += line(0, -70, 0, -60, col, sw); // Head down
+      break;
+    case 'happy': // Arms up, smiling (implied by posture)
+      g += line(-20, 20, 0, 0, col, sw);
+      g += line(20, 20, 0, 0, col, sw);
+      g += line(0, -30, -50, -50, col, sw); // Arms up
+      g += line(0, -30, 50, -50, col, sw);
+      g += line(0, -70, 0, -70, col, sw); // Neutral head
+      break;
+    default: // Default standing pose
+      g += line(-30, 50, 0, 0, col, sw);
+      g += line(30, 50, 0, 0, col, sw);
+      g += line(0, -30, -50, -10, col, sw);
+      g += line(0, -30, 50, -10, col, sw);
+      break;
+  }
+
+  g += '</g>';
+  return g;
+}
+
+// Document Icon
+function documentIcon(x, y, w, h, col, state, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var sw = 8;
+
+  if (state === 'shattered') {
+    // Render fragments
+    var numFragments = 8;
+    for (var i = 0; i < numFragments; i++) {
+      var angle = (i / numFragments) * Math.PI * 2;
+      var dist = lerp(0, 80, rnd(i + 10));
+      var fragX = x + Math.cos(angle) * dist;
+      var fragY = y + Math.sin(angle) * dist;
+      var fragW = w * lerp(0.2, 0.4, rnd(i + 20));
+      var fragH = h * lerp(0.1, 0.2, rnd(i + 30));
+      g += rrect(fragX, fragY, fragW, fragH, 4, col, op * (1 - dist / 80));
+    }
+  } else {
+    // Main rectangle
+    g += rrectStroke(x, y, w, h, 12, col, sw);
+
+    // Internal lines (representing text/content)
+    var lineCount = 4;
+    var lineSpacing = h / (lineCount + 1);
+    for (var i = 0; i < lineCount; i++) {
+      var lineY = y - h / 2 + lineSpacing * (i + 1);
+      g += line(x - w * 0.35, lineY, x + w * 0.35, lineY, col, sw * 0.6);
+    }
+
+    // State-specific glyphs
+    if (state === 'warning') { // Question mark
+      g += line(x, y - h * 0.2, x, y - h * 0.05, col, sw * 0.8); // Dot for question mark
+      g += pathTag("M " + x + " " + (y - h * 0.3) + " Q " + (x + w * 0.1) + " " + (y - h * 0.4) + " " + (x + w * 0.05) + " " + (y - h * 0.25) +
+                    " Q " + (x - w * 0.1) + " " + (y - h * 0.15) + " " + (x - w * 0.05) + " " + (y - h * 0.05), col, sw * 0.8);
+    } else if (state === 'saved') { // Checkmark
+      g += pathTag("M " + (x - w * 0.2) + " " + (y + h * 0.05) + " L " + (x - w * 0.05) + " " + (y + h * 0.2) + " L " + (x + w * 0.2) + " " + (y - h * 0.2), col, sw * 0.8);
+    } else if (state === 'exit') { // X mark
+      g += line(x - w * 0.15, y - h * 0.15, x + w * 0.15, y + h * 0.15, col, sw * 0.8);
+      g += line(x + w * 0.15, y - h * 0.15, x - w * 0.15, y + h * 0.15, col, sw * 0.8);
+    }
+  }
+
+  g += '</g>';
+  return g;
+}
+
+// Generic button with a glyph
+function actionButton(x, y, size, glyph, col, sw, op) {
+  op = (op == null ? 1 : op);
+  sw = sw || 8;
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, size, size, size / 4, col, sw);
+  var glyphSize = size * 0.4;
+  if (glyph === 'X') {
+    g += line(x - glyphSize, y - glyphSize, x + glyphSize, y + glyphSize, col, sw * 0.8);
+    g += line(x + glyphSize, y - glyphSize, x - glyphSize, y + glyphSize, col, sw * 0.8);
+  } else if (glyph === 'check') {
+    g += pathTag("M " + (x - glyphSize * 0.6) + " " + (y + glyphSize * 0.1) + " L " + (x - glyphSize * 0.2) + " " + (y + glyphSize * 0.6) + " L " + (x + glyphSize * 0.6) + " " + (y - glyphSize * 0.4), col, sw * 0.8);
+  } else if (glyph === 'arrow') { // Right arrow
+    g += line(x - glyphSize, y, x + glyphSize, y, col, sw * 0.8);
+    g += line(x + glyphSize, y, x + glyphSize * 0.5, y - glyphSize * 0.5, col, sw * 0.8);
+    g += line(x + glyphSize, y, x + glyphSize * 0.5, y + glyphSize * 0.5, col, sw * 0.8);
+  }
+  g += '</g>';
+  return g;
+}
+
+// Desk for the stick figure
+function desk(x, y, w, h, col, sw, op) {
+  op = (op == null ? 1 : op);
+  sw = sw || 8;
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 12, col, op * 0.1); // Table top fill
+  g += rrectStroke(x, y, w, h, 12, col, sw); // Table top outline
+  g += line(x - w / 2 + 30, y + h / 2, x - w / 2 + 30, y + h / 2 + 150, col, sw); // Left leg
+  g += line(x + w / 2 - 30, y + h / 2, x + w / 2 - 30, y + h / 2 + 150, col, sw); // Right leg
+  g += '</g>';
+  return g;
+}
+
+// Generic dialog box (confirmation box)
+function dialogBox(x, y, w, h, rad, col, sw, op) {
+  op = (op == null ? 1 : op);
+  sw = sw || 10;
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, rad, col, sw);
+  g += rrect(x, y, w, h, rad, col, op * 0.1); // Subtle fill
+  g += '</g>';
+  return g;
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+// Helper for color interpolation
+function lerpColor(a, b, t) {
+  var ca = parseInt(a.slice(1), 16), cb = parseInt(b.slice(1), 16);
+  var ra = ca >> 16 & 0xFF, ga = ca >> 8 & 0xFF, ba = ca & 0xFF;
+  var rb = cb >> 16 & 0xFF, gb = cb >> 8 & 0xFF, bb = cb & 0xFF;
+
+  var r = Math.round(lerp(ra, rb, t));
+  var g = Math.round(lerp(ga, gb, t));
+  var b = Math.round(lerp(ba, bb, t));
+
+  return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+var DOC_W = 220, DOC_H = 300;
+var DESK_W = 500, DESK_H = 100;
+var BUTTON_SIZE = 100;
+
+/* SCENE 1 (0-10): User working, document is fresh. */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  // System background (subtle blue grid/frame)
+  s += rrectStroke(CX, CY, W - 100, BOT - TOP + 100, 50, BLUE, 4, 0.15);
+  s += line(CX, TOP, CX, BOT, BLUE, 2, 0.05); // Vertical guide
+  s += line(CX - 300, CY, CX + 300, CY, BLUE, 2, 0.05); // Horizontal guide
+
+  // Desk
+  s += desk(USER_X - 100, USER_Y - 100, DESK_W, DESK_H, WHITE, 8, 0.9);
+
+  // Document Icon
+  s += documentIcon(DOC_X, DOC_Y, DOC_W, DOC_H, WHITE, 'normal', 1);
+
+  // Stick Figure (working pose)
+  var bob = Math.sin(u * Math.PI * 3) * 5;
+  s += stickFigure(USER_X, USER_Y + bob, 1.0, 'working', AMBER, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): Accidental exit attempt. */
+function scene2(u) {
+  var s = '';
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14);
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+
+  // System background (subtle blue grid/frame)
+  s += rrectStroke(CX, CY, W - 100, BOT - TOP + 100, 50, BLUE, 4, 0.15);
+  s += line(CX, TOP, CX, BOT, BLUE, 2, 0.05);
+  s += line(CX - 300, CY, CX + 300, CY, BLUE, 2, 0.05);
+
+  // Desk
+  s += desk(USER_X - 100, USER_Y - 100, DESK_W, DESK_H, WHITE, 8, 0.9);
+
+  // Document Icon - starts normal, then warning (coral)
+  var docCol = lerpColor(WHITE, CORAL, ramp(u, 0.2, 0.6));
+  var docState = u < 0.6 ? 'normal' : 'warning';
+  s += documentIcon(DOC_X, DOC_Y, DOC_W, DOC_H, docCol, docState, 1);
+
+  // Stick Figure - reaches for exit button
+  var sfPose = u < 0.4 ? 'working' : 'reaching';
+  s += stickFigure(USER_X, USER_Y, 1.0, sfPose, AMBER, 1);
+
+  // Exit button appears
+  var btnOp = ramp(u, 0.3, 0.7);
+  var btnY = DOC_Y - DOC_H / 2 - BUTTON_SIZE / 2 - 40; // Above document
+  s += actionButton(DOC_X, btnY, BUTTON_SIZE, 'X', CORAL, 10, btnOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): System intervenes, "Are you sure?" */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // System background (subtle blue grid/frame)
+  s += rrectStroke(CX, CY, W - 100, BOT - TOP + 100, 50, BLUE, 4, 0.15);
+  s += line(CX, TOP, CX, BOT, BLUE, 2, 0.05);
+  s += line(CX - 300, CY, CX + 300, CY, BLUE, 2, 0.05);
+
+  // Desk
+  s += desk(USER_X - 100, USER_Y - 100, DESK_W, DESK_H, WHITE, 8, 0.9);
+
+  // Document Icon (coral warning)
+  s += documentIcon(DOC_X, DOC_Y, DOC_W, DOC_H, CORAL, 'warning', 1);
+
+  // Stick Figure (surprised/relieved)
+  var sfPose = u < 0.3 ? 'reaching' : 'surprised';
+  s += stickFigure(USER_X, USER_Y, 1.0, sfPose, AMBER, 1);
+
+  // Exit button (fades out as dialog appears)
+  var btnY = DOC_Y - DOC_H / 2 - BUTTON_SIZE / 2 - 40;
+  s += actionButton(DOC_X, btnY, BUTTON_SIZE, 'X', CORAL, 10, 1 - ramp(u, 0.0, 0.4));
+
+  // Confirmation dialog box (blue)
+  var dialogW = 600, dialogH = 400;
+  var dialogOp = ramp(u, 0.2, 0.7);
+  s += dialogBox(CX, CY, dialogW, dialogH, 30, BLUE, 12, dialogOp);
+
+  // Question mark inside dialog
+  var qOp = ramp(u, 0.4, 0.9);
+  s += documentIcon(CX, CY - 40, 100, 120, WHITE, 'warning', qOp); // Reusing documentIcon for a question mark
+
+  // Options: Confirm (check) or Cancel (X)
+  var optOp = ramp(u, 0.6, 1.0);
+  s += actionButton(CX - 120, CY + 100, BUTTON_SIZE, 'check', AMBER, 10, optOp); // Confirm
+  s += actionButton(CX + 120, CY + 100, BUTTON_SIZE, 'X', DIM, 10, optOp); // Cancel (greyed out)
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): User confirms, document saved. */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // System background (subtle blue grid/frame)
+  s += rrectStroke(CX, CY, W - 100, BOT - TOP + 100, 50, BLUE, 4, 0.15);
+  s += line(CX, TOP, CX, BOT, BLUE, 2, 0.05);
+  s += line(CX - 300, CY, CX + 300, CY, BLUE, 2, 0.05);
+
+  // Desk
+  s += desk(USER_X - 100, USER_Y - 100, DESK_W, DESK_H, WHITE, 8, 0.9);
+
+  // Document Icon - changes from coral to amber (saved)
+  var docCol = lerpColor(CORAL, AMBER, ramp(u, 0.3, 0.7));
+  var docState = u < 0.7 ? 'warning' : 'saved';
+  s += documentIcon(DOC_X, DOC_Y, DOC_W, DOC_H, docCol, docState, 1);
+
+  // Stick Figure (interacts with confirm button, then happy)
+  var sfPose = u < 0.5 ? 'reaching' : 'happy';
+  s += stickFigure(USER_X, USER_Y, 1.0, sfPose, AMBER, 1);
+
+  // Confirmation dialog box (blue) - fades out
+  var dialogW = 600, dialogH = 400;
+  var dialogOp = 1 - ramp(u, 0.6, 1.0);
+  s += dialogBox(CX, CY, dialogW, dialogH, 30, BLUE, 12, dialogOp);
+
+  // Confirm button press animation
+  var confirmBtnScale = 1.0;
+  if (u >= 0.1 && u < 0.3) {
+    confirmBtnScale = lerp(1.0, 0.8, smooth(ramp(u, 0.1, 0.2)));
+  } else if (u >= 0.3 && u < 0.5) {
+    confirmBtnScale = lerp(0.8, 1.0, smooth(ramp(u, 0.3, 0.4)));
+  }
+  s += '<g transform="translate(' + (CX - 120) + ' ' + (CY + 100) + ') scale(' + confirmBtnScale + ') translate(' + (-(CX - 120)) + ' ' + (-(CY + 100)) + ')">';
+  s += actionButton(CX - 120, CY + 100, BUTTON_SIZE, 'check', AMBER, 10, 1 - ramp(u, 0.6, 1.0));
+  s += '</g>';
+  s += actionButton(CX + 120, CY + 100, BUTTON_SIZE, 'X', DIM, 10, 1 - ramp(u, 0.6, 1.0));
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): Data loss without confirmation. */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.8, smooth(u));
+  s += '<g ' + camera(scale, 0, lerp(0, 90, smooth(u))) + '>';
+
+  // System background (broken/fading blue frame)
+  s += rrectStroke(CX, CY, W - 100, BOT - TOP + 100, 50, BLUE, 4, 0.15 * (1 - smooth(u)));
+  s += line(CX, TOP, CX, BOT, BLUE, 2, 0.05 * (1 - smooth(u)));
+  s += line(CX - 300, CY, CX + 300, CY, BLUE, 2, 0.05 * (1 - smooth(u)));
+
+  // Desk (fades out)
+  s += desk(USER_X - 100, USER_Y - 100, DESK_W, DESK_H, WHITE, 8, 0.9 * (1 - smooth(u)));
+
+  // Document Icon - shatters into coral fragments
+  var docOp = 1 - ramp(u, 0.4, 0.9);
+  s += documentIcon(DOC_X, DOC_Y, DOC_W, DOC_H, CORAL, 'shattered', docOp);
+
+  // Stick Figure (sad)
+  s += stickFigure(USER_X, USER_Y, 1.0, 'sad', AMBER, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): The value of confirmation. */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.8, 0.92, smooth(clamp(u / 0.7, 0, 1)));
+  s += '<g ' + camera(scale, 0, lerp(90, 0, smooth(u))) + '>';
+
+  // System background (strong, protective blue frame)
+  var frameOp = lerp(0.15, 0.8, smooth(u));
+  s += rrectStroke(CX, CY, W - 100, BOT - TOP + 100, 50, BLUE, 12, frameOp);
+
+  // Document Icon (amber, saved, reappears)
+  var docOp = ramp(u, 0.1, 0.5);
+  s += documentIcon(DOC_X, DOC_Y, DOC_W, DOC_H, AMBER, 'saved', docOp);
+
+  // Stick Figure (happy, looking at document)
+  s += stickFigure(USER_X, USER_Y, 1.0, 'happy', AMBER, 1);
+
+  // A subtle "protected" shield glyph over the document
+  var shieldOp = ramp(u, 0.6, 1.0);
+  var shieldX = DOC_X + DOC_W/2 + 60;
+  var shieldY = DOC_Y - DOC_H/2 - 60;
+  s += pathTag("M " + shieldX + " " + (shieldY - 40) + " L " + (shieldX - 40) + " " + (shieldY + 20) + " L " + (shieldX) + " " + (shieldY + 40) + " L " + (shieldX + 40) + " " + (shieldY + 20) + " Z", BLUE, 8, shieldOp);
+  s += dot(shieldX, shieldY + 10, 10, BLUE, shieldOp); // A dot in the middle of the shield
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
