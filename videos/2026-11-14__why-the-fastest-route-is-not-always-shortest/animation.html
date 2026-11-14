@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why the Fastest Route Isn't Always the Shortest</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> system data / time costs
+var AMBER = "#F2A93B";              // warm amber   -> YOU / chosen path
+var CORAL = "#FF5B5B";              // coral red    -> congestion / naive model
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+/* the "you" car: wide rounded body + driver head + two wheels */
+function car(x, y, col, lookDirection, op) { // lookDirection: 0=forward, -1=left, 1=right, 2=up
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  // Body: larger, thicker stroke
+  g += '<rect x="' + (x - 80) + '" y="' + (y - 42) + '" width="160" height="90" rx="26" fill="none" stroke="' + col + '" stroke-width="12"/>';
+  // Driver head: larger, higher
+  g += dot(x, y - 70, 20, col);
+  // Wheels: larger, adjusted position
+  g += dot(x - 50, y + 54, 14, col);
+  g += dot(x + 50, y + 54, 14, col);
+  // Gaze lines: adjusted start/end, thicker stroke
+  if (lookDirection === -1) g += line(x, y - 70, x - 30, y - 55, WHITE, 8); // look left
+  else if (lookDirection === 1) g += line(x, y - 70, x + 30, y - 55, WHITE, 8); // look right
+  else if (lookDirection === 2) g += line(x, y - 70, x, y - 100, WHITE, 8); // look up
+  g += '</g>';
+  return g;
+}
+
+/* persistent faint map grid / background (hero element, always present) */
+function mapGrid(op) {
+  op = (op == null ? 0.08 : op);
+  var g = '';
+  // Horizontal lines
+  for (var y = TOP; y <= BOT; y += 120) {
+    g += line(0, y, W, y, WHITE, 2, op);
+  }
+  // Vertical lines
+  for (var x = 0; x <= W; x += 120) {
+    g += line(x, TOP, x, BOT, WHITE, 2, op);
+  }
+  return g;
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+// Helper for quadratic bezier point
+function getQuadraticBezierPoint(x1, y1, cx, cy, x2, y2, t) {
+  var invT = 1 - t;
+  var x = invT * invT * x1 + 2 * invT * t * cx + t * t * x2;
+  var y = invT * invT * y1 + 2 * invT * t * cy + t * t * y2;
+  return { x: x, y: y };
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+// Common path parameters
+var START_X = CX - 100, START_Y = BOT - 180;
+var DEST_X = CX + 100, DEST_Y = TOP + 180;
+var CAR_START_Y = START_Y - 80;
+var CAR_DEST_Y = DEST_Y + 80;
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+  s += mapGrid(0.10);
+
+  // Shortest path (straight line)
+  var pathOp = lerp(0.3, 1.0, smooth(u));
+  s += line(START_X, START_Y, DEST_X, DEST_Y, AMBER, 10, pathOp);
+
+  // Destination marker
+  s += rrect(DEST_X, DEST_Y, 40, 40, 10, AMBER, 0.9);
+
+  // Car position
+  var carY = lerp(CAR_START_Y, CAR_START_Y - 40, Math.sin(u * Math.PI * 2) * 0.5 + 0.5); // Gentle bob
+  s += car(START_X, carY, AMBER, 2, 1); // Car looking up at the path/map
+
+  // "Focus" on map - a simple ring around the car's head
+  var focusPulse = Math.sin(u * Math.PI * 4) * 0.5 + 0.5;
+  s += ring(START_X, carY - 70, 24 + focusPulse * 4, WHITE, 4, 0.6 * focusPulse);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): THE SHORT PATH (CONGESTION) */
+function scene2(u) {
+  var s = '';
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14);
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+  s += mapGrid(0.10);
+
+  // Car moves along the path
+  var carProgress = easeIn(ramp(u, 0.0, 0.9));
+  var currentCarX = lerp(START_X, DEST_X, carProgress);
+  var currentCarY = lerp(CAR_START_Y, CAR_DEST_Y, carProgress);
+
+  // Path ahead (amber)
+  var pathAheadLen = lerp(1.0, 0.2, smooth(u));
+  var pathAheadX = lerp(currentCarX, DEST_X, 1 - pathAheadLen);
+  var pathAheadY = lerp(currentCarY, CAR_DEST_Y, 1 - pathAheadLen);
+  s += line(pathAheadX, pathAheadY, DEST_X, CAR_DEST_Y, AMBER, 10, 1);
+
+  // Path behind (coral red, thickening)
+  var pathBehindLen = lerp(0.0, 0.8, smooth(u));
+  var pathBehindX = lerp(START_X, currentCarX, 1 - pathBehindLen);
+  var pathBehindY = lerp(CAR_START_Y, currentCarY, 1 - pathBehindLen);
+  s += line(START_X, CAR_START_Y, pathBehindX, pathBehindY, CORAL, 10 + u * 8, 0.9);
+
+  // Congestion effect: red dots on the path behind the car
+  var congestionOp = ramp(u, 0.2, 0.8);
+  for (var i = 0; i < 8; i++) {
+    var p = (u * 0.8 + rnd(i)) % 1;
+    var dotX = lerp(START_X, currentCarX, p);
+    var dotY = lerp(CAR_START_Y, currentCarY, p);
+    s += dot(dotX, dotY, 12, CORAL, congestionOp * (1 - p));
+  }
+
+  // Destination marker
+  s += rrect(DEST_X, DEST_Y, 40, 40, 10, AMBER, 0.9);
+
+  // Car movement (jerky)
+  var carBob = Math.sin(u * Math.PI * 8) * 6 * ramp(u, 0.3, 0.9);
+  s += car(currentCarX + carBob, currentCarY, AMBER, 0, 1); // Car looking forward
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): THE ALTERNATIVE */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += mapGrid(0.10);
+
+  // Current car position
+  var currentCarX = DEST_X;
+  var currentCarY = CAR_DEST_Y;
+
+  // Red path remains
+  s += line(START_X, CAR_START_Y, DEST_X, CAR_DEST_Y, CORAL, 18, 0.9 * (1 - ramp(u, 0.8, 1.0)));
+  for (var i = 0; i < 8; i++) {
+    var p = (u * 0.4 + rnd(i)) % 1; // Slower movement for red dots
+    var dotX = lerp(START_X, DEST_X, p);
+    var dotY = lerp(CAR_START_Y, CAR_DEST_Y, p);
+    s += dot(dotX, dotY, 12, CORAL, 0.8 * (1 - ramp(u, 0.8, 1.0)));
+  }
+
+  // New path (longer, blue, clear) appears
+  var altPathStartX = START_X - 180;
+  var altPathStartY = CAR_START_Y + 100;
+  var altPathMidX = CX - 200;
+  var altPathMidY = CY;
+  var altPathEndX = DEST_X + 180;
+  var altPathEndY = CAR_DEST_Y - 100;
+
+  var altPathOp = ramp(u, 0.1, 0.6);
+  var altPathD = "M " + altPathStartX + " " + altPathStartY +
+                 " Q " + altPathMidX + " " + altPathMidY + " " + altPathEndX + " " + altPathEndY;
+  s += pathTag(altPathD, BLUE, 10, altPathOp);
+
+  // Destination marker
+  s += rrect(DEST_X, DEST_Y, 40, 40, 10, AMBER, 0.9);
+
+  // Car looking left (at new path), then right (at old path)
+  var lookLeft = ramp(u, 0.1, 0.4);
+  var lookRight = ramp(u, 0.5, 0.8);
+  var carLook = 0;
+  if (lookLeft > 0 && lookLeft < 1) carLook = -1;
+  else if (lookRight > 0 && lookRight < 1) carLook = 1;
+
+  s += car(currentCarX, currentCarY, AMBER, carLook, 1);
+
+  // Thought bubble
+  var thoughtOp = ramp(u, 0.6, 0.9);
+  var thoughtPulse = Math.sin(u * Math.PI * 6) * 0.5 + 0.5;
+  s += ring(currentCarX, currentCarY - 140, 30 + thoughtPulse * 5, WHITE, 5, thoughtOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): DATA & TIME */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += mapGrid(0.10);
+
+  // Current car position (still on the "red" path, observing)
+  var currentCarX = DEST_X;
+  var currentCarY = CAR_DEST_Y;
+
+  // Red path (fading, slower dots)
+  s += line(START_X, CAR_START_Y, DEST_X, CAR_DEST_Y, CORAL, 18, 0.9 * (1 - ramp(u, 0.0, 0.3)));
+  var redDotSpeed = lerp(0.4, 0.1, smooth(u));
+  for (var i = 0; i < 4; i++) { // Fewer dots
+    var p = (u * redDotSpeed + rnd(i)) % 1;
+    var dotX = lerp(START_X, DEST_X, p);
+    var dotY = lerp(CAR_START_Y, CAR_DEST_Y, p);
+    s += dot(dotX, dotY, 12, CORAL, 0.8 * (1 - ramp(u, 0.0, 0.3)));
+  }
+
+  // Blue path (highlighted, fast dots)
+  var altPathStartX = START_X - 180;
+  var altPathStartY = CAR_START_Y + 100;
+  var altPathMidX = CX - 200;
+  var altPathMidY = CY;
+  var altPathEndX = DEST_X + 180;
+  var altPathEndY = CAR_DEST_Y - 100;
+
+  var altPathD = "M " + altPathStartX + " " + altPathStartY +
+                 " Q " + altPathMidX + " " + altPathMidY + " " + altPathEndX + " " + altPathEndY;
+  s += pathTag(altPathD, BLUE, 10, 1);
+
+  // Data points (blue circles) moving smoothly and quickly
+  var blueDotSpeed = lerp(0.8, 1.5, smooth(u));
+  var blueDotCount = lerp(4, 10, smooth(u));
+  for (var j = 0; j < blueDotCount; j++) {
+    var p = (u * blueDotSpeed + rnd(j + 10)) % 1;
+    var pathPoint = getQuadraticBezierPoint(altPathStartX, altPathStartY, altPathMidX, altPathMidY, altPathEndX, altPathEndY, p);
+    s += dot(pathPoint.x, pathPoint.y, 12, BLUE, 0.9);
+  }
+
+  // Clock graphic near blue path
+  var clockX = altPathMidX + 100, clockY = altPathMidY - 100;
+  s += ring(clockX, clockY, 30, WHITE, 4, 0.8);
+  var hourAngle = (u * 0.1 * Math.PI * 2) - Math.PI / 2; // Slow hour hand
+  var minuteAngle = (u * 0.8 * Math.PI * 2) - Math.PI / 2; // Faster minute hand
+  s += line(clockX, clockY, clockX + 18 * Math.cos(hourAngle), clockY + 18 * Math.sin(hourAngle), WHITE, 6, 0.9);
+  s += line(clockX, clockY, clockX + 25 * Math.cos(minuteAngle), clockY + 25 * Math.sin(minuteAngle), WHITE, 4, 0.9);
+  s += dot(clockX, clockY, 8, WHITE, 0.9); // Center dot
+
+  // Destination marker
+  s += rrect(DEST_X, DEST_Y, 40, 40, 10, AMBER, 0.9);
+
+  s += car(currentCarX, currentCarY, AMBER, 0, 1); // Car looking forward
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): THE CHOICE */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.9, smooth(u));
+  var driftY = lerp(0, -60, smooth(u)); // Slight zoom in on destination
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+  s += mapGrid(0.10);
+
+  // Red path fades out
+  s += line(START_X, CAR_START_Y, DEST_X, CAR_DEST_Y, CORAL, 18, 0.9 * (1 - ramp(u, 0.0, 0.4)));
+
+  // Blue path becomes primary
+  var altPathStartX = START_X - 180;
+  var altPathStartY = CAR_START_Y + 100;
+  var altPathMidX = CX - 200;
+  var altPathMidY = CY;
+  var altPathEndX = DEST_X + 180;
+  var altPathEndY = CAR_DEST_Y - 100;
+  var altPathD = "M " + altPathStartX + " " + altPathStartY +
+                 " Q " + altPathMidX + " " + altPathMidY + " " + altPathEndX + " " + altPathEndY;
+  s += pathTag(altPathD, BLUE, 10, 1);
+
+  // Car switches paths and accelerates
+  var switchProgress = smooth(ramp(u, 0.0, 0.3));
+  var carStartX = DEST_X;
+  var carStartY = CAR_DEST_Y;
+  
+  var currentCarX, currentCarY;
+
+  if (switchProgress < 1) { // Switching from red path end to blue path start
+    // Use a short bezier curve for the switch
+    var switchMidX = lerp(carStartX, altPathStartX, 0.5);
+    var switchMidY = lerp(carStartY, altPathStartY, 0.5) - 80; // Arc upwards
+    var switchPoint = getQuadraticBezierPoint(carStartX, carStartY, switchMidX, switchMidY, altPathStartX, altPathStartY, switchProgress);
+    currentCarX = switchPoint.x;
+    currentCarY = switchPoint.y;
+  } else { // Moving along the blue path
+    var bluePathCarProgress = smooth(ramp(u, 0.2, 0.9)) * 0.8; // Don't reach end yet
+    var pathPoint = getQuadraticBezierPoint(altPathStartX, altPathStartY, altPathMidX, altPathMidY, altPathEndX, altPathEndY, bluePathCarProgress);
+    currentCarX = pathPoint.x;
+    currentCarY = pathPoint.y;
+  }
+
+  s += car(currentCarX, currentCarY, AMBER, 0, 1);
+
+  // Destination marker
+  s += rrect(DEST_X, DEST_Y, 40, 40, 10, AMBER, 0.9);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): ARRIVAL */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.9, 1.0, smooth(clamp(u / 0.7, 0, 1)));
+  var driftY = lerp(-60, 0, smooth(clamp(u / 0.7, 0, 1)));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  // Map grid reforms
+  s += mapGrid(0.10 + 0.10 * ramp(u, 0.6, 1.0));
+
+  // Blue path fades out
+  var altPathStartX = START_X - 180;
+  var altPathStartY = CAR_START_Y + 100;
+  var altPathMidX = CX - 200;
+  var altPathMidY = CY;
+  var altPathEndX = DEST_X + 180;
+  var altPathEndY = CAR_DEST_Y - 100;
+  var altPathD = "M " + altPathStartX + " " + altPathStartY +
+                 " Q " + altPathMidX + " " + altPathMidY + " " + altPathEndX + " " + altPathEndY;
+  s += pathTag(altPathD, BLUE, 10, 1 - ramp(u, 0.4, 0.8));
+
+  // Car arrives at destination
+  var carArrivalProgress = smooth(ramp(u, 0.0, 0.4));
+  var finalCarX, finalCarY;
+  var pathPoint = getQuadraticBezierPoint(altPathStartX, altPathStartY, altPathMidX, altPathMidY, altPathEndX, altPathEndY, 0.8 + carArrivalProgress * 0.2);
+  finalCarX = pathPoint.x;
+  finalCarY = pathPoint.y;
+
+  s += car(finalCarX, finalCarY, AMBER, 0, 1);
+
+  // Destination marker
+  s += rrect(DEST_X, DEST_Y, 40, 40, 10, AMBER, 0.9);
+
+  // Destination pulses with success
+  var pulseOp = pulse(u, 0.5, 0.2) * 0.8;
+  s += ring(DEST_X, DEST_Y, 40 + pulseOp * 10, WHITE, 6, pulseOp);
+  s += ring(DEST_X, DEST_Y, 50 + pulseOp * 15, BLUE, 4, pulseOp * 0.6);
+
+  // Car settles at destination, ready for new journey
+  var resetCarX = lerp(finalCarX, CX, ramp(u, 0.8, 1.0));
+  var resetCarY = lerp(finalCarY, CY + 80, ramp(u, 0.8, 1.0));
+  var resetDestX = lerp(DEST_X, CX, ramp(u, 0.8, 1.0));
+  var resetDestY = lerp(DEST_Y, CY - 40, ramp(u, 0.8, 1.0));
+
+  // Fade out the old car/destination and show new centered ones
+  var fadeOutCurrent = 1 - ramp(u, 0.8, 1.0);
+  s += car(resetCarX, resetCarY, AMBER, 0, fadeOutCurrent);
+  s += rrect(resetDestX, resetDestY, 40, 40, 10, AMBER, fadeOutCurrent);
+
+
+  // Final static destination marker and car in center
+  var finalOp = ramp(u, 0.9, 1.0);
+  s += rrect(CX, CY - 40, 40, 40, 10, AMBER, finalOp);
+  s += car(CX, CY + 80, AMBER, 0, finalOp);
+
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

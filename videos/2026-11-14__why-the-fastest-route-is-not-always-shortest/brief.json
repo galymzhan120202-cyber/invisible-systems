@@ -1,0 +1,15 @@
+{
+  "id": "why-the-fastest-route-is-not-always-shortest",
+  "slug": "2026-11-14__why-the-fastest-route-is-not-always-shortest",
+  "title_working": "Why the Fastest Route Isn't Always the Shortest",
+  "system": "algorithmic routing vs. fixed path optimization",
+  "cluster": "traffic-and-crowds",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-11-14T13:39:41+00:00",
+  "produced_at": "2026-11-14T13:44:58+00:00",
+  "verify": "PASS",
+  "takeaway": "Your navigation app prioritizes predicted travel time over raw distance, even if it means a longer path.",
+  "animation_source": "llm"
+}

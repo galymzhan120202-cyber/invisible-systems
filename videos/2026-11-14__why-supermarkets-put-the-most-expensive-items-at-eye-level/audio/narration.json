@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You're in the supermarket, list in hand. Just trying to grab your groceries, find good value, and get out quickly.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "But as your eyes scan the shelves, you notice something. The items that jump out, right at your level, often seem pricier.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "You might think these are just popular brands. But finding a cheaper alternative usually means bending low or stretching high for it.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "This isn't random. It's a calculated strategy: 'eye-level is buy-level.' Retailers know this is prime real estate for impulse buys.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "They place their most profitable items exactly where your gaze naturally lands. Your desire for convenience makes you spend more, invisibly.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "Next time, you'll see this system at work. Scan every shelf, up and down. The best deals are often hiding, just not at eye level.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]
