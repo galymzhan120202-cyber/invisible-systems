@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why You See Fewer Ads For Things You Search</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue  -> system logic/optimization
+var AMBER = "#F2A93B";              // warm amber   -> viewer / desired product
+var CORAL = "#FF5B5B";              // coral red    -> naive expectation / false model
+
+var STROKE_W = 10;
+var STICK_H = 180; // approximate height for stick figure
+var STICK_W = 100; // approximate width for stick figure
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* Custom Helpers */
+// Stick figure: x,y is the center of the body, `pose` can be 'idle', 'tap', 'walk', 'confused', 'nod'
+function stickFigure(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" stroke="' + col + '" stroke-width="' + STROKE_W + '" stroke-linecap="round">';
+  var headR = 30;
+  var bodyH = 80;
+  var armL = 50;
+  var legL = 60;
+
+  // Head
+  g += dot(x, y - headR - bodyH / 2, headR, col);
+
+  // Body
+  g += line(x, y - bodyH / 2, x, y + bodyH / 2);
+
+  // Arms and Legs based on pose
+  switch (pose) {
+    case 'tap':
+      g += line(x, y - bodyH / 4, x - armL, y - bodyH / 4); // Left arm
+      g += line(x, y - bodyH / 4, x + armL * 0.8, y - bodyH / 4 + armL * 0.6); // Right arm bent for tap
+      g += line(x + armL * 0.8, y - bodyH / 4 + armL * 0.6, x + armL * 0.8 + 10, y - bodyH / 4 + armL * 0.6 + 10); // Finger for tap
+      g += line(x - 20, y + bodyH / 2, x - 20, y + bodyH / 2 + legL); // Left leg
+      g += line(x + 20, y + bodyH / 2, x + 20, y + bodyH / 2 + legL); // Right leg
+      break;
+    case 'walk':
+      g += line(x, y - bodyH / 4, x - armL * 0.8, y - bodyH / 4 + armL * 0.4); // Left arm back
+      g += line(x, y - bodyH / 4, x + armL * 0.8, y - bodyH / 4 - armL * 0.4); // Right arm forward
+      g += line(x - 20, y + bodyH / 2, x - 20 + 15, y + bodyH / 2 + legL); // Left leg forward
+      g += line(x + 20, y + bodyH / 2, x + 20 - 15, y + bodyH / 2 + legL); // Right leg back
+      break;
+    case 'confused':
+      g += line(x, y - bodyH / 4, x - armL * 0.6, y - bodyH / 4 - armL * 0.4); // Left arm up
+      g += line(x - armL * 0.6, y - bodyH / 4 - armL * 0.4, x - armL * 0.6 + 15, y - bodyH / 4 - armL * 0.4 - 15); // Hand near head
+      g += line(x, y - bodyH / 4, x + armL * 0.8, y - bodyH / 4); // Right arm out
+      g += line(x - 20, y + bodyH / 2, x - 20, y + bodyH / 2 + legL); // Left leg
+      g += line(x + 20, y + bodyH / 2, x + 20, y + bodyH / 2 + legL); // Right leg
+      break;
+    case 'nod':
+      g += line(x, y - bodyH / 4, x - armL, y - bodyH / 4); // Left arm
+      g += line(x, y - bodyH / 4, x + armL, y - bodyH / 4); // Right arm
+      g += line(x - 20, y + bodyH / 2, x - 20, y + bodyH / 2 + legL); // Left leg
+      g += line(x + 20, y + bodyH / 2, x + 20, y + bodyH / 2 + legL); // Right leg
+      break;
+    case 'idle':
+    default:
+      g += line(x, y - bodyH / 4, x - armL, y - bodyH / 4); // Left arm
+      g += line(x, y - bodyH / 4, x + armL, y - bodyH / 4); // Right arm
+      g += line(x - 20, y + bodyH / 2, x - 20, y + bodyH / 2 + legL); // Left leg
+      g += line(x + 20, y + bodyH / 2, x + 20, y + bodyH / 2 + legL); // Right leg
+      break;
+  }
+
+  g += '</g>';
+  return g;
+}
+
+// Generic product icon (circle or square)
+function productIcon(x, y, size, col, op) {
+  return rrect(x, y, size, size, size / 4, col, op); // Rounded square
+}
+
+// Simple ad rectangle
+function adRect(x, y, w, h, col, sw, op) {
+  return rrectStroke(x, y, w, h, 15, col, sw, op);
+}
+
+// Question mark glyph
+function questionMark(x, y, size, col, sw, op) {
+  var d = "M " + x + " " + (y - size) +
+          " Q " + (x + size * 0.8) + " " + (y - size * 0.8) + " " + (x + size * 0.4) + " " + (y - size * 0.1) +
+          " L " + (x + size * 0.1) + " " + (y + size * 0.1) +
+          " M " + x + " " + (y + size * 0.4);
+  return pathTag(d, col, sw, op);
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var deskY = BOT - 180;
+  var screenY = BOT - 420;
+  var stickX = CX - 180;
+  var stickY = deskY - 100; // Stick figure sits at desk
+
+  // Desk
+  s += rrectStroke(CX, deskY, 600, 200, 20, WHITE, STROKE_W);
+  // Screen
+  s += rrectStroke(CX, screenY, 480, 300, 20, WHITE, STROKE_W);
+
+  // Product icons on screen
+  var productSize = 60;
+  var iconX1 = CX - 120, iconY1 = screenY - 60;
+  var iconX2 = CX + 120, iconY2 = screenY - 60;
+  var iconX3 = CX - 120, iconY3 = screenY + 60;
+  var iconX4 = CX + 120, iconY4 = screenY + 60;
+
+  s += productIcon(iconX1, iconY1, productSize, WHITE);
+  s += productIcon(iconX2, iconY2, productSize, WHITE);
+  s += productIcon(iconX3, iconY3, productSize, WHITE);
+  s += productIcon(iconX4, iconY4, productSize, WHITE);
+
+  // Tapped product icon glows amber
+  var tapProgress = ramp(u, 0.4, 0.6);
+  if (tapProgress > 0) {
+    s += productIcon(iconX2, iconY2, productSize, AMBER, tapProgress);
+    s += ring(iconX2, iconY2, productSize * 0.6 + tapProgress * 10, AMBER, STROKE_W * 0.8, tapProgress);
+  }
+
+  // Stick figure and tap animation
+  var pose = 'idle';
+  if (u > 0.3 && u < 0.7) {
+    pose = 'tap';
+  }
+  s += stickFigure(stickX, stickY, AMBER, pose);
+
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var stickStart = CX - 180;
+  var stickEnd = CX + 200;
+  var stickY = BOT - 100;
+
+  // Stick figure walks right
+  var walkX = lerp(stickStart, stickEnd, easeIn(u));
+  s += stickFigure(walkX, stickY, AMBER, 'walk');
+
+  // Desk/screen morphs into abstract 'website' boxes
+  var screenY = BOT - 420;
+
+  // Morph values for the main screen element
+  var screenMorphX = lerp(CX, CX - 300, smooth(u));
+  var screenMorphY = lerp(screenY, CY - 200, smooth(u));
+  var screenMorphW = lerp(480, 300, smooth(u));
+  var screenMorphH = lerp(300, 200, smooth(u));
+  var screenMorphCol = WHITE;
+
+  s += rrectStroke(screenMorphX, screenMorphY, screenMorphW, screenMorphH, 20, screenMorphCol, STROKE_W);
+
+  // New website boxes sliding in
+  var box1X = lerp(W + 200, CX + 200, smooth(u));
+  var box1Y = CY - 300;
+  s += rrectStroke(box1X, box1Y, 280, 180, 15, WHITE, STROKE_W);
+
+  var box2X = lerp(W + 400, CX + 300, smooth(u * 0.8));
+  var box2Y = CY + 100;
+  s += rrectStroke(box2X, box2Y, 320, 220, 15, WHITE, STROKE_W);
+
+  // Coral red ad outlines pop up around stick figure
+  var adOp = ramp(u, 0.3, 0.7);
+  var adPulse = Math.sin(u * Math.PI * 8) * 0.5 + 0.5; // Pulsing effect
+  var adStroke = STROKE_W * lerp(0.8, 1.2, adPulse);
+
+  s += adRect(walkX - 200, stickY - 300, 200, 120, CORAL, adStroke, adOp);
+  s += adRect(walkX + 150, stickY - 400, 220, 140, CORAL, adStroke, adOp);
+  s += adRect(walkX - 100, stickY + 100, 180, 100, CORAL, adStroke, adOp);
+
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var stickX = CX + 200;
+  var stickY = BOT - 100;
+
+  // Stick figure confused, scratching head
+  var pose = 'idle';
+  var qMarkOp = 0;
+  if (u > 0.3 && u < 0.8) {
+    pose = 'confused';
+    qMarkOp = ramp(u, 0.4, 0.6) * (1 - ramp(u, 0.7, 0.8));
+  }
+  s += stickFigure(stickX, stickY, AMBER, pose);
+
+  // Question mark icon briefly above head
+  if (qMarkOp > 0) {
+    s += questionMark(stickX + 50, stickY - STICK_H - 20, 30, WHITE, STROKE_W, qMarkOp);
+  }
+
+  // Digital environment boxes (from S2)
+  s += rrectStroke(CX - 300, CY - 200, 300, 200, 20, WHITE, STROKE_W);
+  s += rrectStroke(CX + 200, CY - 300, 280, 180, 15, WHITE, STROKE_W);
+  s += rrectStroke(CX + 300, CY + 100, 320, 220, 15, WHITE, STROKE_W);
+
+  // Diminishing coral red ads
+  var fadeAds = lerp(1, 0, smooth(ramp(u, 0.4, 0.9)));
+  var adPulse = Math.sin(u * Math.PI * 12) * 0.5 + 0.5; // Shimmer effect
+  var adStroke = STROKE_W * lerp(0.8, 1.2, adPulse);
+
+  s += adRect(stickX - 200, stickY - 300, 200, 120, CORAL, adStroke, fadeAds);
+  s += adRect(stickX + 150, stickY - 400, 220, 140, CORAL, adStroke, fadeAds * 0.8);
+  s += adRect(stickX - 100, stickY + 100, 180, 100, CORAL, adStroke, fadeAds * 0.6);
+
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var scale = lerp(1, 0.6, smooth(u));
+  var transY = lerp(0, -CY / 2, smooth(u)); // Pull up to overhead view
+
+  s += '<g ' + camera(scale, 0, transY) + '>';
+
+  // Morph from digital boxes to network grid (signal blue lines)
+  var gridOp = ramp(u, 0.2, 0.6);
+  var gridCol = BLUE;
+
+  // Grid lines
+  var numLines = 6;
+  var gridSpacing = (BOT - TOP) / (numLines - 1);
+  for (var i = 0; i < numLines; i++) {
+    var y = lerp(CY - 400, TOP + i * gridSpacing, smooth(u)); // Vertical position
+    s += line(CX - 400, y, CX + 400, y, gridCol, STROKE_W / 2, gridOp); // Horizontal lines
+  }
+  for (var j = 0; j < numLines; j++) {
+    var x = lerp(CX - 400, CX - 200 + j * gridSpacing, smooth(u)); // Horizontal position
+    s += line(x, TOP, x, BOT, gridCol, STROKE_W / 2, gridOp); // Vertical lines
+  }
+
+  // Stick figure as amber dot node
+  s += dot(CX, CY + 200, 20, AMBER, 1);
+
+  // Blue 'ad packets' travel along lines
+  var packetCount = 3;
+  var packetSize = 12;
+  for (var i = 0; i < packetCount; i++) {
+    var packetProgress = (u * 1.5 + rnd(i) * 0.3) % 1;
+    var packetX = lerp(CX - 300, CX, easeIn(packetProgress));
+    var packetY = lerp(CY - 100, CY + 200, easeIn(packetProgress));
+    s += dot(packetX, packetY, packetSize, BLUE, ramp(packetProgress, 0, 0.2) * (1 - ramp(packetProgress, 0.8, 1)));
+  }
+
+  // 'Gate' in the network closes
+  var gateClose = ramp(u, 0.6, 0.8);
+  var gateY = CY + 100;
+  var gateX = CX - 100;
+  s += line(gateX, gateY, gateX + lerp(0, 200, gateClose), gateY, BLUE, STROKE_W, gateClose); // Horizontal bar
+  s += line(gateX + 100, gateY - 50, gateX + 100, gateY + 50, BLUE, STROKE_W, gateClose); // Vertical bar (pivot)
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(0.6, 0.8, smooth(u));
+  var transY = lerp(-CY / 2, 0, smooth(u)); // Zoom in slightly
+
+  s += '<g ' + camera(scale, 0, transY) + '>';
+
+  // Morph from network grid to a graph
+  var graphX = CX - 350, graphY = BOT - 200;
+  var graphW = 700, graphH = 600;
+
+  // Axes
+  s += line(graphX, graphY, graphX + graphW, graphY, WHITE, STROKE_W / 2); // X-axis
+  s += line(graphX, graphY, graphX, graphY - graphH, WHITE, STROKE_W / 2); // Y-axis
+
+  // Y-axis label (simple bar/dot)
+  s += rrect(graphX - 40, graphY - graphH / 2, 10, 80, 5, WHITE);
+  s += dot(graphX - 40, graphY - graphH / 2 - 60, 10, WHITE);
+
+  // X-axis label (simple bar/dot)
+  s += rrect(graphX + graphW / 2, graphY + 40, 80, 10, 5, WHITE);
+  s += dot(graphX + graphW / 2 + 60, graphY + 40, 10, WHITE);
+
+  // Signal blue curve
+  var curveProgress = ramp(u, 0.0, 0.8);
+  var p1 = { x: graphX, y: graphY };
+  var p2 = { x: graphX + graphW * 0.3, y: graphY - graphH * 0.8 };
+  var p3 = { x: graphX + graphW * 0.7, y: graphY - graphH * 0.9 };
+  var p4 = { x: graphX + graphW, y: graphY - graphH * 0.85 };
+
+  var curvePath = "M " + p1.x + " " + p1.y +
+                  " C " + p2.x + " " + p2.y + " " + p3.x + " " + p3.y + " " + p4.x + " " + p4.y;
+  s += pathTag(curvePath, BLUE, STROKE_W, curveProgress);
+
+  // Amber dot moves along the curve
+  var dotX, dotY;
+  // Use cubic Bezier interpolation
+  var t_bezier = u;
+  dotX = (1 - t_bezier) * (1 - t_bezier) * (1 - t_bezier) * p1.x + 3 * (1 - t_bezier) * (1 - t_bezier) * t_bezier * p2.x + 3 * (1 - t_bezier) * t_bezier * t_bezier * p3.x + t_bezier * t_bezier * t_bezier * p4.x;
+  dotY = (1 - t_bezier) * (1 - t_bezier) * (1 - t_bezier) * p1.y + 3 * (1 - t_bezier) * (1 - t_bezier) * t_bezier * p2.y + 3 * (1 - t_bezier) * t_bezier * t_bezier * p3.y + t_bezier * t_bezier * t_bezier * p4.y;
+  
+  s += dot(dotX, dotY, 15, AMBER, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.8, 1, smooth(u));
+  var transY = lerp(0, 0, smooth(u)); // No camera movement, just scale
+
+  s += '<g ' + camera(scale, 0, transY) + '>';
+
+  // Morph from graph back to desk/screen
+  var deskY = BOT - 180;
+  var screenY = BOT - 420;
+  var stickX = CX - 180;
+  var stickY = deskY - 100;
+
+  // Desk
+  s += rrectStroke(CX, deskY, 600, 200, 20, WHITE, STROKE_W);
+  // Screen
+  s += rrectStroke(CX, screenY, 480, 300, 20, WHITE, STROKE_W);
+
+  // Desired product on screen (amber)
+  var productSize = 80;
+  s += productIcon(CX, screenY, productSize, AMBER);
+
+  // Subtle signal blue glow from screen
+  var glowOp = lerp(0.1, 0.4, Math.sin(u * Math.PI * 4) * 0.5 + 0.5);
+  var glowR = lerp(productSize * 0.8, productSize * 1.2, Math.sin(u * Math.PI * 4) * 0.5 + 0.5);
+  s += ring(CX, screenY, glowR, BLUE, STROKE_W * 0.8, glowOp);
+
+  // Stick figure nods knowingly
+  var pose = 'idle';
+  if (u > 0.5) {
+    pose = 'nod';
+  }
+  s += stickFigure(stickX, stickY, AMBER, pose);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure last frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

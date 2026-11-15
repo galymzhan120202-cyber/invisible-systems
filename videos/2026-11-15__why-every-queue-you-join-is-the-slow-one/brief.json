@@ -1,0 +1,15 @@
+{
+  "id": "why-every-queue-you-join-is-the-slow-one",
+  "slug": "2026-11-15__why-every-queue-you-join-is-the-slow-one",
+  "title_working": "Why Every Queue You Join Is The Slow One",
+  "system": "confirmation bias and memory recall of negative experiences",
+  "cluster": "queues-and-waiting",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-11-15T13:51:21+00:00",
+  "produced_at": "2026-11-15T13:55:11+00:00",
+  "verify": "PASS",
+  "takeaway": "You now understand that your perception of slow queues is shaped by how your brain remembers and biases your experiences.",
+  "animation_source": "llm"
+}

@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Every Queue You Join Is The Slow One</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / the wave
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want
+var CORAL = "#FF5B5B";              // coral red    -> the naive model / false signal
+
+var DUR = 60;
+window.__duration = DUR;
+
+// Custom constants for this animation
+var YOU_X = CX;
+var YOU_Y = BOT - 200;
+var STROKE_W = 9;
+var STICK_H = 180;
+var STICK_HEAD_R = 24;
+var QUEUE_LANE_W = 80;
+var QUEUE_LANE_GAP = 180; // Distance between center of lanes
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+// Custom shape builders
+// Stick figure: x, y is base of feet. h is total height.
+function stickFigure(x, y, col, headTilt, armAngle, legAngle, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headY = y - STICK_H + STICK_HEAD_R;
+  g += dot(x, headY, STICK_HEAD_R, col); // Head
+
+  // Body
+  g += line(x, headY + STICK_HEAD_R, x, y - STICK_H / 2 + 10, col, STROKE_W);
+
+  // Arms
+  var armLen = STICK_H * 0.4;
+  var armY = headY + STICK_HEAD_R + STICK_H * 0.1;
+  g += line(x, armY, x - armLen * Math.cos(armAngle), armY + armLen * Math.sin(armAngle), col, STROKE_W);
+  g += line(x, armY, x + armLen * Math.cos(armAngle), armY + armLen * Math.sin(armAngle), col, STROKE_W);
+
+  // Legs
+  var legLen = STICK_H * 0.5;
+  var legY = y - STICK_H / 2 + 10;
+  g += line(x, legY, x - legLen * Math.sin(legAngle), y, col, STROKE_W);
+  g += line(x, legY, x + legLen * Math.sin(legAngle), y, col, STROKE_W);
+
+  // Head tilt (simple gaze line)
+  if (headTilt !== 0) {
+    g += line(x, headY, x + STICK_HEAD_R * Math.sin(headTilt), headY - STICK_HEAD_R * Math.cos(headTilt), col, STROKE_W * 0.7);
+  }
+
+  g += '</g>';
+  return g;
+}
+
+// Clock icon
+function clock(x, y, r, t_local, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, r, col, sw);
+
+  // Hour hand (shorter, thicker)
+  var hourAngle = (t_local * 2 * Math.PI / 12) - Math.PI / 2; // 12 hours cycle
+  g += line(x, y, x + r * 0.5 * Math.cos(hourAngle), y + r * 0.5 * Math.sin(hourAngle), col, sw * 0.8);
+
+  // Minute hand (longer, thinner)
+  var minuteAngle = (t_local * 2 * Math.PI) - Math.PI / 2; // 60 minutes cycle (t_local is [0,1])
+  g += line(x, y, x + r * 0.8 * Math.cos(minuteAngle), y + r * 0.8 * Math.sin(minuteAngle), col, sw * 0.6);
+
+  g += '</g>';
+  return g;
+}
+
+// Queue line of abstract figures (dots or lines)
+function queueLine(x_center, y_start, y_end, figure_count, speed, phase, col, sw, op, type) {
+  op = (op == null ? 1 : op);
+  sw = (sw == null ? STROKE_W : sw);
+  type = (type == null ? 'dot' : type); // 'dot' or 'line'
+
+  var g = '<g opacity="' + op + '">';
+  var span = y_end - y_start;
+  var spacing = span / (figure_count - 0.5); // Adjust spacing for better distribution
+
+  for (var i = 0; i < figure_count; i++) {
+    var y_base = y_end - i * spacing;
+    var y_pos = y_base - (phase % 1) * speed; // Scrolling motion
+    while (y_pos < y_start) y_pos += span;
+    while (y_pos > y_end) y_pos -= span;
+
+    if (y_pos >= y_start && y_pos <= y_end) {
+      if (type === 'dot') {
+        g += dot(x_center, y_pos, STICK_HEAD_R * 0.7, col);
+      } else { // type === 'line'
+        g += line(x_center, y_pos - STICK_H * 0.4, x_center, y_pos + STICK_H * 0.4, col, sw);
+      }
+    }
+  }
+  g += '</g>';
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  // Camera fixed, subtle bob for the figure
+  var bob = Math.sin(u * Math.PI * 2) * 3;
+  s += '<g ' + camera(1.0, 0, bob) + '>';
+
+  // Main queue behind the amber figure
+  var queueY = YOU_Y - STICK_H / 2 - 40; // Start of queue elements
+  var queueFigures = 6;
+  var queueSpacing = (BOT - TOP) / queueFigures;
+  for (var i = 0; i < queueFigures; i++) {
+    var figY = queueY - i * queueSpacing;
+    if (figY > TOP && figY < BOT) {
+      s += stickFigure(YOU_X, figY, WHITE, 0, 0.1, 0.1, 0.8);
+    }
+  }
+
+  // Amber stick figure
+  s += stickFigure(YOU_X, YOU_Y, AMBER, 0, 0.1, 0.1);
+
+  // Clock icon above
+  var clockR = 60;
+  var clockY = TOP + 180;
+  var clockX = CX;
+  // Clock ticks once visibly at 5.5s (u=0.55)
+  var clockTime = lerp(1, 1.05, ramp(u, 0.54, 0.56)); // Small jump in time
+  s += clock(clockX, clockY, clockR, clockTime, WHITE, STROKE_W * 0.8);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  // Camera fixed on amber figure
+  var bob = Math.sin(u * Math.PI * 2) * 3;
+  s += '<g ' + camera(1.0, 0, bob) + '>';
+
+  // Amber stick figure
+  s += stickFigure(YOU_X, YOU_Y, AMBER, 0, 0.1, 0.1);
+
+  // Main queue behind the amber figure (static)
+  var queueY = YOU_Y - STICK_H / 2 - 40;
+  var queueFigures = 6;
+  var queueSpacing = (BOT - TOP) / queueFigures;
+  for (var i = 0; i < queueFigures; i++) {
+    var figY = queueY - i * queueSpacing;
+    if (figY > TOP && figY < BOT) {
+      s += stickFigure(YOU_X, figY, WHITE, 0, 0.1, 0.1, 0.8);
+    }
+  }
+
+  // Other queues moving quickly
+  var leftQueueX = YOU_X - QUEUE_LANE_GAP;
+  var rightQueueX = YOU_X + QUEUE_LANE_GAP;
+  var scrollSpeed = lerp(0, 400, easeOut(ramp(u, 0.0, 0.3))); // Speed up
+  var fastQueueFigures = 8;
+
+  s += queueLine(leftQueueX, TOP, BOT, fastQueueFigures, scrollSpeed, u * 0.5, WHITE, STROKE_W * 0.7, 0.9, 'line');
+  s += queueLine(rightQueueX, TOP, BOT, fastQueueFigures, scrollSpeed, u * 0.5 + 0.3, WHITE, STROKE_W * 0.7, 0.9, 'line');
+
+  // Gaze towards the moving queues
+  var gazeAngle = lerp(0, Math.PI / 8, smooth(ramp(u, 0.1, 0.4)));
+  s += stickFigure(YOU_X, YOU_Y, AMBER, gazeAngle, 0.1, 0.1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30s): SEARCH */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Amber stick figure, confused/exasperated
+  var headShake = Math.sin(u * Math.PI * 10) * 0.1 * pulse(u, 0.3, 0.2);
+  var armLift = lerp(0.1, 0.8, smooth(ramp(u, 0.2, 0.4)));
+  s += stickFigure(YOU_X, YOU_Y, AMBER, headShake, armLift, 0.1);
+
+  // Fainter static queue behind
+  var queueY = YOU_Y - STICK_H / 2 - 40;
+  var queueFigures = 6;
+  var queueSpacing = (BOT - TOP) / queueFigures;
+  for (var i = 0; i < queueFigures; i++) {
+    var figY = queueY - i * queueSpacing;
+    if (figY > TOP && figY < BOT) {
+      s += stickFigure(YOU_X, figY, WHITE, 0, 0.1, 0.1, 0.4);
+    }
+  }
+
+  // Other queues still moving but fading
+  var leftQueueX = YOU_X - QUEUE_LANE_GAP;
+  var rightQueueX = YOU_X + QUEUE_LANE_GAP;
+  var scrollSpeed = 200;
+  var fastQueueFigures = 8;
+  s += queueLine(leftQueueX, TOP, BOT, fastQueueFigures, scrollSpeed, u * 0.5, WHITE, STROKE_W * 0.7, lerp(0.9, 0.2, smooth(ramp(u, 0.0, 0.3))), 'line');
+  s += queueLine(rightQueueX, TOP, BOT, fastQueueFigures, scrollSpeed, u * 0.5 + 0.3, WHITE, STROKE_W * 0.7, lerp(0.9, 0.2, smooth(ramp(u, 0.0, 0.3))), 'line');
+
+  // Coral red question mark
+  var qOp = smooth(ramp(u, 0.3, 0.5)) * (1 - smooth(ramp(u, 0.7, 0.9)));
+  var qSize = lerp(0, 100, easeOut(ramp(u, 0.3, 0.5)));
+  var qX = YOU_X + 100;
+  var qY = TOP + 200;
+  if (qOp > 0.01) {
+    // Simple question mark glyph: dot + curved line
+    s += dot(qX, qY - qSize * 0.6, qSize * 0.15, CORAL, qOp);
+    var d = "M " + qX + " " + (qY - qSize * 0.4) +
+            " Q " + (qX + qSize * 0.5) + " " + (qY - qSize * 0.4) +
+            " " + (qX + qSize * 0.5) + " " + (qY - qSize * 0.1) +
+            " Q " + (qX + qSize * 0.5) + " " + (qY + qSize * 0.2) +
+            " " + qX + " " + (qY + qSize * 0.2) +
+            " L " + qX + " " + (qY + qSize * 0.4);
+    s += pathTag(d, CORAL, STROKE_W * 1.5, qOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40s): FIND */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Amber figure stands calmly
+  s += stickFigure(YOU_X, YOU_Y, AMBER, 0, 0.1, 0.1);
+
+  // Thought bubble appears
+  var bubbleW = lerp(0, 600, easeOut(ramp(u, 0.0, 0.2)));
+  var bubbleH = lerp(0, 800, easeOut(ramp(u, 0.0, 0.2)));
+  var bubbleX = YOU_X + 200;
+  var bubbleY = CY - 100;
+  var bubbleOp = ramp(u, 0.0, 0.2);
+  if (bubbleOp > 0.01) {
+    s += rrect(bubbleX, bubbleY, bubbleW, bubbleH, 40, WHITE, bubbleOp * 0.9);
+    // Thought bubble "tail"
+    s += dot(YOU_X + 50, YOU_Y - STICK_H - 20, 30, WHITE, bubbleOp * 0.9);
+    s += dot(YOU_X + 100, YOU_Y - STICK_H - 80, 40, WHITE, bubbleOp * 0.9);
+
+    // Inside thought bubble: fast queue
+    var fastQueueU = ramp(u, 0.25, 0.4);
+    if (fastQueueU > 0 && fastQueueU < 1) {
+      s += '<g clip-path="url(#bubbleClip)" opacity="' + (1 - fastQueueU) + '">';
+      s += queueLine(bubbleX, bubbleY - bubbleH / 2 + 50, bubbleY + bubbleH / 2 - 50, 5, 400, fastQueueU * 0.8, DIM, STROKE_W * 0.5, 1, 'dot');
+      s += '</g>';
+    }
+
+    // Inside thought bubble: slow queue with coral marker
+    var slowQueueU = ramp(u, 0.45, 0.85);
+    if (slowQueueU > 0) {
+      s += '<g clip-path="url(#bubbleClip)" opacity="' + slowQueueU + '">';
+      s += queueLine(bubbleX, bubbleY - bubbleH / 2 + 50, bubbleY + bubbleH / 2 - 50, 4, 80, slowQueueU * 0.2, WHITE, STROKE_W * 0.7, 1, 'line');
+      // Coral "bar" glyph for slow
+      if (slowQueueU > 0.5) {
+        var markerY = lerp(bubbleY + bubbleH / 2 - 100, bubbleY - bubbleH / 2 + 100, easeOut(ramp(slowQueueU, 0.6, 0.9)));
+        var markerOp = ramp(slowQueueU, 0.6, 0.9);
+        s += rrect(bubbleX, markerY, 100, 60, 10, CORAL, markerOp);
+        s += line(bubbleX - 30, markerY, bubbleX + 30, markerY, WHITE, STROKE_W * 0.8, markerOp);
+      }
+      s += '</g>';
+    }
+  }
+
+  // Define a clip path for the thought bubble content
+  s += '<defs><clipPath id="bubbleClip">';
+  s += rrect(bubbleX, bubbleY, bubbleW - 20, bubbleH - 20, 30, WHITE, 1);
+  s += '</clipPath></defs>';
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50s): TAKE */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.9, smooth(u));
+  s += '<g ' + camera(scale, 0, lerp(0, 50, smooth(u))) + '>';
+
+  // Amber figure
+  s += stickFigure(YOU_X, YOU_Y, AMBER, 0, 0.1, 0.1);
+
+  // Other queues around the amber figure
+  var numLanes = 5;
+  var laneXs = [];
+  for (var i = 0; i < numLanes; i++) {
+    laneXs.push(CX - (numLanes / 2 - i - 0.5) * QUEUE_LANE_GAP * 1.2);
+  }
+
+  var myLaneIdx = Math.floor(numLanes / 2); // The center lane for the amber figure
+  var coralColumnX = laneXs[myLaneIdx] + QUEUE_LANE_GAP * 0.5;
+  var coralColumnY = BOT - 400;
+  var coralBlockH = 52;
+  var maxCoralBlocks = 5;
+
+  for (var i = 0; i < numLanes; i++) {
+    var x = laneXs[i];
+    var speed = (rnd(i) > 0.5) ? lerp(200, 400, rnd(i + 10)) : lerp(50, 150, rnd(i + 20)); // Mix of fast and slow
+    var op = (i === myLaneIdx) ? 0.2 : 0.8; // My lane is faint, others are clear
+    var type = (rnd(i + 30) > 0.5) ? 'dot' : 'line';
+
+    if (i === myLaneIdx) { // My lane is static, for context
+      var queueFigures = 6;
+      var queueSpacing = (BOT - TOP) / queueFigures;
+      for (var j = 0; j < queueFigures; j++) {
+        var figY = YOU_Y - STICK_H / 2 - 40 - j * queueSpacing;
+        if (figY > TOP && figY < BOT) {
+          s += stickFigure(x, figY, WHITE, 0, 0.1, 0.1, op);
+        }
+      }
+    } else { // Other lanes are dynamic
+      s += queueLine(x, TOP, BOT, 6, speed, u * (speed / 300) + rnd(i + 40), WHITE, STROKE_W * 0.7, op, type);
+    }
+  }
+
+  // Coral red memory column
+  var blocksToStack = Math.floor(smooth(ramp(u, 0.1, 0.8)) * maxCoralBlocks);
+  for (var i = 0; i < blocksToStack; i++) {
+    var blockY = coralColumnY - i * (coralBlockH + 10);
+    s += rrect(coralColumnX, blockY, 120, coralBlockH, 10, CORAL, 0.9);
+    s += line(coralColumnX - 30, blockY, coralColumnX + 30, blockY, WHITE, STROKE_W * 0.8, 0.9); // "slow" glyph
+  }
+  // Outline for the column
+  s += rrectStroke(coralColumnX, coralColumnY - (maxCoralBlocks / 2 - 0.5) * (coralBlockH + 10), 130, maxCoralBlocks * (coralBlockH + 10) + 20, 15, CORAL, 2, 0.3);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60s): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.9, 0.7, smooth(u));
+  var ty = lerp(50, -100, smooth(u)); // Zoom out and move up slightly
+  s += '<g ' + camera(scale, 0, ty) + '>';
+
+  // Amber figure, posture shifts to understanding
+  var armAngle = lerp(0.1, -0.5, smooth(ramp(u, 0.4, 0.8))); // Arms open
+  var headTilt = lerp(0, 0.05, smooth(ramp(u, 0.4, 0.8))); // Head slightly up
+  s += stickFigure(YOU_X, YOU_Y, AMBER, headTilt, armAngle, 0.1);
+
+  // Queues transform into signal blue flow lines
+  var numLanes = 5;
+  var laneXs = [];
+  for (var i = 0; i < numLanes; i++) {
+    laneXs.push(CX - (numLanes / 2 - i - 0.5) * QUEUE_LANE_GAP * 1.2);
+  }
+
+  var flowOp = ramp(u, 0.5, 0.9);
+  var whiteOp = 1 - flowOp;
+
+  for (var i = 0; i < numLanes; i++) {
+    var x = laneXs[i];
+    var speed = lerp(200, 300, rnd(i + 50));
+    var phase = u * (speed / 300) + rnd(i + 60);
+
+    // White queue lines (fading out)
+    s += queueLine(x, TOP, BOT, 6, speed, phase, WHITE, STROKE_W * 0.7, whiteOp, 'line');
+
+    // Blue flow lines (fading in)
+    s += queueLine(x, TOP, BOT, 6, speed * 1.2, phase * 1.2, BLUE, STROKE_W * 0.9, flowOp, 'line');
+  }
+
+  // Abstract flow lines in the background
+  var bgLineOp = lerp(0, 0.3, smooth(ramp(u, 0.6, 0.9)));
+  if (bgLineOp > 0.01) {
+    for (var i = 0; i < 4; i++) {
+      var x1 = lerp(0, CX - 300, rnd(i));
+      var y1 = lerp(BOT, TOP, (u * 0.1 + rnd(i + 1)) % 1);
+      var x2 = lerp(W, CX + 300, rnd(i + 2));
+      var y2 = lerp(BOT, TOP, (u * 0.1 + rnd(i + 3) + 0.5) % 1);
+      s += line(x1, y1, x2, y2, BLUE, STROKE_W * 0.5, bgLineOp * 0.6);
+    }
+  }
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
