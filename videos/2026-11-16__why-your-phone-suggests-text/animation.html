@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Your Phone Knows What You Want To Say</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = W / 2, CY = H / 2;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue
+var AMBER = "#F2A93B";              // warm amber
+var CORAL = "#FF5B5B";              // coral red
+
+var DUR = 60;
+window.__duration = DUR;
+
+// Phone dimensions
+var PHONE_W = 700;
+var PHONE_H = 1200;
+var PHONE_X = CX;
+var PHONE_Y = CY + 80; // Slightly lower to make space for hand above
+var PHONE_RAD = 40;
+
+var STROKE_WIDTH = 10;
+var ACCENT_STROKE_WIDTH = 12;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom shapes for this animation ---------- */
+
+// Simple phone outline
+function phoneOutline(x, y, w, h, rad, col, sw, op) {
+  return rrectStroke(x, y, w, h, rad, col, sw, op);
+}
+
+// Abstract text lines within a bubble or on screen
+function abstractText(x, y, w, h, col, op, count, seed) {
+  var g = '';
+  var lineHeight = h / (count + 1);
+  for (var i = 0; i < count; i++) {
+    var lineY = y - h / 2 + (i + 1) * lineHeight;
+    var lineWidth = lerp(w * 0.6, w * 0.9, rnd(seed + i));
+    g += line(x - lineWidth / 2, lineY, x + lineWidth / 2, lineY, col, 8, op);
+  }
+  return g;
+}
+
+// A simple stick figure hand with a finger
+function stickHand(x, y, col, op, fingerX, fingerY, fingerTap) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  // Hand base (simple blob/oval)
+  g += rrect(x, y, 120, 100, 50, col, op);
+  // Thumb
+  g += line(x - 60, y + 20, x - 100, y + 50, col, STROKE_WIDTH, op);
+  // Finger (index finger)
+  var tapOffset = fingerTap ? 15 : 0;
+  g += line(x + 20, y - 50, fingerX, fingerY + tapOffset, col, STROKE_WIDTH, op);
+  g += dot(fingerX, fingerY + tapOffset, STROKE_WIDTH / 2, col, op); // Finger tip
+  g += '</g>';
+  return g;
+}
+
+// A question mark glyph
+function questionMark(x, y, size, col, sw, op) {
+  var d = "M " + x + " " + (y - size * 0.4) +
+          " A " + (size * 0.3) + " " + (size * 0.3) + " 0 1 1 " + (x + size * 0.3) + " " + (y - size * 0.1) +
+          " L " + (x + size * 0.1) + " " + (y + size * 0.2) +
+          " M " + x + " " + (y + size * 0.4);
+  return pathTag(d, col, sw, op);
+}
+
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var phoneScale = 1.0;
+  var phoneTy = 0;
+  s += '<g ' + camera(phoneScale, 0, phoneTy) + '>';
+
+  // Phone outline
+  s += phoneOutline(PHONE_X, PHONE_Y, PHONE_W, PHONE_H, PHONE_RAD, WHITE, STROKE_WIDTH, 1);
+
+  // Hand and finger
+  var fingerTap = (u > 0.2 && u < 0.3) || (u > 0.5 && u < 0.6); // Simple tap animation
+  var fingerYOffset = fingerTap ? 20 : 0;
+  var handX = PHONE_X + 180;
+  var handY = PHONE_Y + 450;
+  var fingerX = PHONE_X + 100;
+  var fingerY = PHONE_Y - 100;
+
+  s += stickHand(handX, handY, AMBER, 1, fingerX, fingerY + fingerYOffset, fingerTap);
+
+  // Typed text "Happy b"
+  var happyOp = ramp(u, 0.1, 0.3);
+  var bOp = ramp(u, 0.4, 0.6);
+  if (happyOp > 0) {
+    s += abstractText(PHONE_X - 120, PHONE_Y - 300, 180, 60, WHITE, happyOp, 2, 1); // "Happy"
+  }
+  if (bOp > 0) {
+    s += abstractText(PHONE_X + 40, PHONE_Y - 300, 60, 60, WHITE, bOp, 1, 2); // "b"
+  }
+  
+  // Frustration: small dots above head
+  var frusOp = ramp(u, 0.7, 0.9);
+  if (frusOp > 0) {
+    s += dot(handX + 50, handY - 100, 20, AMBER, 1); // Head
+    s += dot(handX + 10, handY - 120, 8, DIM, frusOp);
+    s += dot(handX + 30, handY - 130, 8, DIM, frusOp);
+    s += dot(handX + 50, handY - 120, 8, DIM, frusOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var zoom = lerp(1.0, 1.08, smooth(ramp(u, 0.0, 0.4)));
+  var shake = Math.sin(u * 42) * 2 * pulse(u, 0.18, 0.14); // Subtle shake for surprise
+  s += '<g ' + camera(zoom, shake, 0) + '>';
+
+  s += phoneOutline(PHONE_X, PHONE_Y, PHONE_W, PHONE_H, PHONE_RAD, WHITE, STROKE_WIDTH, 1);
+
+  var handX = PHONE_X + 180;
+  var handY = PHONE_Y + 450;
+  var fingerX = PHONE_X + 100;
+  var fingerY = PHONE_Y - 100;
+  s += stickHand(handX, handY, AMBER, 1, fingerX, fingerY, false); // Finger hovers
+
+  // Typed text "Happy b" persists, then "birthday"
+  s += abstractText(PHONE_X - 120, PHONE_Y - 300, 180, 60, WHITE, 1, 2, 1); // "Happy"
+  s += abstractText(PHONE_X + 40, PHONE_Y - 300, 60, 60, WHITE, 1, 1, 2); // "b"
+
+  var birthdayOp = ramp(u, 0.1, 0.3);
+  var birthdayScale = lerp(0.8, 1.0, easeOut(ramp(u, 0.1, 0.3)));
+  if (birthdayOp > 0) {
+    s += rrect(PHONE_X + 100, PHONE_Y - 300 - 100, 300 * birthdayScale, 80 * birthdayScale, 20, AMBER, birthdayOp);
+    s += abstractText(PHONE_X + 100, PHONE_Y - 300 - 100, 200 * birthdayScale, 40 * birthdayScale, WHITE, birthdayOp, 2, 3); // "birthday"
+  }
+
+  var toYouOp = ramp(u, 0.5, 0.7);
+  var toYouScale = lerp(0.8, 1.0, easeOut(ramp(u, 0.5, 0.7)));
+  if (toYouOp > 0) {
+    s += rrect(PHONE_X + 100, PHONE_Y - 300 - 200, 250 * toYouScale, 80 * toYouScale, 20, AMBER, toYouOp);
+    s += abstractText(PHONE_X + 100, PHONE_Y - 300 - 200, 180 * toYouScale, 40 * toYouScale, WHITE, toYouOp, 2, 4); // "to you!"
+  }
+  
+  // User's head tilt in surprise
+  var headTilt = lerp(0, 15, smooth(ramp(u, 0.4, 0.6)));
+  s += '<g transform="rotate(' + headTilt + ' ' + (handX + 50) + ' ' + (handY - 100) + ')">';
+  s += dot(handX + 50, handY - 100, 20, AMBER, 1); // Head
+  s += '</g>';
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH — is something targeting me? (funnel + coral beam on the OTHER lane) */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  s += phoneOutline(PHONE_X, PHONE_Y, PHONE_W, PHONE_H, PHONE_RAD, WHITE, STROKE_WIDTH, 1);
+
+  var handX = PHONE_X + 180;
+  var handY = PHONE_Y + 450;
+  var fingerX = PHONE_X + 100;
+  var fingerY = PHONE_Y - 100;
+  s += stickHand(handX, handY, AMBER, 1, fingerX, fingerY, false);
+
+  // Typed text "Happy birthday to you!" persists as background
+  s += abstractText(PHONE_X - 120, PHONE_Y - 300, 180, 60, WHITE, 0.2, 2, 1); // "Happy"
+  s += abstractText(PHONE_X + 40, PHONE_Y - 300, 60, 60, WHITE, 0.2, 1, 2); // "b"
+  s += rrect(PHONE_X + 100, PHONE_Y - 300 - 100, 300, 80, 20, AMBER, 0.2);
+  s += abstractText(PHONE_X + 100, PHONE_Y - 300 - 100, 200, 40, WHITE, 0.2, 2, 3); // "birthday"
+  s += rrect(PHONE_X + 100, PHONE_Y - 300 - 200, 250, 80, 20, AMBER, 0.2);
+  s += abstractText(PHONE_X + 100, PHONE_Y - 300 - 200, 180, 40, WHITE, 0.2, 2, 4); // "to you!"
+
+  // Coral red thought bubble with question mark
+  var bubbleScale = lerp(0.8, 1.0, easeOut(ramp(u, 0.0, 0.2)));
+  var bubbleOp = lerp(0, 1, ramp(u, 0.0, 0.2));
+  var shatterOp = lerp(1, 0, ramp(u, 0.6, 0.8));
+  var shatterOffset = lerp(0, 50, easeIn(ramp(u, 0.6, 0.8)));
+
+  if (bubbleOp > 0.01 && shatterOp > 0.01) {
+    s += rrect(handX + 100, handY - 200, 250 * bubbleScale, 200 * bubbleScale, 30, CORAL, bubbleOp * shatterOp);
+    s += questionMark(handX + 100, handY - 200, 80 * bubbleScale, WHITE, ACCENT_STROKE_WIDTH, bubbleOp * shatterOp);
+  }
+
+  // Shatter animation (small fragments flying out)
+  if (u > 0.6) {
+    for (var i = 0; i < 5; i++) {
+      var fragX = handX + 100 + Math.cos(rnd(i) * Math.PI * 2) * shatterOffset * rnd(i + 10);
+      var fragY = handY - 200 + Math.sin(rnd(i) * Math.PI * 2) * shatterOffset * rnd(i + 20);
+      s += dot(fragX, fragY, lerp(8, 2, ramp(u, 0.6, 0.8)), CORAL, shatterOp);
+    }
+  }
+  s += dot(handX + 50, handY - 100, 20, AMBER, 1); // Head
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND — belts; slow lane passed for minutes, fast lane overtakes in seconds */
+function scene4(u) {
+  var s = '';
+  var panX = lerp(0, -100, smooth(ramp(u, 0.0, 0.3)));
+  var panY = lerp(0, -200, smooth(ramp(u, 0.0, 0.3)));
+  s += '<g ' + camera(1.0, panX, panY) + '>';
+
+  // Phone outline (faded as we look inside)
+  s += phoneOutline(PHONE_X, PHONE_Y, PHONE_W, PHONE_H, PHONE_RAD, WHITE, STROKE_WIDTH, 0.3);
+
+  // Hand and finger (faded)
+  var handX = PHONE_X + 180;
+  var handY = PHONE_Y + 450;
+  var fingerX = PHONE_X + 100;
+  var fingerY = PHONE_Y - 100;
+  s += stickHand(handX, handY, AMBER, 0.3, fingerX, fingerY, false);
+  s += dot(handX + 50, handY - 100, 20, AMBER, 0.3); // Head
+
+  // Inside the phone: abstract signal blue lines connecting white word bubbles
+  var wordBubbleOp = 0.8;
+  var wordBubbleRad = 15;
+  var pathGlowOp = ramp(u, 0.4, 0.7);
+
+  // Word bubbles
+  var happyX = PHONE_X - 180, happyY = PHONE_Y - 300;
+  var birthdayX = PHONE_X + 100, birthdayY = PHONE_Y - 300;
+  var toX = PHONE_X + 100, toY = PHONE_Y - 150;
+  var youX = PHONE_X + 100, youY = PHONE_Y;
+
+  s += rrect(happyX, happyY, 180, 60, wordBubbleRad, WHITE, wordBubbleOp);
+  s += rrect(birthdayX, birthdayY, 300, 80, wordBubbleRad, WHITE, wordBubbleOp);
+  s += rrect(toX, toY, 150, 60, wordBubbleRad, WHITE, wordBubbleOp);
+  s += rrect(youX, youY, 150, 60, wordBubbleRad, WHITE, wordBubbleOp);
+
+  // Connections (signal blue)
+  s += line(happyX + 90, happyY, birthdayX - 150, birthdayY, BLUE, STROKE_WIDTH, 0.6);
+  s += line(birthdayX, birthdayY + 40, toX, toY - 30, BLUE, STROKE_WIDTH, 0.6);
+  s += line(toX, toY + 30, youX, youY - 30, BLUE, STROKE_WIDTH, 0.6);
+
+  // Glowing path
+  if (pathGlowOp > 0.01) {
+    s += line(happyX + 90, happyY, birthdayX - 150, birthdayY, BLUE, ACCENT_STROKE_WIDTH, pathGlowOp);
+    s += line(birthdayX, birthdayY + 40, toX, toY - 30, BLUE, ACCENT_STROKE_WIDTH, pathGlowOp);
+    s += line(toX, toY + 30, youX, youY - 30, BLUE, ACCENT_STROKE_WIDTH, pathGlowOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE — losing moments stack into a tall coral memory column */
+function scene5(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  s += phoneOutline(PHONE_X, PHONE_Y, PHONE_W, PHONE_H, PHONE_RAD, WHITE, STROKE_WIDTH, 1);
+
+  var handX = PHONE_X + 180;
+  var handY = PHONE_Y + 450;
+  var fingerX = PHONE_X + 100;
+  var fingerY = PHONE_Y - 100;
+
+  var tap = (u > 0.2 && u < 0.3) || (u > 0.6 && u < 0.7); // Typing taps
+  var fingerYOffset = tap ? 20 : 0;
+  s += stickHand(handX, handY, AMBER, 1, fingerX, fingerY + fingerYOffset, tap);
+  s += dot(handX + 50, handY - 100, 20, AMBER, 1); // Head
+
+  // Internal network (from S4, slightly faded)
+  var wordBubbleOp = 0.4;
+  var wordBubbleRad = 15;
+  var happyX = PHONE_X - 180, happyY = PHONE_Y - 300;
+  var birthdayX = PHONE_X + 100, birthdayY = PHONE_Y - 300;
+  var toX = PHONE_X + 100, toY = PHONE_Y - 150;
+  var youX = PHONE_X + 100, youY = PHONE_Y;
+
+  s += rrect(happyX, happyY, 180, 60, wordBubbleRad, WHITE, wordBubbleOp);
+  s += rrect(birthdayX, birthdayY, 300, 80, wordBubbleRad, WHITE, wordBubbleOp);
+  s += rrect(toX, toY, 150, 60, wordBubbleRad, WHITE, wordBubbleOp);
+  s += rrect(youX, youY, 150, 60, wordBubbleRad, WHITE, wordBubbleOp);
+
+  s += line(happyX + 90, happyY, birthdayX - 150, birthdayY, BLUE, STROKE_WIDTH, 0.3);
+  s += line(birthdayX, birthdayY + 40, toX, toY - 30, BLUE, STROKE_WIDTH, 0.3);
+  s += line(toX, toY + 30, youX, youY - 30, BLUE, STROKE_WIDTH, 0.3);
+
+  // New text and suggestions
+  var newTextOp = ramp(u, 0.1, 0.4);
+  var newSuggestionOp = ramp(u, 0.5, 0.8);
+
+  if (newTextOp > 0) {
+    s += abstractText(PHONE_X - 100, PHONE_Y - 450, 200, 60, WHITE, newTextOp, 2, 10); // "New message"
+  }
+  if (newSuggestionOp > 0) {
+    s += rrect(PHONE_X + 100, PHONE_Y - 450 - 100, 300, 80, 20, AMBER, newSuggestionOp);
+    s += abstractText(PHONE_X + 100, PHONE_Y - 450 - 100, 200, 40, WHITE, newSuggestionOp, 2, 11); // "suggestion"
+  }
+
+  // Small faint signal blue lines extending from finger taps to the network
+  var learnOp = ramp(u, 0.3, 0.9);
+  if (learnOp > 0) {
+    var fingerTipX = fingerX;
+    var fingerTipY = fingerY + fingerYOffset;
+    // Connect to 'happy'
+    s += line(fingerTipX, fingerTipY, happyX - 50, happyY - 10, BLUE, 4, learnOp * rnd(100));
+    // Connect to 'birthday'
+    s += line(fingerTipX, fingerTipY, birthdayX - 100, birthdayY + 20, BLUE, 4, learnOp * rnd(101));
+    // Connect to 'to'
+    s += line(fingerTipX, fingerTipY, toX - 50, toY + 10, BLUE, 4, learnOp * rnd(102));
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE — one shared finish line, then snap back to plain lanes */
+function scene6(u) {
+  var s = '';
+  var cameraScale = lerp(1.0, 0.9, smooth(ramp(u, 0.0, 0.5)));
+  s += '<g ' + camera(cameraScale, 0, 0) + '>';
+
+  s += phoneOutline(PHONE_X, PHONE_Y, PHONE_W, PHONE_H, PHONE_RAD, WHITE, STROKE_WIDTH, 1);
+
+  var handX = PHONE_X + 180;
+  var handY = PHONE_Y + 450;
+  var fingerX = PHONE_X + 100;
+  var fingerY = PHONE_Y - 100;
+
+  var tap = (u > 0.1 && u < 0.2) || (u > 0.4 && u < 0.5) || (u > 0.7 && u < 0.8); // Confident typing
+  var fingerYOffset = tap ? 20 : 0;
+  s += stickHand(handX, handY, AMBER, 1, fingerX, fingerY + fingerYOffset, tap);
+
+  // Typed text and seamless suggestions
+  s += abstractText(PHONE_X - 100, PHONE_Y - 450, 200, 60, WHITE, 1, 2, 10); // "New message"
+  var suggestionY = PHONE_Y - 450 - 100;
+  s += rrect(PHONE_X + 100, suggestionY, 300, 80, 20, AMBER, 1);
+  s += abstractText(PHONE_X + 100, suggestionY, 200, 40, WHITE, 1, 2, 11); // "suggestion"
+
+  // Subtle, pulsing amber glow around the phone
+  var glowOp = 0.4 + 0.3 * Math.sin(u * Math.PI * 6); // Pulsing opacity
+  var glowScale = 1 + 0.02 * Math.sin(u * Math.PI * 6); // Pulsing size
+  s += rrectStroke(PHONE_X, PHONE_Y, PHONE_W * glowScale, PHONE_H * glowScale, PHONE_RAD, AMBER, ACCENT_STROKE_WIDTH, glowOp);
+
+  // User smiling (simple dot mouth)
+  var smileOp = ramp(u, 0.5, 0.8);
+  s += dot(handX + 50, handY - 100, 20, AMBER, 1); // Head
+  // Smile: slightly curved line
+  var smileCurveY = lerp(handY - 90, handY - 80, easeOut(ramp(u, 0.5, 0.8)));
+  s += pathTag("M " + (handX + 40) + " " + (handY - 85) + " Q " + (handX + 50) + " " + smileCurveY + " " + (handX + 60) + " " + (handY - 85), WHITE, 6, smileOp);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    var elapsed = (ts - start) / 1000;
+    render(elapsed % DUR); // Loop playback for preview
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

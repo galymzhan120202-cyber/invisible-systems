@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "Every morning, you check your weather app, hoping for a clear answer. Will it rain today, or will the sun shine all day long?",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "You need to make plans, decide on outfits, or whether to bring an umbrella. You just want a simple yes or no answer, a guarantee.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "But often, the forecast is frustratingly vague. \"40% chance of showers,\" or \"partly cloudy with isolated thunderstorms.\" It feels like they don't really know.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "You wonder why they can't just tell you for sure. Is the technology not advanced enough, or are meteorologists just trying to cover their bases?",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "The truth is, weather is a chaotic system. Tiny, unmeasurable differences in initial conditions rapidly amplify, leading to vastly different outcomes over time.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "Forecasts use many simulations to show a range of possibilities, not one definite future. The vagueness is actually an honest representation of nature's complexity.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

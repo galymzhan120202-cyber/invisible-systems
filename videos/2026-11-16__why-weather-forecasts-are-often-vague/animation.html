@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Weather Forecasts Are Often Vague</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue  -> system / rules
+var AMBER = "#F2A93B";              // warm amber   -> YOU / desire
+var CORAL = "#FF5B5B";              // coral red    -> naive model / false signal
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, fill) {
+  return '<path d="' + d + '" ' + (fill ? 'fill="' + fill + '"' : 'fill="none"') + ' stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom elements ---------- */
+
+// Stick figure
+function stickFigure(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = 30;
+  var bodyLen = 100;
+  var armLen = 70;
+  var legLen = 90;
+  var sw = 8;
+
+  // Head
+  g += dot(x, y - headR - bodyLen / 2, headR, col);
+
+  // Body
+  g += line(x, y - bodyLen / 2, x, y + bodyLen / 2, col, sw);
+
+  // Arms
+  if (pose === 'shrug') {
+    g += line(x - 10, y - bodyLen / 4, x - armLen, y - bodyLen / 4 - 20, col, sw); // Left arm
+    g += line(x + 10, y - bodyLen / 4, x + armLen, y - bodyLen / 4 - 20, col, sw); // Right arm
+  } else if (pose === 'confused') {
+    g += line(x - 10, y - bodyLen / 4, x - armLen * 0.7, y - bodyLen / 4 - 30, col, sw); // Left arm bent
+    g += line(x + 10, y - bodyLen / 4, x + armLen * 0.7, y - bodyLen / 4 - 30, col, sw); // Right arm bent
+    g += line(x - armLen * 0.7, y - bodyLen / 4 - 30, x - armLen * 0.7 + 20, y - bodyLen / 4 - 10, col, sw); // Left hand up
+    g += line(x + armLen * 0.7, y - bodyLen / 4 - 30, x + armLen * 0.7 - 20, y - bodyLen / 4 - 10, col, sw); // Right hand up
+  } else if (pose === 'looking_up') {
+    g += line(x - 10, y - bodyLen / 4, x - armLen * 0.6, y - bodyLen / 4 + 20, col, sw); // Left arm down
+    g += line(x + 10, y - bodyLen / 4, x + armLen * 0.6, y - bodyLen / 4 + 20, col, sw); // Right arm down
+    g += line(x, y - headR - bodyLen / 2, x + 10, y - headR - bodyLen / 2 - 20, col, sw); // Gaze line
+  } else if (pose === 'nods') {
+    g += line(x - 10, y - bodyLen / 4, x - armLen * 0.6, y - bodyLen / 4 + 20, col, sw); // Left arm down
+    g += line(x + 10, y - bodyLen / 4, x + armLen * 0.6, y - bodyLen / 4 + 20, col, sw); // Right arm down
+    g += line(x, y - headR - bodyLen / 2, x, y - headR - bodyLen / 2 + 10, col, sw); // Head nod
+  }
+  else { // default: neutral, arms down
+    g += line(x - 10, y - bodyLen / 4, x - armLen, y + bodyLen / 4, col, sw); // Left arm
+    g += line(x + 10, y - bodyLen / 4, x + armLen, y + bodyLen / 4, col, sw); // Right arm
+  }
+
+  // Legs
+  g += line(x - 20, y + bodyLen / 2, x - 30, y + bodyLen / 2 + legLen, col, sw); // Left leg
+  g += line(x + 20, y + bodyLen / 2, x + 30, y + bodyLen / 2 + legLen, col, sw); // Right leg
+
+  g += '</g>';
+  return g;
+}
+
+// Phone
+function phone(x, y, w, h, col, op) {
+  return rrect(x, y, w, h, 18, col, op);
+}
+
+// Simple cloud shape (path)
+function cloudPath(x, y, w, h) {
+  var path = "M " + (x - w * 0.4) + " " + (y + h * 0.1);
+  path += " Q " + (x - w * 0.6) + " " + (y - h * 0.3) + " " + (x - w * 0.3) + " " + (y - h * 0.4);
+  path += " C " + (x - w * 0.1) + " " + (y - h * 0.6) + " " + (x + w * 0.2) + " " + (y - h * 0.6) + " " + (x + w * 0.4) + " " + (y - h * 0.4);
+  path += " Q " + (x + w * 0.6) + " " + (y - h * 0.2) + " " + (x + w * 0.4) + " " + (y + h * 0.1);
+  path += " Q " + (x + w * 0.2) + " " + (y + h * 0.3) + " " + (x - w * 0.2) + " " + (y + h * 0.3);
+  path += " Q " + (x - w * 0.5) + " " + (y + h * 0.2) + " " + (x - w * 0.4) + " " + (y + h * 0.1) + " Z";
+  return path;
+}
+
+// Hero Cloud element, evolves across scenes
+function heroCloud(x, y, w, h, state, u, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var sw = 8;
+  var pathD = cloudPath(x, y, w, h);
+
+  // State 0: Simple outline
+  if (state === 0) {
+    g += pathTag(pathD, WHITE, sw);
+  }
+  // State 1: Outline with question mark inside
+  else if (state === 1) {
+    g += pathTag(pathD, WHITE, sw);
+    var qX = x, qY = y - h * 0.05;
+    g += line(qX, qY - 20, qX, qY + 10, WHITE, 6); // vertical part
+    g += pathTag("M " + (qX - 12) + " " + (qY - 20) + " Q " + (qX - 12) + " " + (qY - 40) + " " + qX + " " + (qY - 40) +
+                 " Q " + (qX + 12) + " " + (qY - 40) + " " + (qX + 12) + " " + (qY - 20), WHITE, 6); // top curve
+    g += dot(qX, qY + 25, 6, WHITE); // dot
+  }
+  // State 2: Larger outline with vague glyphs (coral red)
+  else if (state === 2) {
+    g += pathTag(pathD, WHITE, sw);
+    // "40%" as a block
+    g += rrect(x - w * 0.15, y - h * 0.2, w * 0.2, h * 0.1, 5, CORAL, 0.9);
+    // "Scattered" as wavy lines/dots
+    g += line(x + w * 0.1, y + h * 0.1, x + w * 0.2, y + h * 0.05, CORAL, 6, 0.9);
+    g += line(x + w * 0.05, y + h * 0.2, x + w * 0.15, y + h * 0.15, CORAL, 6, 0.9);
+    g += dot(x - w * 0.05, y + h * 0.15, 8, CORAL, 0.9);
+    g += dot(x + w * 0.25, y - h * 0.1, 8, CORAL, 0.9);
+  }
+  // State 3: Outline framing complex coral red lines (weather map)
+  else if (state === 3) {
+    g += pathTag(pathD, WHITE, sw);
+    var numLines = 8;
+    for (var i = 0; i < numLines; i++) {
+      var startX = x - w * 0.4 + rnd(i * 3) * w * 0.8;
+      var startY = y - h * 0.4 + rnd(i * 5) * h * 0.8;
+      var endX = x - w * 0.4 + rnd(i * 7) * w * 0.8;
+      var endY = y - h * 0.4 + rnd(i * 11) * h * 0.8;
+      var midX = x - w * 0.4 + rnd(i * 13) * w * 0.8;
+      var midY = y - h * 0.4 + rnd(i * 17) * h * 0.8;
+      var path = "M " + startX + " " + startY + " Q " + midX + " " + midY + " " + endX + " " + endY;
+      g += pathTag(path, CORAL, 4, 0.6 + 0.4 * Math.sin(u * Math.PI * 2 + i));
+    }
+  }
+  // State 4: Outline with diverging signal blue lines
+  else if (state === 4) {
+    g += pathTag(pathD, WHITE, sw);
+    var originX = x;
+    var originY = y + h * 0.3; // Bottom center of cloud
+    var numPaths = 12;
+    for (var i = 0; i < numPaths; i++) {
+      var angle = (i / numPaths) * Math.PI - Math.PI / 2; // Fan out from -90 to 90 degrees
+      var len = lerp(h * 0.3, h * 0.6, rnd(i));
+      var endX = originX + Math.cos(angle) * len;
+      var endY = originY + Math.sin(angle) * len;
+      // Ensure lines stay somewhat within the cloud's general area
+      endX = clamp(endX, x - w * 0.4, x + w * 0.4);
+      endY = clamp(endY, y - h * 0.4, y + h * 0.4);
+      g += line(originX, originY, endX, endY, BLUE, 5, 0.7 + 0.3 * Math.sin(u * Math.PI * 2 + i));
+    }
+  }
+  // State 5: Probabilistic cloud (unified, gradient-like)
+  else if (state === 5) {
+    // A series of concentric cloud shapes with varying opacity/stroke width
+    var numLayers = 5;
+    for (var i = numLayers; i >= 0; i--) {
+      var currentW = w * (1 + i * 0.05);
+      var currentH = h * (1 + i * 0.05);
+      var currentPath = cloudPath(x, y, currentW, currentH);
+      var currentOp = lerp(0.05, 0.3, i / numLayers);
+      g += pathTag(currentPath, BLUE, sw * (1 - i * 0.1), currentOp);
+    }
+    // A central, more solid cloud representing the most likely outcome
+    g += pathTag(pathD, BLUE, sw, 0.8, BLUE);
+  }
+
+  g += '</g>';
+  return g;
+}
+
+// Question mark glyph
+function questionMark(x, y, size, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += line(x, y - size * 0.5, x, y + size * 0.2, col, sw); // vertical part
+  g += pathTag("M " + (x - size * 0.3) + " " + (y - size * 0.5) + " Q " + (x - size * 0.3) + " " + (y - size * 0.7) + " " + x + " " + (y - size * 0.7) +
+               " Q " + (x + size * 0.3) + " " + (y - size * 0.7) + " " + (x + size * 0.3) + " " + (y - size * 0.5), col, sw); // top curve
+  g += dot(x, y + size * 0.35, size * 0.15, col); // dot
+  g += '</g>';
+  return g;
+}
+
+// Picnic basket glyph
+function picnicBasket(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var sw = size * 0.1;
+  g += rrect(x, y + size * 0.15, size * 0.8, size * 0.5, size * 0.1, col, op); // Basket body
+  g += line(x - size * 0.3, y - size * 0.1, x + size * 0.3, y - size * 0.1, col, sw); // Top rim
+  g += pathTag("M " + (x - size * 0.2) + " " + (y - size * 0.1) + " Q " + x + " " + (y - size * 0.5) + " " + (x + size * 0.2) + " " + (y - size * 0.1), col, sw); // Handle
+  g += '</g>';
+  return g;
+}
+
+// Umbrella glyph
+function umbrella(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var sw = size * 0.1;
+  g += pathTag("M " + (x - size * 0.4) + " " + y + " A " + (size * 0.4) + " " + (size * 0.3) + " 0 0 1 " + (x + size * 0.4) + " " + y, col, sw); // Top arc
+  g += line(x - size * 0.4, y, x - size * 0.3, y + size * 0.1, col, sw); // Ribs
+  g += line(x, y, x, y + size * 0.1, col, sw);
+  g += line(x + size * 0.4, y, x + size * 0.3, y + size * 0.1, col, sw);
+  g += line(x, y + size * 0.1, x, y + size * 0.5, col, sw); // Handle shaft
+  g += pathTag("M " + (x - size * 0.1) + " " + (y + size * 0.5) + " Q " + (x - size * 0.1) + " " + (y + size * 0.6) + " " + x + " " + (y + size * 0.6), col, sw); // Handle curve
+  g += '</g>';
+  return g;
+}
+
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+var STICK_Y = BOT - 280; // Standard height for stick figure
+var PHONE_W = 180, PHONE_H = 320;
+
+/* SCENE 1 (0-10): YOU + NEED (part 1) */
+function scene1(u) {
+  var s = '';
+  var stickX = CX + 100;
+  var phoneX = stickX - 100;
+  var phoneY = STICK_Y - 100;
+  var cloudW = PHONE_W * 0.6;
+  var cloudH = PHONE_H * 0.5;
+  var cloudX = phoneX;
+  var cloudY = phoneY - 20;
+
+  var camScale = lerp(1.0, 1.2, smooth(ramp(u, 0.0, 0.4)));
+  var camTX = lerp(0, -100, smooth(ramp(u, 0.0, 0.4)));
+  var camTY = lerp(0, -100, smooth(ramp(u, 0.0, 0.4)));
+
+  s += '<g ' + camera(camScale, camTX, camTY) + '>';
+  s += stickFigure(stickX, STICK_Y, AMBER, 'neutral', 1);
+  s += phone(phoneX, phoneY, PHONE_W, PHONE_H, DIM, 1);
+  s += heroCloud(cloudX, cloudY, cloudW, cloudH, 0, u, 1); // Simple cloud
+  var qOp = ramp(u, 0.3, 0.8);
+  s += questionMark(cloudX + cloudW * 0.6, cloudY - cloudH * 0.3, 40, WHITE, 6, qOp);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): NEED (part 2) */
+function scene2(u) {
+  var s = '';
+  var stickX = CX + 100;
+  var phoneX = stickX - 100;
+  var phoneY = STICK_Y - 100;
+  var cloudW = PHONE_W * 0.6;
+  var cloudH = PHONE_H * 0.5;
+  var cloudX = phoneX;
+  var cloudY = phoneY - 20;
+
+  var camPanX = lerp(-100, 0, smooth(ramp(u, 0.0, 0.3)));
+  var camPanY = lerp(-100, 0, smooth(ramp(u, 0.0, 0.3)));
+
+  s += '<g ' + camera(1.2, camPanX, camPanY) + '>';
+  s += stickFigure(stickX, STICK_Y, AMBER, 'neutral', 1);
+  s += phone(phoneX, phoneY, PHONE_W, PHONE_H, DIM, 1);
+  s += heroCloud(cloudX, cloudY, cloudW, cloudH, 1, u, 1); // Cloud with question mark inside
+
+  var bubbleOp = smooth(ramp(u, 0.1, 0.4)) * (1 - smooth(ramp(u, 0.7, 1.0)));
+  var bubbleYOffset = Math.sin(u * Math.PI * 2) * 10;
+
+  // Picnic thought bubble
+  s += rrectStroke(stickX - 150, STICK_Y - 300 + bubbleYOffset, 160, 120, 20, AMBER, 5, bubbleOp);
+  s += picnicBasket(stickX - 150, STICK_Y - 300 + bubbleYOffset, 60, AMBER, bubbleOp);
+
+  // Umbrella thought bubble
+  s += rrectStroke(stickX + 150, STICK_Y - 300 - bubbleYOffset, 160, 120, 20, AMBER, 5, bubbleOp);
+  s += umbrella(stickX + 150, STICK_Y - 300 - bubbleYOffset, 60, AMBER, bubbleOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): GO */
+function scene3(u) {
+  var s = '';
+  var stickX = CX + 100;
+  var phoneX = stickX - 100;
+  var phoneY = STICK_Y - 100;
+
+  var cloudW = lerp(PHONE_W * 0.6, PHONE_W * 0.8, smooth(ramp(u, 0.0, 0.3)));
+  var cloudH = lerp(PHONE_H * 0.5, PHONE_H * 0.7, smooth(ramp(u, 0.0, 0.3)));
+  var cloudX = phoneX;
+  var cloudY = phoneY - 20;
+
+  s += '<g ' + camera(1.2, 0, 0) + '>'; // Camera static after initial pan in S2
+  s += stickFigure(stickX, STICK_Y, AMBER, 'shrug', 1);
+  s += phone(phoneX, phoneY, PHONE_W, PHONE_H, DIM, 1);
+  s += heroCloud(cloudX, cloudY, cloudW, cloudH, 2, u, 1); // Cloud with vague glyphs
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): SEARCH */
+function scene4(u) {
+  var s = '';
+  var stickX = CX + 100;
+  var stickY = STICK_Y;
+  var cloudW = lerp(PHONE_W * 0.8, W * 0.8, smooth(ramp(u, 0.0, 0.4)));
+  var cloudH = lerp(PHONE_H * 0.7, H * 0.6, smooth(ramp(u, 0.0, 0.4)));
+  var cloudX = lerp(stickX - 100, CX, smooth(ramp(u, 0.0, 0.4)));
+  var cloudY = lerp(STICK_Y - 120, CY - 100, smooth(ramp(u, 0.0, 0.4)));
+
+  var camScale = lerp(1.2, 0.8, smooth(ramp(u, 0.0, 0.4)));
+  var camTX = lerp(0, 0, smooth(ramp(u, 0.0, 0.4))); // No camera translation after scale out
+  var camTY = lerp(0, 0, smooth(ramp(u, 0.0, 0.4)));
+
+  s += '<g ' + camera(camScale, camTX, camTY) + '>';
+  s += stickFigure(stickX, stickY, AMBER, 'confused', 1);
+  // Phone fades out
+  s += phone(stickX - 100, STICK_Y - 100, PHONE_W, PHONE_H, DIM, 1 - smooth(ramp(u, 0.0, 0.2)));
+  s += heroCloud(cloudX, cloudY, cloudW, cloudH, 3, u, 1); // Cloud framing complex coral lines
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): FIND */
+function scene5(u) {
+  var s = '';
+  var stickX = CX + 100;
+  var stickY = STICK_Y;
+  var cloudW = W * 0.8;
+  var cloudH = H * 0.6;
+  var cloudX = CX;
+  var cloudY = CY - 100;
+
+  s += '<g ' + camera(0.8, 0, 0) + '>';
+  s += stickFigure(stickX, stickY, AMBER, 'looking_up', 1);
+  s += heroCloud(cloudX, cloudY, cloudW, cloudH, 4, u, 1); // Cloud with diverging blue lines
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): TAKE + RETURN/CHANGE */
+function scene6(u) {
+  var s = '';
+  var stickX = CX + 100;
+  var stickY = STICK_Y;
+  var cloudW = W * 0.8;
+  var cloudH = H * 0.6;
+  var cloudX = CX;
+  var cloudY = CY - 100;
+
+  var camScale = lerp(0.8, 1.0, smooth(ramp(u, 0.2, 0.8)));
+  s += '<g ' + camera(camScale, 0, 0) + '>';
+  s += stickFigure(stickX, stickY, AMBER, 'nods', 1);
+  s += heroCloud(cloudX, cloudY, cloudW, cloudH, 5, u, 1); // Probabilistic cloud
+
+  var smallIconOp = smooth(ramp(u, 0.5, 0.9));
+  // Small picnic basket
+  s += picnicBasket(stickX - 180, STICK_Y + 80, 40, AMBER, smallIconOp);
+  // Small umbrella
+  s += umbrella(stickX - 260, STICK_Y + 80, 40, AMBER, smallIconOp);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
