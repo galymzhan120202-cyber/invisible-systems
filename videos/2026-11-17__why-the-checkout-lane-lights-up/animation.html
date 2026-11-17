@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Supermarket Checkouts Light Up To Call You Over</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+var LANE_W = 140;                    // width of a checkout lane
+var LANE_SPACING = 200;              // distance between lane centers
+var SHOPPER_H = 220;                 // approximate height of a shopper figure
+var CART_W = 120, CART_H = 100;      // approximate size of a shopping cart
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots / other shoppers
+var BLUE  = "#4C86F0";              // signal blue  -> the system / lights / flow
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want
+var CORAL = "#FF5B5B";              // coral red    -> naive model / frustration
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function triangle(x, y, size, col, op) { // Upward pointing triangle
+  var h = size * Math.sqrt(3) / 2;
+  var d = "M " + x + " " + (y - h * 2/3) + " L " + (x - size / 2) + " " + (y + h / 3) + " L " + (x + size / 2) + " " + (y + h / 3) + " Z";
+  return '<path d="' + d + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+/* stick figure shopper with cart */
+function shopper(x, y, col, op, lookDir) { // lookDir: -1 left, 0 forward, 1 right
+  op = (op == null ? 1 : op);
+  lookDir = (lookDir == null ? 0 : lookDir);
+  var g = '<g opacity="' + op + '">';
+  // Head
+  g += dot(x, y - SHOPPER_H * 0.4, SHOPPER_H * 0.1, col);
+  // Body
+  g += line(x, y - SHOPPER_H * 0.3, x, y + SHOPPER_H * 0.1, col, 9);
+  // Arms
+  g += line(x - SHOPPER_H * 0.1, y - SHOPPER_H * 0.2, x - SHOPPER_H * 0.2, y + SHOPPER_H * 0.05, col, 7);
+  g += line(x + SHOPPER_H * 0.1, y - SHOPPER_H * 0.2, x + SHOPPER_H * 0.2, y + SHOPPER_H * 0.05, col, 7);
+  // Legs
+  g += line(x, y + SHOPPER_H * 0.1, x - SHOPPER_H * 0.08, y + SHOPPER_H * 0.4, col, 9);
+  g += line(x, y + SHOPPER_H * 0.1, x + SHOPPER_H * 0.08, y + SHOPPER_H * 0.4, col, 9);
+
+  // Cart (positioned relative to shopper)
+  var cartX = x + SHOPPER_H * 0.25;
+  var cartY = y + SHOPPER_H * 0.15;
+  g += rrectStroke(cartX, cartY, CART_W, CART_H, 10, col, 8);
+  g += dot(cartX - CART_W * 0.3, cartY + CART_H * 0.4, 10, col); // Wheels
+  g += dot(cartX + CART_W * 0.3, cartY + CART_H * 0.4, 10, col);
+  g += line(cartX - CART_W * 0.5, cartY - CART_H * 0.2, cartX - CART_W * 0.5 - 20, cartY - CART_H * 0.4, col, 7); // Handle
+
+  // Gaze direction
+  if (lookDir !== 0) {
+    g += line(x, y - SHOPPER_H * 0.4, x + lookDir * SHOPPER_H * 0.1, y - SHOPPER_H * 0.5, WHITE, 6);
+  }
+  g += '</g>';
+  return g;
+}
+
+/* checkout lane structure with overhead light */
+function checkoutLane(x, yTop, yBot, lightOn, lightColor, lightOp, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  // Lane boundaries
+  g += line(x - LANE_W / 2, yTop, x - LANE_W / 2, yBot, WHITE, 8);
+  g += line(x + LANE_W / 2, yTop, x + LANE_W / 2, yBot, WHITE, 8);
+
+  // Checkout counter
+  var counterH = 180;
+  g += rrect(x, yTop + counterH / 2, LANE_W, counterH, 20, WHITE, 0.2); // Counter area
+  g += line(x - LANE_W / 2 + 10, yTop + counterH, x + LANE_W / 2 - 10, yTop + counterH, WHITE, 8); // Counter top
+
+  // Overhead light
+  var lightY = yTop - 80;
+  var currentLightColor = lightOn ? lightColor : WHITE;
+  var currentLightOp = lightOn ? (lightOp == null ? 1 : lightOp) : 0.3;
+  g += ring(x, lightY, 30, currentLightColor, 7, currentLightOp);
+  if (!lightOn) { // If light is off, show a cross to indicate closed
+    g += line(x - 15, lightY - 15, x + 15, lightY + 15, WHITE, 6, 0.3);
+    g += line(x - 15, lightY + 15, x + 15, lightY - 15, WHITE, 6, 0.3);
+  }
+  g += '</g>';
+  return g;
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var shopperY = BOT - SHOPPER_H * 0.6; // Shopper stands near the bottom
+  var laneX1 = CX - LANE_SPACING - LANE_SPACING / 2;
+  var laneX2 = CX - LANE_SPACING / 2;
+  var laneX3 = CX + LANE_SPACING / 2;
+  var laneX4 = CX + LANE_SPACING + LANE_SPACING / 2;
+
+  // Camera zoom in slightly
+  var scale = lerp(1.0, 1.04, smooth(u * 0.5));
+  s += '<g ' + camera(scale, 0, 0) + '>';
+
+  // Multiple closed lanes
+  s += checkoutLane(laneX1, TOP + 200, BOT - 200, false, BLUE, 1, 0.6);
+  s += checkoutLane(laneX2, TOP + 200, BOT - 200, false, BLUE, 1, 0.8);
+  s += checkoutLane(laneX3, TOP + 200, BOT - 200, false, BLUE, 1, 0.8);
+  s += checkoutLane(laneX4, TOP + 200, BOT - 200, false, BLUE, 1, 0.6);
+
+  // Shopper looking around
+  var lookDir = Math.sin(u * Math.PI * 2) > 0 ? 1 : -1;
+  s += shopper(CX - LANE_W / 2 - 100, shopperY, AMBER, 1, lookDir);
+
+  // Other shoppers in lines (dots)
+  for (var i = 0; i < 4; i++) {
+    s += dot(laneX1, shopperY - 100 - i * 180 - u * 20, 18, DIM, 0.7);
+    s += dot(laneX2, shopperY - 100 - i * 180 - u * 30, 18, DIM, 0.9);
+    s += dot(laneX3, shopperY - 100 - i * 180 - u * 25, 18, DIM, 0.9);
+    s += dot(laneX4, shopperY - 100 - i * 180 - u * 15, 18, DIM, 0.7);
+  }
+
+  // "Need" chevrons above shopper
+  for (var c = 0; c < 3; c++) {
+    var cp = (u * 1.5 + c / 3) % 1;
+    var chevY = shopperY - SHOPPER_H * 0.8 - cp * 120;
+    var chevOp = (1 - cp) * 0.8;
+    var d = "M " + (CX - 30) + " " + (chevY + 20) + " L " + CX + " " + (chevY - 20) + " L " + (CX + 30) + " " + (chevY + 20);
+    s += pathTag(d, AMBER, 10, chevOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): WAIT + OBSERVE */
+function scene2(u) {
+  var s = '';
+  var shopperY = BOT - SHOPPER_H * 0.6;
+  var laneX1 = CX - LANE_SPACING - LANE_SPACING / 2;
+  var laneX2 = CX - LANE_SPACING / 2; // Shopper's initial lane
+  var laneX3 = CX + LANE_SPACING / 2; // Lane that opens
+  var laneX4 = CX + LANE_SPACING + LANE_SPACING / 2;
+
+  s += '<g ' + camera(1.04, 0, 0) + '>';
+
+  // Closed lanes
+  s += checkoutLane(laneX1, TOP + 200, BOT - 200, false, BLUE, 1, 0.6);
+  s += checkoutLane(laneX2, TOP + 200, BOT - 200, false, BLUE, 1, 0.8);
+  s += checkoutLane(laneX4, TOP + 200, BOT - 200, false, BLUE, 1, 0.6);
+
+  // Lane 3 light turns on
+  var lightOn = u > 0.1;
+  var lightPulse = lightOn ? (0.5 + 0.5 * Math.sin(u * Math.PI * 8)) : 0;
+  s += checkoutLane(laneX3, TOP + 200, BOT - 200, lightOn, BLUE, lightPulse, 1);
+
+  // Shopper looks at the light
+  var lookDir = lerp(0, 1, ramp(u, 0.2, 0.5)); // Gaze shifts right
+  s += shopper(CX - LANE_W / 2 - 100, shopperY, AMBER, 1, lookDir);
+
+  // Other shoppers in lines
+  for (var i = 0; i < 4; i++) {
+    s += dot(laneX1, shopperY - 100 - i * 180 - u * 20, 18, DIM, 0.7);
+    s += dot(laneX2, shopperY - 100 - i * 180 - u * 30, 18, DIM, 0.9);
+    s += dot(laneX4, shopperY - 100 - i * 180 - u * 15, 18, DIM, 0.7);
+  }
+
+  // Shoppers move towards the new lane
+  var moveTowardLane3 = easeOut(ramp(u, 0.4, 0.8));
+  for (var j = 0; j < 3; j++) {
+    var initialX = laneX2 + rnd(j) * 20 - 10;
+    var initialY = shopperY - 100 - j * 180 - u * 30;
+    var targetX = laneX3 + rnd(j + 10) * 20 - 10;
+    var targetY = shopperY - 100 - j * 180 - u * 30;
+    var currentX = lerp(initialX, targetX, moveTowardLane3);
+    var currentY = lerp(initialY, targetY, moveTowardLane3);
+    s += dot(currentX, currentY, 18, DIM, 0.9);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): THE CALL */
+function scene3(u) {
+  var s = '';
+  var shopperY = BOT - SHOPPER_H * 0.6;
+  var laneX2 = CX - LANE_SPACING / 2; // Shopper's initial lane
+  var laneX3 = CX + LANE_SPACING / 2; // Lane that opened
+
+  // Camera slightly zoomed in
+  s += '<g ' + camera(1.04, 0, 0) + '>';
+
+  // Checkout lanes, lane 3 is open
+  s += checkoutLane(laneX2, TOP + 200, BOT - 200, false, BLUE, 1, 0.8);
+  s += checkoutLane(laneX3, TOP + 200, BOT - 200, true, BLUE, 1, 1);
+
+  // Blue beam from the light to the shopper
+  var beamOp = smooth(ramp(u, 0.0, 0.4)) * (1 - smooth(ramp(u, 0.7, 1.0)));
+  var lightY = TOP + 200 - 80;
+  var shopperHeadY = shopperY - SHOPPER_H * 0.4;
+  var beamStartR = 40 + 10 * Math.sin(u * 20);
+  s += ring(laneX3, lightY, beamStartR, BLUE, 8, beamOp * 0.7);
+  s += line(laneX3, lightY + beamStartR, laneX3, shopperHeadY - 20, BLUE, 12, beamOp); // Main beam
+  s += triangle(laneX3, shopperHeadY - 50, 40, BLUE, beamOp); // Arrowhead
+
+  // Shopper moves to the new lane
+  var moveProgress = easeOut(ramp(u, 0.3, 0.8));
+  var shopperCurrentX = lerp(CX - LANE_W / 2 - 100, laneX3 + LANE_W / 2 + 100, moveProgress);
+  s += shopper(shopperCurrentX, shopperY, AMBER, 1, 0); // Shopper moves forward
+
+  // Other shoppers already moving or in the new lane
+  for (var j = 0; j < 3; j++) {
+    var initialX = laneX2 + rnd(j) * 20 - 10;
+    var initialY = shopperY - 100 - j * 180 - 60;
+    var targetX = laneX3 + rnd(j + 10) * 20 - 10;
+    var targetY = shopperY - 100 - j * 180 - 60;
+    var currentX = lerp(initialX, targetX, Math.min(1, moveProgress * 1.2));
+    var currentY = lerp(initialY, targetY, Math.min(1, moveProgress * 1.2));
+    s += dot(currentX, currentY, 18, DIM, 0.9);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): THE REALITY */
+function scene4(u) {
+  var s = '';
+  var shopperY = BOT - SHOPPER_H * 0.6;
+  var laneX3 = CX + LANE_SPACING / 2; // Shopper's current lane
+
+  // Camera slightly zoomed in
+  s += '<g ' + camera(1.04, 0, 0) + '>';
+
+  // Checkout lane 3 is open and full
+  s += checkoutLane(laneX3, TOP + 200, BOT - 200, true, BLUE, 1, 1);
+
+  // Shopper in the new lane
+  s += shopper(laneX3 + LANE_W / 2 + 100, shopperY, AMBER, 1, -1); // Shopper looks left, at the queue
+
+  // Lane fills up quickly
+  var fillProgress = easeIn(ramp(u, 0.0, 0.6));
+  var numShoppers = Math.floor(fillProgress * 6);
+  for (var i = 0; i < numShoppers; i++) {
+    var yOffset = i * 180 + u * 40; // Slight motion
+    s += dot(laneX3 + rnd(i) * 20 - 10, shopperY - 100 - yOffset, 18, DIM, 0.9);
+  }
+
+  // Shopper's frustration (coral sign)
+  var frustrationOp = smooth(ramp(u, 0.5, 0.9));
+  if (frustrationOp > 0.05) {
+    var signX = laneX3 + LANE_W / 2 + 100 + 80;
+    var signY = shopperY - SHOPPER_H * 0.4 - 80;
+    s += rrectStroke(signX, signY, 80, 80, 15, CORAL, 8, frustrationOp);
+    s += line(signX - 25, signY - 25, signX + 25, signY + 25, CORAL, 8, frustrationOp); // X mark
+    s += line(signX - 25, signY + 25, signX + 25, signY - 25, CORAL, 8, frustrationOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): SYSTEM VIEW */
+function scene5(u) {
+  var s = '';
+  var shopperY = BOT - SHOPPER_H * 0.6;
+  var laneX1 = CX - LANE_SPACING - LANE_SPACING / 2;
+  var laneX2 = CX - LANE_SPACING / 2;
+  var laneX3 = CX + LANE_SPACING / 2;
+  var laneX4 = CX + LANE_SPACING + LANE_SPACING / 2;
+
+  // Camera pulls back and up
+  var scale = lerp(1.04, 0.7, smooth(u));
+  var ty = lerp(0, -200, smooth(u));
+  s += '<g ' + camera(scale, 0, ty) + '>';
+
+  // All lanes visible, lights activating
+  var lightActivity = Math.sin(u * Math.PI * 4); // Oscillating activity
+  s += checkoutLane(laneX1, TOP + 200, BOT - 200, lightActivity > 0.5, BLUE, 0.8, 0.7);
+  s += checkoutLane(laneX2, TOP + 200, BOT - 200, lightActivity < -0.2, BLUE, 0.8, 0.9);
+  s += checkoutLane(laneX3, TOP + 200, BOT - 200, lightActivity > 0.2, BLUE, 0.8, 0.9);
+  s += checkoutLane(laneX4, TOP + 200, BOT - 200, lightActivity < -0.5, BLUE, 0.8, 0.7);
+
+  // Shopper in one lane, now smaller
+  s += shopper(laneX3 + LANE_W / 2 + 100, shopperY, AMBER, 1, 0);
+
+  // Many other shoppers (dots) in various lanes, moving
+  for (var i = 0; i < 12; i++) {
+    var laneIdx = Math.floor(rnd(i) * 4);
+    var currentLaneX;
+    if (laneIdx === 0) currentLaneX = laneX1;
+    else if (laneIdx === 1) currentLaneX = laneX2;
+    else if (laneIdx === 2) currentLaneX = laneX3;
+    else currentLaneX = laneX4;
+
+    var yOffset = (rnd(i + 10) * (BOT - TOP - 400)) + TOP + 200;
+    var movePhase = (u * 0.8 + rnd(i + 20)) % 1;
+    var currentY = lerp(BOT - 200, TOP + 200, movePhase);
+    s += dot(currentLaneX + rnd(i + 30) * 40 - 20, currentY, 18, DIM, 0.8);
+  }
+
+  // Visualizing "flow" with subtle blue lines moving through lanes
+  for (var k = 0; k < 4; k++) {
+    var flowX;
+    if (k === 0) flowX = laneX1;
+    else if (k === 1) flowX = laneX2;
+    else if (k === 2) flowX = laneX3;
+    else flowX = laneX4;
+    
+    var flowPhase = (u * 1.5 + k * 0.2) % 1;
+    var flowY = lerp(BOT - 200, TOP + 200, flowPhase);
+    s += line(flowX, flowY - 50, flowX, flowY + 50, BLUE, 6, 0.3);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): OPTIMIZED FLOW */
+function scene6(u) {
+  var s = '';
+  var shopperY = BOT - SHOPPER_H * 0.6;
+  var laneX1 = CX - LANE_SPACING - LANE_SPACING / 2;
+  var laneX2 = CX - LANE_SPACING / 2;
+  var laneX3 = CX + LANE_SPACING / 2;
+  var laneX4 = CX + LANE_SPACING + LANE_SPACING / 2;
+
+  // Camera zooms back in and centers
+  var scale = lerp(0.7, 1.0, smooth(u));
+  var ty = lerp(-200, 0, smooth(u));
+  s += '<g ' + camera(scale, 0, ty) + '>';
+
+  // All lanes are active and flowing
+  s += checkoutLane(laneX1, TOP + 200, BOT - 200, true, BLUE, 1, 0.8);
+  s += checkoutLane(laneX2, TOP + 200, BOT - 200, true, BLUE, 1, 1);
+  s += checkoutLane(laneX3, TOP + 200, BOT - 200, true, BLUE, 1, 1);
+  s += checkoutLane(laneX4, TOP + 200, BOT - 200, true, BLUE, 1, 0.8);
+
+  // Shopper at the front of a lane, moving forward
+  var shopperMoveFwd = easeOut(ramp(u, 0.0, 0.8));
+  var currentShopperY = lerp(shopperY, TOP + 200 + SHOPPER_H * 0.6, shopperMoveFwd);
+  s += shopper(laneX3 + LANE_W / 2 + 100, currentShopperY, AMBER, 1, 0);
+
+  // Other shoppers moving smoothly
+  for (var i = 0; i < 4; i++) {
+    var yOffset = i * 180;
+    var movePhase = (u * 1.2 + rnd(i) * 0.1) % 1; // Faster, smoother movement
+    var currentY = lerp(BOT - 200, TOP + 200, movePhase);
+    s += dot(laneX3 + rnd(i + 10) * 20 - 10, currentY, 18, DIM, 0.9);
+    s += dot(laneX2 + rnd(i + 20) * 20 - 10, currentY, 18, DIM, 0.9);
+  }
+
+  // "Flow" indicator: smooth, fast-moving blue lines
+  for (var k = 0; k < 4; k++) {
+    var flowX;
+    if (k === 0) flowX = laneX1;
+    else if (k === 1) flowX = laneX2;
+    else if (k === 2) flowX = laneX3;
+    else flowX = laneX4;
+    
+    var flowPhase = (u * 2.5 + k * 0.1) % 1; // Even faster flow
+    var flowY = lerp(BOT - 200, TOP + 200, flowPhase);
+    s += line(flowX, flowY - 60, flowX, flowY + 60, BLUE, 8, 0.4);
+  }
+
+  // Final frame stability: ensure elements are stable at u=1
+  if (u >= 0.92) {
+    s = ''; // Rebuild for stability, removing transient effects
+    s += '<g ' + camera(1.0, 0, 0) + '>';
+    s += checkoutLane(laneX1, TOP + 200, BOT - 200, true, BLUE, 1, 0.8);
+    s += checkoutLane(laneX2, TOP + 200, BOT - 200, true, BLUE, 1, 1);
+    s += checkoutLane(laneX3, TOP + 200, BOT - 200, true, BLUE, 1, 1);
+    s += checkoutLane(laneX4, TOP + 200, BOT - 200, true, BLUE, 1, 0.8);
+    s += shopper(laneX3 + LANE_W / 2 + 100, TOP + 200 + SHOPPER_H * 0.6, AMBER, 1, 0);
+    for (var i = 0; i < 4; i++) {
+      var yOffset = i * 180;
+      s += dot(laneX3 + rnd(i + 10) * 20 - 10, TOP + 200 + 180 + yOffset, 18, DIM, 0.9);
+      s += dot(laneX2 + rnd(i + 20) * 20 - 10, TOP + 200 + 180 + yOffset, 18, DIM, 0.9);
+    }
+    for (var k = 0; k < 4; k++) {
+      var flowX;
+      if (k === 0) flowX = laneX1;
+      else if (k === 1) flowX = laneX2;
+      else if (k === 2) flowX = laneX3;
+      else flowX = laneX4;
+      s += line(flowX, TOP + 200, flowX, BOT - 200, BLUE, 8, 0.4);
+    }
+    s += '</g>';
+  }
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable at u=1
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() {
+  render(0);
+  window.__ready = true;
+}
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

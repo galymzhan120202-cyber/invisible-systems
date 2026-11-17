@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "Your phone screen is dark, waiting. You want to access your apps, scroll, or send a message. A familiar, quick action you do constantly.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "But first, a small, unconscious step: the swipe to unlock. A tiny bit of friction, a brief delay before interaction.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "You might wonder why it's there. Why isn't it instant? Is it an old habit, or just a pointless extra step designed to annoy?",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "That swipe isn't just decoration; it's \"friction as intent.\" It ensures you meant to unlock, not an accidental brush. It's a tiny gate.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "Without it, your phone would be pocket-dialing, opening random apps, or draining its battery. The cost: a fraction of a second; the benefit: silent protection.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "Now, that little swipe isn't just an action; it's a conscious choice. An invisible guardian, ensuring your phone only works when you want it to.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

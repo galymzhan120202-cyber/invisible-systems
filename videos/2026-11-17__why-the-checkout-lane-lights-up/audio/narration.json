@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You're at the supermarket, cart full, ready to escape. Your main goal? Get out fast, avoid the dreaded long lines.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "Suddenly, a light flashes above a distant register! It's a clear signal. You quickly steer your cart towards it, hoping for a quick escape.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "You rush over, thinking \"Aha, a new lane opened!\" or \"Finally, someone saw my need for speed!\" You believe this light is your personal invitation.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "But here's the invisible system: the light isn't about your speed. It's the store's way to redistribute any shopper to any open register, keeping the floor clear.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "The cost? The light often creates a false sense of urgency. It makes you rush to a lane that might still be slow, or just opening.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "Next time you see that flash, you'll know it's not a personal express pass. It's just the system, nudging the crowd, and you won't be fooled.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]
