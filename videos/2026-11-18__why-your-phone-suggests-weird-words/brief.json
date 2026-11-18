@@ -1,0 +1,15 @@
+{
+  "id": "why-your-phone-suggests-weird-words",
+  "slug": "2026-11-18__why-your-phone-suggests-weird-words",
+  "title_working": "Why Your Phone Suggests Weird Words",
+  "system": "predictive text algorithm biases based on training data",
+  "cluster": "platforms-and-algorithms",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "rendering",
+  "created_at": "2026-11-18T15:55:17+00:00",
+  "produced_at": null,
+  "verify": null,
+  "takeaway": "Your phone's predictive text sometimes suggests odd words because it learns from a vast, messy, and often biased dataset, not just your personal usage.",
+  "animation_source": "llm"
+}

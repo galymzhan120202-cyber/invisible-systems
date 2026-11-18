@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why You Keep Re-entering Passwords</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band
+var FIGURE_GROUND = 1500;           // "you" resting height
+var ACCOUNT_CENTER_Y = 700;         // account icon resting height
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / the wave
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want
+var CORAL = "#FF5B5B";              // coral red    -> the naive model / false signal
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function chevron(x, y, size, col, op) {
+  var d = "M " + (x - size) + " " + (y + size * 0.55) + " L " + x + " " + (y - size * 0.55) + " L " + (x + size) + " " + (y + size * 0.55);
+  return pathTag(d, col, 14, op);
+}
+
+/* Custom shapes for this animation */
+
+// Stick figure
+function stickFigure(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = 30;
+  var bodyH = 100;
+  var armL = 60;
+  var legL = 80;
+  var sw = 10;
+
+  // Head
+  g += dot(x, y - headR - bodyH / 2, headR, col);
+  // Body
+  g += line(x, y - bodyH / 2, x, y + bodyH / 2, col, sw);
+
+  // Arms
+  var armY = y - bodyH / 2 + 20;
+  if (pose.arms === 'up') {
+    g += line(x, armY, x - armL, armY - armL * 0.6, col, sw);
+    g += line(x, armY, x + armL, armY - armL * 0.6, col, sw);
+  } else if (pose.arms === 'frustrated') {
+    g += line(x, armY, x - armL * 0.7, armY + armL * 0.4, col, sw);
+    g += line(x, armY, x + armL * 0.7, armY + armL * 0.4, col, sw);
+  } else if (pose.arms === 'down') {
+    g += line(x, armY, x - armL * 0.4, armY + armL * 0.8, col, sw);
+    g += line(x, armY, x + armL * 0.4, armY + armL * 0.8, col, sw);
+  } else { // normal
+    g += line(x, armY, x - armL, armY, col, sw);
+    g += line(x, armY, x + armL, armY, col, sw);
+  }
+
+  // Legs
+  var legY = y + bodyH / 2;
+  var legSpread = 30;
+  g += line(x, legY, x - legSpread, legY + legL, col, sw);
+  g += line(x, legY, x + legSpread, legY + legL, col, sw);
+
+  // Head tilt / expression
+  if (pose.head === 'tilt') {
+    g += line(x - headR * 0.4, y - headR - bodyH / 2 - headR * 0.4, x + headR * 0.4, y - headR - bodyH / 2 - headR * 0.4, WHITE, 4, 0.5); //brow
+  } else if (pose.head === 'question') {
+    g += dot(x, y - headR - bodyH / 2 - headR * 0.6, 8, WHITE); // The dot
+    g += pathTag("M " + (x - 10) + " " + (y - headR - bodyH / 2 - headR * 0.4) + " A 10 10 0 0 1 " + (x + 10) + " " + (y - headR - bodyH / 2 - headR * 0.4) + " L " + (x + 10) + " " + (y - headR - bodyH / 2 - headR * 0.2), WHITE, 6);
+  }
+
+  g += '</g>';
+  return g;
+}
+
+// Account Door/Portal
+function accountDoor(x, y, w, h, col, lockState, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var sw = 10;
+  var rx = 20;
+
+  // Door frame
+  g += rrectStroke(x, y, w, h, rx, col, sw);
+
+  // Inner panel for fill
+  if (lockState === 'open') {
+    g += rrect(x, y, w - sw * 2, h - sw * 2, rx, col, 0.1); // subtle inner glow
+  } else if (lockState === 'denied') {
+    g += rrect(x, y, w - sw * 2, h - sw * 2, rx, CORAL, 0.2);
+  }
+
+  // Lock icon
+  var lockX = x + w / 2 - 30;
+  var lockY = y - h / 2 + 30;
+  if (lockState === 'locked' || lockState === 'denied') {
+    g += pathTag("M " + lockX + " " + lockY + " v -20 a 10 10 0 0 1 -20 0 v 20", col, sw); // shackle
+    g += rrect(lockX - 10, lockY + 15, 20, 20, 4, col); // body
+  }
+  // Red X for denied
+  if (lockState === 'denied') {
+    var xSize = 20;
+    g += line(lockX - xSize, lockY - xSize, lockX + xSize, lockY + xSize, CORAL, sw, 0.9);
+    g += line(lockX + xSize, lockY - xSize, lockX - xSize, lockY + xSize, CORAL, sw, 0.9);
+  }
+  g += '</g>';
+  return g;
+}
+
+// Session Token Card
+function sessionToken(x, y, w, h, col, timerFill, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var sw = 8;
+  var rx = 16;
+
+  // Card body
+  g += rrect(x, y, w, h, rx, col, 0.2);
+  g += rrectStroke(x, y, w, h, rx, col, sw);
+
+  // Timer bar
+  var barH = 16;
+  var barW = w - 40;
+  var barY = y + h / 2 - 30;
+  g += rrectStroke(x, barY, barW, barH, barH / 2, WHITE, 2, 0.6);
+  g += rrect(x - barW / 2, barY, barW * timerFill, barH, barH / 2, AMBER, 0.9);
+
+  // Small clock glyph
+  g += ring(x, y - h / 2 + 30, 15, WHITE, 3);
+  g += line(x, y - h / 2 + 30, x + 8, y - h / 2 + 30, WHITE, 3); // minute hand
+  g += line(x, y - h / 2 + 30, x, y - h / 2 + 30 - 10, WHITE, 3); // hour hand
+
+  g += '</g>';
+  return g;
+}
+
+// Security Shield
+function securityShield(x, y, r, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var sw = 12;
+  var d = "M " + (x - r) + " " + (y - r * 0.4) +
+          " C " + (x - r) + " " + (y - r) + ", " + (x + r) + " " + (y - r) + ", " + (x + r) + " " + (y - r * 0.4) +
+          " L " + x + " " + (y + r * 1.2) + " Z";
+  g += pathTag(d, col, sw);
+  g += '<path d="' + d + '" fill="' + col + '" opacity="0.15"/>'; // inner fill
+  g += '</g>';
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + Expectation (Convenience) */
+function scene1(u) {
+  var s = '';
+  var figX = CX;
+  var figY = FIGURE_GROUND;
+  var doorY = ACCOUNT_CENTER_Y;
+
+  var approach = smooth(ramp(u, 0.0, 0.4));
+  var loginPulse = pulse(u, 0.5, 0.1);
+
+  figY = lerp(FIGURE_GROUND + 100, FIGURE_GROUND, approach);
+  var doorScale = lerp(0.9, 1.0, smooth(u));
+
+  s += line(CX - 200, FIGURE_GROUND + 100, CX + 200, FIGURE_GROUND + 100, WHITE, 4, 0.1); // ground line
+
+  s += '<g transform="scale(' + doorScale + ') translate(' + CX * (1 - doorScale) + ' ' + doorY * (1 - doorScale) + ')">';
+  s += accountDoor(CX, doorY, 200, 300, WHITE, 'open', 1);
+  s += '</g>';
+
+  s += stickFigure(figX, figY, AMBER, {arms: 'up', head: 'normal'}, 1);
+
+  // "want": a rising stream of chevrons ahead of the figure
+  for (var c = 0; c < 3; c++) {
+    var cp = (u * 1.5 + c / 3) % 1;
+    s += chevron(figX, figY - 180 - cp * 120, 26, AMBER, (1 - cp) * 0.7);
+  }
+
+  // Login pulse effect
+  if (loginPulse > 0.05) {
+    s += ring(CX, doorY, 100 + loginPulse * 40, WHITE, 8, loginPulse * 0.8);
+  }
+
+  return s;
+}
+
+/* SCENE 2 (10-20): Interruption (Password Required) */
+function scene2(u) {
+  var s = '';
+  var figX = CX;
+  var figY = FIGURE_GROUND;
+  var doorY = ACCOUNT_CENTER_Y;
+
+  var block = smooth(ramp(u, 0.1, 0.4));
+  var frustrationPulse = pulse(u, 0.6, 0.15);
+
+  var currentDoorState = (block > 0.5) ? 'denied' : 'open';
+  var figPoseArms = (block > 0.5) ? 'frustrated' : 'normal';
+  var figPoseHead = (block > 0.5) ? 'tilt' : 'normal';
+
+  // Figure moves towards, gets blocked, steps back
+  var figOffset = Math.sin(block * Math.PI) * 60;
+  figY = FIGURE_GROUND - figOffset;
+
+  s += line(CX - 200, FIGURE_GROUND + 100, CX + 200, FIGURE_GROUND + 100, WHITE, 4, 0.1);
+
+  s += accountDoor(CX, doorY, 200, 300, WHITE, currentDoorState, 1);
+  s += stickFigure(figX, figY, AMBER, {arms: figPoseArms, head: figPoseHead}, 1);
+
+  // Coral red lines around the door for denial
+  if (block > 0.5) {
+    for (var i = 0; i < 4; i++) {
+      var angle = i * Math.PI / 2 + u * Math.PI * 2;
+      var startR = 120;
+      var endR = 180;
+      s += line(CX + Math.cos(angle) * startR, doorY + Math.sin(angle) * startR,
+                CX + Math.cos(angle) * endR, doorY + Math.sin(angle) * endR, CORAL, 8, block * 0.8);
+    }
+  }
+
+  // Frustration pulse
+  if (frustrationPulse > 0.05) {
+    s += ring(figX, figY - 180, 40 + frustrationPulse * 20, CORAL, 6, frustrationPulse * 0.9);
+  }
+
+  return s;
+}
+
+/* SCENE 3 (20-30): Frustration (Glitch?) */
+function scene3(u) {
+  var s = '';
+  var figX = CX;
+  var figY = FIGURE_GROUND;
+  var doorY = ACCOUNT_CENTER_Y;
+
+  var cycle = u % 0.5; // Two cycles within the scene
+  var approach = smooth(ramp(cycle, 0.0, 0.2));
+  var block = smooth(ramp(cycle, 0.2, 0.4));
+
+  var currentDoorState = (block > 0.5) ? 'denied' : 'open';
+  var figPoseArms = (block > 0.5) ? 'frustrated' : 'normal';
+  var figPoseHead = (block > 0.5) ? 'question' : 'normal';
+
+  var figOffset = Math.sin(approach * Math.PI) * 60;
+  figY = FIGURE_GROUND - figOffset;
+
+  s += line(CX - 200, FIGURE_GROUND + 100, CX + 200, FIGURE_GROUND + 100, WHITE, 4, 0.1);
+
+  s += accountDoor(CX, doorY, 200, 300, WHITE, currentDoorState, 1);
+  s += stickFigure(figX, figY, AMBER, {arms: figPoseArms, head: figPoseHead}, 1);
+
+  // Coral red pulse behind the door
+  var redGlow = pulse(u, 0.5, 0.4);
+  if (redGlow > 0.05) {
+    s += rrect(CX, doorY, 280, 380, 30, CORAL, redGlow * 0.2);
+  }
+
+  // Question mark glyph above figure's head
+  if (figPoseHead === 'question') {
+    s += dot(figX, figY - 180, 8, WHITE); // The dot
+    s += pathTag("M " + (figX - 10) + " " + (figY - 160) + " A 10 10 0 0 1 " + (figX + 10) + " " + (figY - 160) + " L " + (figX + 10) + " " + (figY - 145), WHITE, 6);
+  }
+
+  return s;
+}
+
+/* SCENE 4 (30-40): Explanation (Session Token) */
+function scene4(u) {
+  var s = '';
+  var figX = CX;
+  var figY = FIGURE_GROUND;
+  var tokenY = ACCOUNT_CENTER_Y;
+
+  var morph = smooth(ramp(u, 0.0, 0.3)); // Door to token
+  var tokenFill = ramp(u, 0.4, 0.9); // Timer filling
+
+  // Door fading out, token fading in
+  var doorOp = 1 - morph;
+  var tokenOp = morph;
+
+  s += line(CX - 200, FIGURE_GROUND + 100, CX + 200, FIGURE_GROUND + 100, WHITE, 4, 0.1);
+
+  // Door (fading out)
+  if (doorOp > 0.01) {
+    s += accountDoor(CX, tokenY, 200, 300, WHITE, 'open', doorOp);
+  }
+
+  // Token (fading in and filling)
+  if (tokenOp > 0.01) {
+    s += sessionToken(CX, tokenY, 160, 240, BLUE, tokenFill, tokenOp);
+  }
+
+  s += stickFigure(figX, figY, AMBER, {arms: 'normal', head: 'normal'}, 1);
+
+  // "Server" box sending token
+  var serverX = CX - 300, serverY = tokenY;
+  s += rrect(serverX, serverY, 120, 180, 20, BLUE, 0.2);
+  s += rrectStroke(serverX, serverY, 120, 180, 20, BLUE, 8);
+
+  // Token transfer animation
+  var transfer = smooth(ramp(u, 0.3, 0.6));
+  if (transfer > 0.01 && transfer < 0.99) {
+    var tx = lerp(serverX, CX, transfer);
+    var ty = lerp(serverY, tokenY, transfer);
+    s += rrect(tx, ty, 60, 90, 10, BLUE, 0.6 * (1 - transfer));
+  }
+
+  return s;
+}
+
+/* SCENE 5 (40-50): Security (Expiration) */
+function scene5(u) {
+  var s = '';
+  var figX = CX;
+  var figY = FIGURE_GROUND;
+  var shieldY = ACCOUNT_CENTER_Y;
+
+  var tokenExpire = smooth(ramp(u, 0.0, 0.3)); // Token timer depletes
+  var shieldGrow = smooth(ramp(u, 0.4, 0.7)); // Shield grows
+
+  var tokenOp = 1 - tokenExpire;
+  var shieldOp = shieldGrow;
+
+  s += line(CX - 200, FIGURE_GROUND + 100, CX + 200, FIGURE_GROUND + 100, WHITE, 4, 0.1);
+
+  // Token (depleting and fading out)
+  if (tokenOp > 0.01) {
+    s += sessionToken(CX, shieldY, 160, 240, BLUE, 1 - tokenExpire, tokenOp);
+  }
+
+  // Shield (growing in)
+  if (shieldOp > 0.01) {
+    s += securityShield(CX, shieldY, 180 * shieldGrow, BLUE, shieldOp);
+  }
+
+  s += stickFigure(figX, figY, AMBER, {arms: 'down', head: 'normal'}, 1);
+
+  // Red dots representing threats
+  var threatOp = ramp(u, 0.5, 0.8);
+  if (threatOp > 0.01) {
+    for (var i = 0; i < 6; i++) {
+      var angle = (i * Math.PI / 3) + u * Math.PI;
+      var startR = 300;
+      var endR = lerp(startR, 180 + 20, threatOp); // approach shield
+      var bounceR = lerp(180 + 20, 250, easeOut(threatOp)); // bounce off
+      var currentR = lerp(endR, bounceR, threatOp);
+
+      s += dot(CX + Math.cos(angle) * currentR, shieldY + Math.sin(angle) * currentR, 12, CORAL, threatOp * (1 - ramp(u, 0.8, 0.9)));
+    }
+  }
+
+  return s;
+}
+
+/* SCENE 6 (50-60): Acceptance (Protection) */
+function scene6(u) {
+  var s = '';
+  var figX = CX;
+  var figY = FIGURE_GROUND;
+  var shieldY = ACCOUNT_CENTER_Y;
+
+  var reEnter = smooth(ramp(u, 0.2, 0.6)); // Figure re-enters
+  var shieldGlow = pulse(u, 0.7, 0.2);
+
+  s += line(CX - 200, FIGURE_GROUND + 100, CX + 200, FIGURE_GROUND + 100, WHITE, 4, 0.1);
+
+  // Shield with a temporary opening
+  var shieldRadius = 180;
+  var openAngle = lerp(0, Math.PI / 4, Math.sin(reEnter * Math.PI)); // Arc for opening
+  var d = "M " + (CX - shieldRadius) + " " + (shieldY - shieldRadius * 0.4) +
+          " C " + (CX - shieldRadius) + " " + (shieldY - shieldRadius) + ", " + (CX + shieldRadius) + " " + (shieldY - shieldRadius) + ", " + (CX + shieldRadius) + " " + (shieldY - shieldRadius * 0.4) +
+          " L " + (CX + shieldRadius * Math.cos(openAngle)) + " " + (shieldY + shieldRadius * 1.2 * Math.sin(openAngle)) +
+          " A " + (shieldRadius * 1.2) + " " + (shieldRadius * 1.2) + " 0 0 1 " + (CX - shieldRadius * Math.cos(openAngle)) + " " + (shieldY + shieldRadius * 1.2 * Math.sin(openAngle)) + " Z";
+  s += pathTag(d, BLUE, 12);
+  s += '<path d="' + d + '" fill="' + BLUE + '" opacity="0.15"/>'; // inner fill
+
+  // Shield glow
+  if (shieldGlow > 0.05) {
+    s += securityShield(CX, shieldY, shieldRadius + shieldGlow * 20, BLUE, shieldGlow * 0.4);
+  }
+
+  // Figure re-entering
+  var figEnterX = lerp(CX, CX, reEnter); // Not much horizontal movement
+  var figEnterY = lerp(FIGURE_GROUND, shieldY + shieldRadius * 0.8, reEnter); // Moves up into shield
+  var figExitY = lerp(shieldY + shieldRadius * 0.8, FIGURE_GROUND, ramp(u, 0.7, 0.9)); // Moves back down
+  var currentFigY = lerp(figEnterY, figExitY, ramp(u, 0.6, 0.8));
+
+  s += stickFigure(figX, currentFigY, AMBER, {arms: 'up', head: 'normal'}, 1);
+
+  // Chevrons rising for understanding/continued flow
+  if (u > 0.6) {
+    for (var c = 0; c < 3; c++) {
+      var cp = ((u - 0.6) * 2 + c / 3) % 1;
+      s += chevron(figX, currentFigY - 180 - cp * 120, 26, AMBER, (1 - cp) * 0.7);
+    }
+  }
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

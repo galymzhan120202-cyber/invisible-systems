@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why It's Hard To Leave Some Online Groups</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue  -> the system / network
+var AMBER = "#F2A93B";              // warm amber   -> YOU / desire
+var CORAL = "#FF5B5B";              // coral red    -> friction / naive model
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+// Stick figure: y is the base of the feet
+function stickFigure(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = 26;
+  var bodyH = 80;
+  var armL = 60;
+  var legL = 70;
+  var sw = 8;
+
+  var headY = y - legL - bodyH - headR;
+  var bodyTopY = y - legL - bodyH;
+  var bodyBotY = y - legL;
+  var armY = bodyTopY + bodyH * 0.2;
+
+  // Head
+  g += dot(x, headY, headR, col);
+  // Body
+  g += line(x, bodyTopY, x, bodyBotY, col, sw);
+
+  // Arms & Legs based on pose
+  switch (pose) {
+    case 'happy':
+      g += line(x, armY, x - armL * 0.8, armY + armL * 0.4, col, sw);
+      g += line(x, armY, x + armL * 0.8, armY + armL * 0.4, col, sw);
+      g += line(x, bodyBotY, x - 20, y, col, sw);
+      g += line(x, bodyBotY, x + 20, y, col, sw);
+      break;
+    case 'overwhelmed':
+      g += line(x, armY, x - armL * 0.6, armY - armL * 0.3, col, sw);
+      g += line(x, armY, x + armL * 0.6, armY - armL * 0.3, col, sw);
+      g += line(x, bodyBotY, x - 10, y, col, sw);
+      g += line(x, bodyBotY, x + 10, y, col, sw);
+      break;
+    case 'hesitant':
+      g += line(x, armY, x - armL * 0.5, armY + armL * 0.2, col, sw);
+      g += line(x, armY, x + armL * 0.5, armY + armL * 0.2, col, sw);
+      g += line(x, bodyBotY, x - 15, y, col, sw);
+      g += line(x, bodyBotY, x + 15, y, col, sw);
+      break;
+    case 'cutting':
+      g += line(x, armY, x - armL * 0.6, armY - armL * 0.8, col, sw);
+      g += line(x, armY, x + armL * 0.6, armY - armL * 0.8, col, sw);
+      g += line(x, bodyBotY, x - 15, y, col, sw);
+      g += line(x, bodyBotY, x + 15, y, col, sw);
+      break;
+    case 'resigned':
+      g += line(x, armY, x - armL * 0.7, armY + armL * 0.6, col, sw);
+      g += line(x, armY, x + armL * 0.7, armY + armL * 0.6, col, sw);
+      g += line(x, bodyBotY, x - 10, y, col, sw);
+      g += line(x, bodyBotY, x + 10, y, col, sw);
+      break;
+    case 'contemplative':
+      g += line(x, armY, x - armL * 0.4, armY + armL * 0.1, col, sw);
+      g += line(x, armY, x + armL * 0.4, armY + armL * 0.1, col, sw);
+      g += line(x, bodyBotY, x - 15, y, col, sw);
+      g += line(x, bodyBotY, x + 15, y, col, sw);
+      break;
+  }
+  g += '</g>';
+  return g;
+}
+
+function leaveButton(x, y, w, h, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, 12, col, sw);
+  g += line(x - w * 0.2, y - h * 0.2, x + w * 0.2, y + h * 0.2, col, sw * 0.8);
+  g += line(x - w * 0.2, y + h * 0.2, x + w * 0.2, y - h * 0.2, col, sw * 0.8);
+  g += '</g>';
+  return g;
+}
+
+function questionMark(x, y, size, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var d = "M " + x + " " + (y - size * 0.5) +
+          " A " + (size * 0.3) + " " + (size * 0.3) + " 0 1 1 " + (x - size * 0.3) + " " + (y - size * 0.1) +
+          " L " + (x - size * 0.1) + " " + (y + size * 0.2) +
+          " M " + x + " " + (y + size * 0.4);
+  return pathTag(d, col, sw, op);
+}
+
+function scissors(x, y, size, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += line(x - size * 0.4, y - size * 0.4, x + size * 0.4, y + size * 0.4, col, sw);
+  g += line(x + size * 0.4, y - size * 0.4, x - size * 0.4, y + size * 0.4, col, sw);
+  g += ring(x - size * 0.2, y + size * 0.6, size * 0.2, col, sw * 0.8);
+  g += ring(x + size * 0.2, y + size * 0.6, size * 0.2, col, sw * 0.8);
+  g += '</g>';
+  return g;
+}
+
+function brokenChain(x, y, size, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var r = size * 0.4;
+  var gap = size * 0.1;
+  g += pathTag("M " + (x - r) + " " + y + " A " + r + " " + r + " 0 0 1 " + x + " " + (y - r) +
+               " L " + x + " " + (y + r - gap) + " A " + r + " " + r + " 0 0 1 " + (x - r) + " " + (y + gap), col, sw);
+  g += pathTag("M " + (x + r) + " " + y + " A " + r + " " + r + " 0 0 0 " + x + " " + (y + r) +
+               " L " + x + " " + (y - r + gap) + " A " + r + " " + r + " 0 0 0 " + (x + r) + " " + (y - gap), col, sw);
+  g += '</g>';
+  return g;
+}
+
+function drainedBattery(x, y, w, h, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, w * 0.1, col, sw);
+  g += rrect(x + w * 0.5 - sw * 0.5, y, sw * 2, h * 0.4, w * 0.05, col);
+  g += line(x - w * 0.4, y + h * 0.3, x + w * 0.4, y - h * 0.3, col, sw * 0.8);
+  g += '</g>';
+  return g;
+}
+
+function phoneIcon(x, y, w, h, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, w * 0.15, col, sw);
+  g += rrectStroke(x, y - h * 0.05, w * 0.8, h * 0.8, w * 0.1, col, sw * 0.7);
+  return g;
+}
+
+// Helper for network web (nodes and ties)
+function networkWeb(centerX, centerY, numNodes, tiesPerNode, nodeR, nodeCol, tieCol, sw, op, u) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var nodes = [];
+  var networkRadius = 300;
+
+  for (var i = 0; i < numNodes; i++) {
+    var angle = rnd(i) * Math.PI * 2;
+    var r = lerp(networkRadius * 0.6, networkRadius, rnd(i + 1));
+    var x = centerX + Math.cos(angle) * r;
+    var y = centerY + Math.sin(angle) * r;
+    nodes.push({ x: x, y: y });
+    g += dot(x, y, nodeR, nodeCol, 0.9);
+  }
+
+  for (var i = 0; i < numNodes; i++) {
+    var n1 = nodes[i];
+    for (var j = 0; j < tiesPerNode; j++) {
+      var n2Idx = Math.floor(rnd(i * 100 + j) * numNodes);
+      var n2 = nodes[n2Idx];
+      if (n1 !== n2) {
+        var pulseOp = 1;
+        if (rnd(i + j + 200) < 0.3) {
+          pulseOp = 0.5 + 0.5 * Math.sin(u * Math.PI * 6 + rnd(i + j + 300) * Math.PI * 2);
+        }
+        g += line(n1.x, n1.y, n2.x, n2.y, tieCol, sw, pulseOp * 0.6);
+      }
+    }
+  }
+  g += '</g>';
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.95, smooth(u));
+  var shiftY = lerp(0, -40, smooth(u));
+  s += '<g ' + camera(scale, 0, shiftY) + '>';
+
+  var figureY = CY + 300;
+  var groupX = CX, groupY = CY - 200;
+  var groupR = 100;
+
+  s += stickFigure(CX, figureY, AMBER, 'happy', 1);
+  s += dot(groupX, groupY, groupR, BLUE); // Group Icon
+
+  // Notifications (white lines radiating from group)
+  var numNotifs = 15;
+  var clutterRadius = 200;
+  for (var i = 0; i < numNotifs; i++) {
+    var phase = (u * 1.5 + rnd(i)) % 1;
+    var startR = groupR + 20;
+    var endR = clutterRadius + 100;
+    var angle = rnd(i + 100) * Math.PI * 2;
+    var x1 = groupX + Math.cos(angle) * startR;
+    var y1 = groupY + Math.sin(angle) * startR;
+    var x2 = groupX + Math.cos(angle) * endR;
+    var y2 = groupY + Math.sin(angle) * endR;
+
+    var fade = 1 - easeOut(phase);
+    var currentX = lerp(x1, x2, easeOut(phase));
+    var currentY = lerp(y1, y2, easeOut(phase));
+    var prevX = lerp(x1, x2, Math.max(0, easeOut(phase) - 0.1));
+    var prevY = lerp(y1, y2, Math.max(0, easeOut(phase) - 0.1));
+
+    s += line(prevX, prevY, currentX, currentY, WHITE, 6, fade * 0.8);
+  }
+
+  // Cluttering dots around YOU
+  var clutterIntensity = ramp(u, 0.3, 0.9);
+  var youHeadY = figureY - 26 - 80 - 70;
+  var youBodyX = CX;
+
+  for (var i = 0; i < 20; i++) {
+    var phase = (u * 2.0 + rnd(i + 200)) % 1;
+    var angle = rnd(i + 300) * Math.PI * 2;
+    var dist = lerp(50, 150, phase);
+    var cx = youBodyX + Math.cos(angle) * dist;
+    var cy = youHeadY + Math.sin(angle) * dist;
+    s += dot(cx, cy, 8, WHITE, clutterIntensity * (1 - phase) * 0.7);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var figureY = CY + 300;
+  var groupX = CX, groupY = CY - 200;
+  var groupR = 100;
+
+  s += stickFigure(CX, figureY, AMBER, 'hesitant', 1);
+  s += dot(groupX, groupY, groupR, BLUE, lerp(1, 0.4, smooth(u))); // Group Icon (fading to faint)
+
+  // Faint blue lines connecting YOU to group
+  var connectOpacity = lerp(0, 0.2, smooth(u));
+  var youHeadY = figureY - 26 - 80 - 70;
+  s += line(CX, youHeadY, groupX, groupY + groupR, BLUE, 4, connectOpacity);
+  s += line(CX - 30, figureY - 100, groupX - 60, groupY + groupR, BLUE, 4, connectOpacity);
+  s += line(CX + 30, figureY - 100, groupX + 60, groupY + groupR, BLUE, 4, connectOpacity);
+
+  // Leave Group Button
+  var buttonY = CY + 100;
+  s += leaveButton(CX, buttonY, 180, 80, WHITE, 10, 1);
+
+  // Question Mark above YOU's head
+  var qmY = figureY - 200;
+  var qmPop = smooth(ramp(u, 0.1, 0.4));
+  var qmBounce = Math.sin(u * Math.PI * 8) * 10 * pulse(u, 0.25, 0.1);
+  s += questionMark(CX, qmY + qmBounce, 60, CORAL, 10, qmPop);
+
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var figureY = CY + 300;
+  var youX = CX - 150;
+  var groupX = CX + 150, groupY = CY - 200;
+  var groupR = 100;
+
+  s += stickFigure(youX, figureY, AMBER, 'cutting', 1);
+  s += dot(groupX, groupY, groupR, BLUE, 0.4); // Faint Group Icon
+
+  // Elastic blue line
+  var youHandX = youX + 60;
+  var youHandY = figureY - 70 - 80 * 0.2 - 60 * 0.8;
+  var lineStart = { x: youHandX, y: youHandY };
+  var lineEnd = { x: groupX - groupR, y: groupY };
+
+  var stretch = smooth(ramp(u, 0.1, 0.5)) * (1 - smooth(ramp(u, 0.6, 0.9)));
+  var controlX = lerp(lineStart.x, lineEnd.x, 0.5);
+  var controlY = lerp(lineStart.y, lineEnd.y, 0.5) - stretch * 120;
+  var d = "M " + lineStart.x + " " + lineStart.y + " Q " + controlX + " " + controlY + " " + lineEnd.x + " " + lineEnd.y;
+  s += pathTag(d, BLUE, 10, 0.8);
+
+  // Scissors
+  var scissorSize = 80;
+  s += scissors(youHandX + 20, youHandY - 10, scissorSize, CORAL, 10, 1);
+
+  // Thought bubble with broken chain
+  var bubbleX = youX + 100, bubbleY = figureY - 260;
+  var bubbleW = 200, bubbleH = 160;
+  var bubblePop = smooth(ramp(u, 0.4, 0.7));
+  if (bubblePop > 0.01) {
+    s += rrectStroke(bubbleX, bubbleY, bubbleW, bubbleH, 20, WHITE, 8, bubblePop);
+    s += brokenChain(bubbleX, bubbleY, 80, CORAL, 10, bubblePop);
+  }
+
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var figureY = CY + 300;
+  var networkCenterX = CX, networkCenterY = CY - 200;
+
+  s += stickFigure(CX, figureY, AMBER, 'contemplative', 1);
+
+  // Group morphs into Network
+  var morphPhase = smooth(ramp(u, 0.1, 0.6));
+  var groupR = lerp(100, 0, morphPhase);
+  if (groupR > 0.1) {
+    s += dot(networkCenterX, networkCenterY, groupR, BLUE, 1 - morphPhase);
+  }
+
+  var networkOp = lerp(0, 1, morphPhase);
+  s += networkWeb(networkCenterX, networkCenterY, 12, 2, 12, BLUE, BLUE, 6, networkOp, u);
+
+  // Connections from YOU to network (signal blue)
+  var youHeadY = figureY - 26 - 80 - 70;
+  var numYouTies = 5;
+  var youTieOp = lerp(0, 0.8, morphPhase);
+  for (var i = 0; i < numYouTies; i++) {
+    var angle = rnd(i + 500) * Math.PI * 2;
+    var targetX = networkCenterX + Math.cos(angle) * 200;
+    var targetY = networkCenterY + Math.sin(angle) * 200;
+    var pulseOp = 0.5 + 0.5 * Math.sin(u * Math.PI * 8 + rnd(i + 600) * Math.PI * 2);
+    s += line(CX, youHeadY, targetX, targetY, BLUE, 8, youTieOp * pulseOp);
+  }
+
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var figureY = CY + 300;
+  var networkCenterX = CX, networkCenterY = CY - 200;
+
+  s += stickFigure(CX, figureY, AMBER, 'resigned', 1);
+  s += networkWeb(networkCenterX, networkCenterY, 12, 2, 12, BLUE, BLUE, 6, 0.6, u);
+
+  // Faint blue connections from YOU to network
+  var youHeadY = figureY - 26 - 80 - 70;
+  var numYouTies = 5;
+  for (var i = 0; i < numYouTies; i++) {
+    var angle = rnd(i + 500) * Math.PI * 2;
+    var targetX = networkCenterX + Math.cos(angle) * 200;
+    var targetY = networkCenterY + Math.sin(angle) * 200;
+    s += line(CX, youHeadY, targetX, targetY, BLUE, 8, 0.3);
+  }
+
+  // Drained Battery icon
+  var batteryX = CX, batteryY = CY + 100;
+  var batteryW = 120, batteryH = 180;
+  var batteryPop = smooth(ramp(u, 0.1, 0.5));
+  s += drainedBattery(batteryX, batteryY, batteryW, batteryH, CORAL, 10, batteryPop);
+
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var figureY = CY + 300;
+  var youX = CX - 200;
+  var phoneX = CX + 200, phoneY = CY + 200;
+
+  s += stickFigure(youX, figureY, AMBER, 'contemplative', 1);
+
+  // Phone Icon with scrolling
+  var phoneW = 180, phoneH = 320;
+  s += phoneIcon(phoneX, phoneY, phoneW, phoneH, WHITE, 10, 1);
+  // Scrolling lines inside the phone screen
+  var scrollOffset = (u * 1.5) % 1;
+  var screenTop = phoneY - phoneH * 0.45;
+  var screenBot = phoneY + phoneH * 0.35;
+  var screenLeft = phoneX - phoneW * 0.35;
+  var screenRight = phoneX + phoneW * 0.35;
+  var itemHeight = 40;
+  var numItems = 5;
+  for (var i = 0; i < numItems; i++) {
+    var itemY = screenTop + i * itemHeight * 1.5 - scrollOffset * itemHeight * 1.5;
+    while (itemY < screenTop) itemY += numItems * itemHeight * 1.5;
+    while (itemY > screenBot + itemHeight) itemY -= numItems * itemHeight * 1.5;
+
+    if (itemY > screenTop && itemY < screenBot) {
+      s += rrect(phoneX, itemY, phoneW * 0.6, itemHeight * 0.8, 8, DIM, 0.7);
+    }
+  }
+
+  // Subtle blue network lines around YOU and phone (background)
+  var networkOp = lerp(0.3, 0.6, smooth(u));
+  var networkPulse = 0.5 + 0.5 * Math.sin(u * Math.PI * 4);
+  var networkRadius = lerp(300, 360, smooth(u));
+  var numNodes = 10;
+  var networkBaseY = CY - 200;
+
+  for (var i = 0; i < numNodes; i++) {
+    var angle = rnd(i) * Math.PI * 2;
+    var x = CX + Math.cos(angle) * networkRadius;
+    var y = networkBaseY + Math.sin(angle) * networkRadius;
+    s += dot(x, y, 10, BLUE, networkOp * networkPulse * 0.5);
+  }
+  for (var i = 0; i < numNodes; i++) {
+    var n1X = CX + Math.cos(rnd(i) * Math.PI * 2) * networkRadius;
+    var n1Y = networkBaseY + Math.sin(rnd(i) * Math.PI * 2) * networkRadius;
+    var n2X = CX + Math.cos(rnd(i + 10) * Math.PI * 2) * networkRadius;
+    var n2Y = networkBaseY + Math.sin(rnd(i + 10) * Math.PI * 2) * networkRadius;
+    s += line(n1X, n1Y, n2X, n2Y, BLUE, 4, networkOp * networkPulse * 0.3);
+  }
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

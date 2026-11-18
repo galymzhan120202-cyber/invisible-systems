@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Your Phone Suggests Weird Words</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / data flow
+var AMBER = "#F2A93B";              // warm amber   -> YOU / user intent / input
+var CORAL = "#FF5B5B";              // coral red    -> bizarre suggestions / biases
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom elements ---------- */
+
+// Stick figure: x, y is base of feet
+function stickFigure(x, y, headR, bodyH, armAngle, legAngle, col, op) {
+  op = (op == null ? 1 : op);
+  var sw = 8;
+  var bodyY = y - bodyH / 2 - headR * 2;
+  var headY = bodyY - bodyH / 2 - headR;
+  var armL = bodyH * 0.7;
+  var legL = bodyH * 0.9;
+
+  var g = '<g opacity="' + op + '">';
+  g += dot(x, headY, headR, col); // Head
+  g += line(x, bodyY - bodyH / 2, x, bodyY + bodyH / 2, col, sw); // Body
+
+  // Arms
+  var armX1 = x, armY1 = bodyY - bodyH * 0.3;
+  var armX2_L = armX1 - armL * Math.sin(armAngle);
+  var armY2_L = armY1 + armL * Math.cos(armAngle);
+  var armX2_R = armX1 + armL * Math.sin(armAngle);
+  var armY2_R = armY1 + armL * Math.cos(armAngle);
+  g += line(armX1, armY1, armX2_L, armY2_L, col, sw);
+  g += line(armX1, armY1, armX2_R, armY2_R, col, sw);
+
+  // Legs
+  var legX1 = x, legY1 = bodyY + bodyH / 2;
+  var legX2_L = legX1 - legL * Math.sin(legAngle);
+  var legY2_L = legY1 + legL * Math.cos(legAngle);
+  var legX2_R = legX1 + legL * Math.sin(legAngle);
+  var legY2_R = legY1 + legL * Math.cos(legAngle);
+  g += line(legX1, legY1, legX2_L, legY2_L, col, sw);
+  g += line(legX1, legY1, legX2_R, legY2_R, col, sw);
+
+  g += '</g>';
+  return g;
+}
+
+// Smartphone: x, y is center of phone
+function phone(x, y, w, h, screenW, screenH, col, op) {
+  op = (op == null ? 1 : op);
+  var sw = 10;
+  var rad = 30; // Corner radius for phone body
+  var screenRad = 10; // Corner radius for screen
+
+  var g = '<g opacity="' + op + '">';
+  // Phone body
+  g += rrect(x, y, w, h, rad, col, op);
+  // Screen (inner rectangle, slightly smaller, black fill)
+  g += rrect(x, y, screenW, screenH, screenRad, "#000000", op);
+  g += rrectStroke(x, y, screenW, screenH, screenRad, DIM, 4, op); // Screen border
+  g += '</g>';
+  return g;
+}
+
+// Word block: x, y is center
+function wordBlock(x, y, w, h, rad, col, op, sw) {
+  sw = sw == null ? 0 : sw; // Default to no stroke
+  if (sw > 0) {
+    return rrectStroke(x, y, w, h, rad, col, sw, op);
+  } else {
+    return rrect(x, y, w, h, rad, col, op);
+  }
+}
+
+// Data stream path: from (x1, y1) to (x2, y2) with control points for curve
+function dataStream(x1, y1, cx1, cy1, cx2, cy2, x2, y2, col, sw, op) {
+  var d = "M " + x1 + " " + y1 + " C " + cx1 + " " + cy1 + " " + cx2 + " " + cy2 + " " + x2 + " " + y2;
+  return pathTag(d, col, sw, op);
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + PHONE + TYPING (AMBER input, BLUE system) */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  var phoneX = CX, phoneY = CY + 100;
+  var phoneW = 400, phoneH = 700;
+  var screenW = phoneW * 0.85, screenH = phoneH * 0.85;
+
+  // Stick figure typing
+  var figX = CX, figY = BOT - 100;
+  var headR = 30, bodyH = 180;
+  var armAngle = lerp(0.3, 0.1, Math.sin(u * Math.PI * 4) * 0.5 + 0.5); // Typing motion
+  var legAngle = lerp(0.05, -0.05, Math.sin(u * Math.PI * 2) * 0.5 + 0.5); // Slight sway
+  s += stickFigure(figX, figY, headR, bodyH, armAngle, legAngle, WHITE);
+
+  // Phone held by figure
+  s += phone(phoneX, phoneY, phoneW, phoneH, screenW, screenH, WHITE);
+
+  // Word blocks on screen
+  var inputY = phoneY + screenH / 2 - 80; // Bottom of input area
+  var suggestY = phoneY - screenH / 2 + 80; // Top of suggestion area
+  var blockW = screenW * 0.7, blockH = 60, blockRad = 12;
+
+  // Input word block (AMBER)
+  var inputOp = lerp(0.3, 1.0, u);
+  s += wordBlock(phoneX, inputY, blockW, blockH, blockRad, AMBER, inputOp);
+  s += rrect(phoneX - blockW / 2 + 20, inputY, 40, 4, 2, WHITE, pulse(u * 5, 0.5, 0.2)); // Cursor
+
+  // Suggestion word blocks (BLUE)
+  var numSuggestions = 3;
+  for (var i = 0; i < numSuggestions; i++) {
+    var blockU = (u * 0.8 + i / numSuggestions) % 1; // Staggered appearance
+    var blockOp = easeOut(ramp(blockU, 0, 0.3)) * (1 - ramp(blockU, 0.7, 1));
+    var blockY = lerp(inputY, suggestY, blockU * 0.8 + 0.1);
+    var blockCol = BLUE;
+    s += wordBlock(phoneX, blockY, blockW * lerp(0.8, 1.0, blockU), blockH, blockRad, blockCol, blockOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): DATA INGESTION (BLUE data flow, AMBER user input) */
+function scene2(u) {
+  var s = '';
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14);
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+
+  var phoneX = CX, phoneY = CY;
+  var phoneW = lerp(400, 600, smooth(u)); // Phone grows larger
+  var phoneH = lerp(700, 1000, smooth(u));
+  var screenW = phoneW * 0.85, screenH = phoneH * 0.85;
+
+  // Stick figure observing
+  var figX = CX + 300, figY = BOT - 200;
+  var headR = 30, bodyH = 180;
+  var armAngle = lerp(0.1, 0.3, Math.sin(u * Math.PI * 2) * 0.5 + 0.5); // Arms slightly raised
+  var legAngle = 0;
+  s += stickFigure(figX, figY, headR, bodyH, armAngle, legAngle, WHITE, 0.8);
+
+  // Phone central, glowing blue
+  var phoneCol = WHITE;
+  var screenGlowOp = lerp(0.2, 0.6, smooth(u));
+  s += phone(phoneX, phoneY, phoneW, phoneH, screenW, screenH, phoneCol);
+  s += rrect(phoneX, phoneY, screenW, screenH, 10, BLUE, screenGlowOp); // Blue glow on screen
+
+  // Data streams flowing into the phone (BLUE)
+  var numStreams = 8;
+  var streamSW = 8;
+  for (var i = 0; i < numStreams; i++) {
+    var angle = (i / numStreams) * Math.PI * 2 + u * Math.PI;
+    var startR = H * 0.6;
+    var startX = CX + startR * Math.cos(angle);
+    var startY = CY + startR * Math.sin(angle);
+    var endX = phoneX + screenW * 0.3 * Math.cos(angle);
+    var endY = phoneY + screenH * 0.3 * Math.sin(angle);
+
+    // Control points for a gentle curve
+    var midX = lerp(startX, endX, 0.5);
+    var midY = lerp(startY, endY, 0.5);
+    var ctrlOffset = 100;
+    var cx1 = lerp(startX, midX, 0.5) + ctrlOffset * Math.sin(angle);
+    var cy1 = lerp(startY, midY, 0.5) - ctrlOffset * Math.cos(angle);
+    var cx2 = lerp(midX, endX, 0.5) + ctrlOffset * Math.sin(angle);
+    var cy2 = lerp(midY, endY, 0.5) - ctrlOffset * Math.cos(angle);
+
+    var streamOp = lerp(0.2, 0.8, Math.sin(u * Math.PI * 2 + i * 0.5) * 0.5 + 0.5);
+    s += dataStream(startX, startY, cx1, cy1, cx2, cy2, endX, endY, BLUE, streamSW, streamOp);
+
+    // Small word blocks following the stream (fading)
+    var blockU = (u * 1.5 + rnd(i)) % 1;
+    var blockX = lerp(startX, endX, easeOut(blockU));
+    var blockY = lerp(startY, endY, easeOut(blockU));
+    s += wordBlock(blockX, blockY, 40, 20, 8, BLUE, (1 - blockU) * 0.6);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): BIAS EMERGES (CORAL suggestions, AMBER input) */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var phoneX = CX, phoneY = CY + 100;
+  var phoneW = 400, phoneH = 700;
+  var screenW = phoneW * 0.85, screenH = phoneH * 0.85;
+
+  // Stick figure typing
+  var figX = CX, figY = BOT - 100;
+  var headR = 30, bodyH = 180;
+  var armAngle = lerp(0.1, -0.1, Math.sin(u * Math.PI * 5) * 0.5 + 0.5); // Typing motion
+  var legAngle = 0;
+  s += stickFigure(figX, figY, headR, bodyH, armAngle, legAngle, WHITE);
+
+  // Phone
+  s += phone(phoneX, phoneY, phoneW, phoneH, screenW, screenH, WHITE);
+
+  // Word blocks on screen
+  var inputY = phoneY + screenH / 2 - 80;
+  var suggestY = phoneY - screenH / 2 + 80;
+  var blockW = screenW * 0.7, blockH = 60, blockRad = 12;
+
+  // Input word block (AMBER)
+  s += wordBlock(phoneX, inputY, blockW, blockH, blockRad, AMBER, 1);
+  s += rrect(phoneX - blockW / 2 + 20, inputY, 40, 4, 2, WHITE, pulse(u * 5, 0.5, 0.2)); // Cursor
+
+  // Normal suggestion (BLUE)
+  s += wordBlock(phoneX, suggestY + 100, blockW * 0.8, blockH, blockRad, BLUE, 0.8);
+
+  // Weird/biased suggestion (CORAL) - pops up prominently
+  var coralScale = lerp(0.8, 1.2, easeOut(ramp(u, 0.1, 0.4))) * (1 - ramp(u, 0.8, 1));
+  var coralY = lerp(suggestY + 100, suggestY - 40, easeOut(ramp(u, 0.1, 0.4)));
+  var coralW = blockW * coralScale;
+  var coralH = blockH * coralScale;
+  var coralRad = blockRad * coralScale;
+
+  // Distorted coral block
+  var pathD = "M " + (phoneX - coralW / 2 + coralRad) + " " + (coralY - coralH / 2) +
+              " L " + (phoneX + coralW / 2 - coralRad) + " " + (coralY - coralH / 2) +
+              " Q " + (phoneX + coralW / 2 + 20) + " " + (coralY - 20) + " " + (phoneX + coralW / 2 - coralRad) + " " + (coralY + coralH / 2) +
+              " L " + (phoneX - coralW / 2 + coralRad) + " " + (coralY + coralH / 2) +
+              " Q " + (phoneX - coralW / 2 - 20) + " " + (coralY + 20) + " " + (phoneX - coralW / 2 + coralRad) + " " + (coralY - coralH / 2) + " Z";
+  s += '<path d="' + pathD + '" fill="' + CORAL + '" opacity="' + lerp(0.2, 1.0, smooth(ramp(u, 0.1, 0.3))) + '"/>';
+
+  // Exaggerated question mark / glitch effect
+  var glitchOp = pulse(u, 0.5, 0.2) * 0.8;
+  s += line(phoneX - 20, coralY - 10, phoneX + 20, coralY - 10, WHITE, 8, glitchOp);
+  s += dot(phoneX, coralY + 20, 8, WHITE, glitchOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): THE "WHY" - DATA IMBALANCE (BLUE data, CORAL bias source) */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  var phoneX = CX + 350, phoneY = CY - 100;
+  var phoneW = 280, phoneH = 500;
+  var screenW = phoneW * 0.85, screenH = phoneH * 0.85;
+
+  // Stick figure observing from the side
+  var figX = CX + 350, figY = BOT - 100;
+  var headR = 24, bodyH = 140;
+  s += stickFigure(figX, figY, headR, bodyH, 0, 0, WHITE, 0.8);
+  s += line(figX, figY - bodyH - headR * 2, phoneX, phoneY, WHITE, 5, 0.5); // Gaze line
+
+  // Phone
+  s += phone(phoneX, phoneY, phoneW, phoneH, screenW, screenH, WHITE, 0.7);
+
+  // Large abstract data pools
+  var pool1X = CX - 220, pool1Y = CY + 100;
+  var pool1W = lerp(600, 500, smooth(u));
+  var pool1H = lerp(800, 700, smooth(u));
+  var pool1Rad = 100;
+  s += rrect(pool1X, pool1Y, pool1W, pool1H, pool1Rad, BLUE, 0.3);
+  s += rrectStroke(pool1X, pool1Y, pool1W, pool1H, pool1Rad, BLUE, 8, 0.6);
+
+  var pool2X = CX + 180, pool2Y = CY - 300;
+  var pool2W = lerp(200, 300, smooth(u));
+  var pool2H = lerp(300, 400, smooth(u));
+  var pool2Rad = 60;
+  s += rrect(pool2X, pool2Y, pool2W, pool2H, pool2Rad, CORAL, 0.5);
+  s += rrectStroke(pool2X, pool2Y, pool2W, pool2H, pool2Rad, CORAL, 8, 0.8);
+
+  // Small data blocks flowing between pools
+  var numBlocks = 10;
+  for (var i = 0; i < numBlocks; i++) {
+    var blockU = (u * 0.7 + rnd(i)) % 1;
+    var blockX = lerp(pool2X, pool1X, easeOut(blockU));
+    var blockY = lerp(pool2Y, pool1Y, easeOut(blockU));
+    var blockCol = lerp(0, 1, blockU) > 0.5 ? BLUE : CORAL; // Mix of colors
+    s += wordBlock(blockX, blockY, 30, 20, 6, blockCol, (1 - blockU) * 0.7);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): FEEDBACK LOOP (AMBER user, CORAL suggestion, BLUE system) */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.8, smooth(u));
+  s += '<g ' + camera(scale, 0, lerp(0, 90, smooth(u))) + '>';
+
+  var phoneX = CX, phoneY = CY + 100;
+  var phoneW = 400, phoneH = 700;
+  var screenW = phoneW * 0.85, screenH = phoneH * 0.85;
+
+  // Stick figure typing/interacting
+  var figX = CX, figY = BOT - 100;
+  var headR = 30, bodyH = 180;
+  var armAngle = lerp(0.1, -0.2, smooth(ramp(u, 0.2, 0.5))); // Arm reaching
+  var legAngle = 0;
+  s += stickFigure(figX, figY, headR, bodyH, armAngle, legAngle, WHITE);
+
+  // Phone
+  s += phone(phoneX, phoneY, phoneW, phoneH, screenW, screenH, WHITE);
+
+  // Word blocks on screen
+  var inputY = phoneY + screenH / 2 - 80;
+  var suggestY = phoneY - screenH / 2 + 80;
+  var blockW = screenW * 0.7, blockH = 60, blockRad = 12;
+
+  // Input word block (AMBER)
+  s += wordBlock(phoneX, inputY, blockW, blockH, blockRad, AMBER, 1);
+
+  // Normal suggestion (BLUE)
+  s += wordBlock(phoneX, suggestY + 100, blockW * 0.8, blockH, blockRad, BLUE, 0.8);
+
+  // Biased suggestion (CORAL) - selected by user
+  var coralBlockY = suggestY - 40;
+  s += wordBlock(phoneX, coralBlockY, blockW, blockH, blockRad, CORAL, 1);
+
+  // User selection gesture (AMBER line)
+  var selectProg = smooth(ramp(u, 0.3, 0.6));
+  if (selectProg > 0.01 && selectProg < 0.99) {
+    var startSelX = phoneX - 100, startSelY = inputY + 40;
+    var endSelX = phoneX, endSelY = coralBlockY;
+    var selX = lerp(startSelX, endSelX, selectProg);
+    var selY = lerp(startSelY, endSelY, selectProg);
+    s += line(startSelX, startSelY, selX, selY, AMBER, 10, 0.8);
+    s += dot(selX, selY, 12, AMBER, 1);
+  }
+
+  // Feedback loop into the system (CORAL to BLUE)
+  var feedbackProg = smooth(ramp(u, 0.6, 0.9));
+  if (feedbackProg > 0.01) {
+    var fbStartX = phoneX, fbStartY = coralBlockY;
+    var fbEndX = phoneX - screenW / 2 - 50; // Off-screen, into system
+    var fbEndY = phoneY - screenH / 2 - 100;
+    var fbMidX = lerp(fbStartX, fbEndX, 0.5) + 80;
+    var fbMidY = lerp(fbStartY, fbEndY, 0.5) - 80;
+    s += dataStream(fbStartX, fbStartY, fbMidX, fbMidY, fbMidX, fbMidY, fbEndX, fbEndY, CORAL, 10, feedbackProg);
+    s += ring(fbEndX, fbEndY, 30 + feedbackProg * 50, BLUE, 8, feedbackProg * 0.8);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): AWARENESS & IMPROVEMENT (AMBER user, BLUE system, WHITE balance) */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.8, 0.92, smooth(clamp(u / 0.7, 0, 1)));
+  s += '<g ' + camera(scale, 0, lerp(90, 0, smooth(u))) + '>';
+
+  var phoneX = CX, phoneY = CY + 100;
+  var phoneW = lerp(400, 450, smooth(u));
+  var phoneH = lerp(700, 780, smooth(u));
+  var screenW = phoneW * 0.85, screenH = phoneH * 0.85;
+
+  // Stick figure in a more balanced, upright pose
+  var figX = CX, figY = BOT - 100;
+  var headR = 30, bodyH = 180;
+  var armAngle = lerp(-0.2, 0, smooth(u)); // Arms returning to neutral
+  var legAngle = 0;
+  s += stickFigure(figX, figY, headR, bodyH, armAngle, legAngle, WHITE);
+
+  // Phone
+  s += phone(phoneX, phoneY, phoneW, phoneH, screenW, screenH, WHITE);
+
+  // Word blocks on screen, more balanced
+  var inputY = phoneY + screenH / 2 - 80;
+  var suggestY = phoneY - screenH / 2 + 80;
+  var blockW = screenW * 0.7, blockH = 60, blockRad = 12;
+
+  // Input word block (AMBER)
+  s += wordBlock(phoneX, inputY, blockW, blockH, blockRad, AMBER, 1);
+
+  // Suggestions are now balanced (BLUE and WHITE)
+  var numSuggestions = 3;
+  for (var i = 0; i < numSuggestions; i++) {
+    var blockY = suggestY + (numSuggestions - 1 - i) * 80;
+    var blockCol = (i % 2 === 0) ? BLUE : WHITE; // Alternating blue and white
+    var blockOp = lerp(0.6, 1.0, smooth(u));
+    s += wordBlock(phoneX, blockY, blockW * 0.9, blockH, blockRad, blockCol, blockOp);
+  }
+
+  // System improvement / re-calibration (BLUE and WHITE lines)
+  var systemCenterX = phoneX - screenW / 2 - 100;
+  var systemCenterY = phoneY - screenH / 2 - 100;
+  var systemRadius = 80;
+  s += ring(systemCenterX, systemCenterY, systemRadius, BLUE, 10, 0.6);
+
+  var numLines = 6;
+  for (var i = 0; i < numLines; i++) {
+    var lineAngle = (i / numLines) * Math.PI * 2 + u * Math.PI * 0.5;
+    var lineX1 = systemCenterX + systemRadius * Math.cos(lineAngle);
+    var lineY1 = systemCenterY + systemRadius * Math.sin(lineAngle);
+    var lineX2 = systemCenterX + (systemRadius + 60) * Math.cos(lineAngle);
+    var lineY2 = systemCenterY + (systemRadius + 60) * Math.sin(lineAngle);
+    s += line(lineX1, lineY1, lineX2, lineY2, WHITE, 6, lerp(0.3, 0.8, smooth(u)));
+  }
+
+  // A checkmark or approval symbol
+  var checkOp = ramp(u, 0.7, 0.9);
+  var checkX = CX + 200, checkY = TOP + 100;
+  s += pathTag("M " + (checkX - 50) + " " + (checkY) + " L " + (checkX - 10) + " " + (checkY + 40) + " L " + (checkX + 50) + " " + (checkY - 40), WHITE, 12, checkOp);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500); // Fallback for slow font loading
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

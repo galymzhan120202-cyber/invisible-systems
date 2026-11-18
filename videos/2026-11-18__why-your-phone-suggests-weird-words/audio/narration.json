@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You're typing a quick message, perfectly normal, when your phone's predictive text suggests something utterly bizarre. It's baffling, isn't it?",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "You just want to type efficiently, but these bizarre suggestions interrupt your flow. It feels like the phone should know *you* better.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "You might think it’s poorly designed, or picking up strange habits from *your* typing. You correct it, but the weirdness persists.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "The truth is, your phone’s brain isn’t just your typing history. It's a massive algorithm trained on billions of words from the entire internet – articles, conversations, every text imaginable.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "This giant dataset includes all the internet’s quirks and biases. So, while it guesses common phrases, it also learns obscure, nonsensical connections.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "So next time your phone suggests 'flibbertigibbet' instead of 'finish', you'll know it's not broken. It's reflecting the wild, vast world of text it was trained on.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]
