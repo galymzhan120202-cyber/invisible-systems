@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Online Forms Ask for Your Middle Name</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue  -> the system / mechanism
+var AMBER = "#F2A93B";              // warm amber   -> YOU / user
+var CORAL = "#FF5B5B";              // coral red    -> friction / naive model
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+function hexToRgb(hex) {
+  var bigint = parseInt(hex.slice(1), 16);
+  var r = (bigint >> 16) & 255;
+  var g = (bigint >> 8) & 255;
+  var b = bigint & 255;
+  return [r, g, b];
+}
+
+function rgbToHex(r, g, b) {
+  return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
+}
+
+function lerpColor(a, b, t) {
+  var rgbA = hexToRgb(a);
+  var rgbB = hexToRgb(b);
+  var r = Math.round(lerp(rgbA[0], rgbB[0], t));
+  var g = Math.round(lerp(rgbA[1], rgbB[1], t));
+  var b = Math.round(lerp(rgbA[2], rgbB[2], t));
+  return rgbToHex(r, g, b);
+}
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+/* Stick figure (head, body, arms, legs) */
+function stickFigure(x, y, scale, headYOffset, bodyLen, armAngle, legAngle, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ') scale(' + scale + ')">';
+  var sw = 8 / scale; // Adjust stroke width for scale
+
+  // Head
+  g += dot(0, headYOffset, 20 / scale, col);
+
+  // Body
+  g += line(0, headYOffset + 20 / scale, 0, headYOffset + 20 / scale + bodyLen / scale, col, sw);
+
+  // Arms
+  var armStartX = 0;
+  var armStartY = headYOffset + 20 / scale + bodyLen / scale * 0.2;
+  var armLen = bodyLen * 0.5 / scale;
+  g += line(armStartX, armStartY, armStartX + armLen * Math.cos(armAngle), armStartY + armLen * Math.sin(armAngle), col, sw); // Right arm
+  g += line(armStartX, armStartY, armStartX - armLen * Math.cos(armAngle), armStartY + armLen * Math.sin(armAngle), col, sw); // Left arm
+
+  // Legs
+  var legStartX = 0;
+  var legStartY = headYOffset + 20 / scale + bodyLen / scale;
+  var legLen = bodyLen * 0.6 / scale;
+  g += line(legStartX, legStartY, legStartX + legLen * Math.cos(legAngle), legStartY + legLen * Math.sin(legAngle), col, sw); // Right leg
+  g += line(legStartX, legStartY, legStartX - legLen * Math.cos(legAngle), legStartY + legLen * Math.sin(legAngle), col, sw); // Left leg
+
+  g += '</g>';
+  return g;
+}
+
+// Specific poses for stick figure
+function youFigure(x, y, u, poseType, op) {
+  var scale = 1; // Base scale for the figure
+  var headYOffset = -90; // Relative to figure's y
+  var bodyLen = 100;
+  var armAngle = Math.PI / 2; // Default arms down
+  var legAngle = Math.PI / 2; // Default legs straight down
+
+  switch (poseType) {
+    case 'typing':
+      scale = lerp(1.0, 0.9, smooth(u));
+      headYOffset = lerp(-90, -110, smooth(u));
+      armAngle = Math.PI / 2 - Math.sin(u * Math.PI * 8) * 0.1 - 0.3; // Typing motion
+      legAngle = Math.PI / 2 + Math.sin(u * Math.PI * 4) * 0.05;
+      break;
+    case 'confused':
+      headYOffset = lerp(-110, -90, smooth(u)); // Head lifts slightly
+      armAngle = lerp(Math.PI / 2 - 0.3, Math.PI / 2 - 0.1, smooth(u)); // Arms relax
+      legAngle = Math.PI / 2;
+      break;
+    case 'shrugging':
+      var shrugU = smooth(u);
+      armAngle = lerp(Math.PI / 2 - 0.1, Math.PI / 2 - 0.6, shrugU); // Arms raise for shrug
+      headYOffset = lerp(-90, -80, shrugU); // Head slightly up
+      break;
+    case 'observing':
+      armAngle = Math.PI / 2 - 0.2; // Arms slightly bent
+      headYOffset = -90;
+      break;
+    case 'lost':
+      scale = lerp(1.0, 0.8, smooth(u));
+      armAngle = lerp(Math.PI / 2 - 0.2, Math.PI / 2 - 0.8, smooth(u)); // Arms out
+      headYOffset = -80;
+      break;
+    case 'knowing':
+      var nodU = smooth(u);
+      headYOffset = lerp(-90, -80, nodU); // Head nods down
+      armAngle = Math.PI / 2 - 0.1; // Arms relaxed
+      break;
+  }
+  return stickFigure(x, y, scale, headYOffset, bodyLen, armAngle, legAngle, AMBER, op);
+}
+
+// Form elements
+function formField(x, y, w, h, rad, col, sw, op) {
+  return rrectStroke(x, y, w, h, rad, col, sw, op);
+}
+
+function formProgressBar(x, y, w, h, u, col, op) {
+  var fillW = w * clamp(u, 0, 1);
+  var g = '<g opacity="' + (op == null ? 1 : op) + '">';
+  g += rrectStroke(x, y, w, h, h / 2, WHITE, 4, 0.6); // Background track
+  g += rrect(x - (w - fillW) / 2, y, fillW, h, h / 2, col, 0.9); // Filled bar
+  g += '</g>';
+  return g;
+}
+
+function thoughtBubble(x, y, u, col, sw, op) {
+  var r = lerp(0, 40, easeOut(u));
+  var opacity = lerp(0, 1, easeOut(u)) * (1 - easeIn(ramp(u, 0.7, 1.0)));
+  return ring(x, y, r, col, sw, opacity);
+}
+
+// Database elements
+function databaseRow(x, y, w, h, rad, col, sw, op, highlightInitial) {
+  var g = '<g opacity="' + (op == null ? 1 : op) + '">';
+  g += rrectStroke(x, y, w, h, rad, col, sw);
+  // Simulate "John Smith" with simple shapes (lines)
+  // "J"
+  g += line(x - w * 0.3, y - h * 0.2, x - w * 0.25, y - h * 0.2, WHITE, sw * 0.8, 0.8);
+  g += line(x - w * 0.25, y - h * 0.2, x - w * 0.25, y + h * 0.1, WHITE, sw * 0.8, 0.8);
+  g += line(x - w * 0.25, y + h * 0.1, x - w * 0.3, y + h * 0.2, WHITE, sw * 0.8, 0.8);
+  // "S"
+  g += line(x + w * 0.1, y - h * 0.2, x + w * 0.2, y - h * 0.2, WHITE, sw * 0.8, 0.8);
+  g += line(x + w * 0.1, y - h * 0.2, x + w * 0.1, y, WHITE, sw * 0.8, 0.8);
+  g += line(x + w * 0.1, y, x + w * 0.2, y, WHITE, sw * 0.8, 0.8);
+  g += line(x + w * 0.2, y, x + w * 0.2, y + h * 0.2, WHITE, sw * 0.8, 0.8);
+  g += line(x + w * 0.2, y + h * 0.2, x + w * 0.1, y + h * 0.2, WHITE, sw * 0.8, 0.8);
+
+  if (highlightInitial) {
+    // Middle initial (a dot for simplicity)
+    g += dot(x - w * 0.05, y, h * 0.15, BLUE); // Highlighted dot
+  } else {
+    g += dot(x - w * 0.05, y, h * 0.15, WHITE, 0.6); // Unhighlighted dot
+  }
+  g += '</g>';
+  return g;
+}
+
+// Chaotic database lines
+function chaoticLines(x, y, w, h, u, col, op) {
+  var g = '';
+  var density = lerp(0, 15, smooth(u)); // More lines for chaos
+  for (var i = 0; i < density; i++) {
+    var x1 = x - w / 2 + rnd(i * 10) * w;
+    var y1 = y - h / 2 + rnd(i * 10 + 1) * h;
+    var x2 = x - w / 2 + rnd(i * 10 + 2) * w;
+    var y2 = y - h / 2 + rnd(i * 10 + 3) * h;
+    g += line(x1, y1, x2, y2, col, 5, op * rnd(i * 10 + 4));
+  }
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var formW = 700, formH = 1200;
+  var formY = CY + 100;
+  var youX = CX - 300, youY = formY + 200;
+
+  // Form background
+  s += rrectStroke(CX, formY, formW, formH, 40, WHITE, 10, 0.8);
+
+  // Progress bar at the top of the form
+  var progressBarY = formY - formH / 2 + 80;
+  var progressBarW = formW * 0.8;
+  var progress = easeOut(ramp(u, 0.0, 0.8)); // Progress bar fills quickly
+  s += formProgressBar(CX, progressBarY, progressBarW, 30, progress, BLUE, 0.9);
+
+  // Other form fields
+  s += rrectStroke(CX, formY - 300, formW * 0.7, 80, 15, WHITE, 6, 0.4);
+  s += rrectStroke(CX, formY - 180, formW * 0.7, 80, 15, WHITE, 6, 0.4);
+  s += rrectStroke(CX, formY - 60, formW * 0.7, 80, 15, WHITE, 6, 0.4);
+  s += rrectStroke(CX, formY + 60, formW * 0.7, 80, 15, WHITE, 6, 0.4);
+  s += rrectStroke(CX, formY + 180, formW * 0.7, 80, 15, WHITE, 6, 0.4);
+
+  // YOU figure
+  s += youFigure(youX, youY, u, 'typing', 1);
+
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var formW = 700, formH = 1200;
+  var formY = CY + 100;
+  var youX = CX - 300, youY = formY + 200;
+
+  // Form background (fades slightly)
+  s += rrectStroke(CX, formY, formW, formH, 40, WHITE, 10, lerp(0.8, 0.6, smooth(u)));
+
+  // Other form fields (fade out)
+  var fieldOp = lerp(0.4, 0.1, smooth(u));
+  s += rrectStroke(CX, formY - 300, formW * 0.7, 80, 15, WHITE, 6, fieldOp);
+  s += rrectStroke(CX, formY - 180, formW * 0.7, 80, 15, WHITE, 6, fieldOp);
+  s += rrectStroke(CX, formY + 60, formW * 0.7, 80, 15, WHITE, 6, fieldOp);
+  s += rrectStroke(CX, formY + 180, formW * 0.7, 80, 15, WHITE, 6, fieldOp);
+
+  // Middle Name field (becomes prominent)
+  var middleNameFieldY = formY - 60;
+  var middleNameFieldW = formW * 0.7;
+  var middleNameFieldH = 80;
+  s += formField(CX, middleNameFieldY, middleNameFieldW, middleNameFieldH, 15, WHITE, 8, 1);
+
+  // Cursor animation
+  var cursorX = CX - middleNameFieldW / 2 + 40;
+  var cursorY = middleNameFieldY;
+  var cursorPulse = Math.sin(u * Math.PI * 6) * 0.5 + 0.5;
+  s += line(cursorX, cursorY - middleNameFieldH * 0.3, cursorX, cursorY + middleNameFieldH * 0.3, WHITE, 4, cursorPulse);
+
+  // YOU figure
+  s += youFigure(youX, youY, u, 'confused', 1);
+
+  // Thought bubble
+  s += thoughtBubble(youX + 100, youY - 200, ramp(u, 0.2, 0.8), WHITE, 6);
+
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var formW = 700, formH = 1200;
+  var formY = CY + 100;
+  var youX = CX - 300, youY = formY + 200;
+
+  // Form background (fades further)
+  s += rrectStroke(CX, formY, formW, formH, 40, WHITE, 10, lerp(0.6, 0.3, smooth(u)));
+
+  // Middle Name field
+  var middleNameFieldY = formY - 60;
+  var middleNameFieldW = formW * 0.7;
+  var middleNameFieldH = 80;
+  s += formField(CX, middleNameFieldY, middleNameFieldW, middleNameFieldH, 15, WHITE, 8, 1);
+
+  // Typed letter (a dot)
+  var typedLetterX = CX - middleNameFieldW / 2 + 40;
+  s += dot(typedLetterX, middleNameFieldY, 12, WHITE, 1);
+
+  // Coral red shimmers from the field
+  var shimmerOp = pulse(u, 0.4, 0.3) * 0.8;
+  if (shimmerOp > 0.05) {
+    var shimmerSize = lerp(0, 50, easeOut(u));
+    s += ring(CX, middleNameFieldY, middleNameFieldW / 2 + shimmerSize, CORAL, 10, shimmerOp);
+    s += ring(CX, middleNameFieldY, middleNameFieldW / 2 + shimmerSize * 0.6, CORAL, 8, shimmerOp * 0.6);
+  }
+
+  // YOU figure
+  s += youFigure(youX, youY, u, 'shrugging', 1);
+
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var formW = 700, formH = 1200;
+  var formY = CY + 100;
+  var youX = CX - 300, youY = formY + 200;
+
+  // Form background fades out completely
+  s += rrectStroke(CX, formY, formW, formH, 40, WHITE, 10, lerp(0.3, 0.0, smooth(u)));
+
+  // Middle Name field transforms into a database row
+  var middleNameFieldY = formY - 60;
+  var dbRowY = CY;
+  var dbRowW = 600, dbRowH = 80;
+
+  var transformProgress = smooth(ramp(u, 0.1, 0.4));
+
+  var currentFieldY = lerp(middleNameFieldY, dbRowY, transformProgress);
+  var currentFieldW = lerp(formW * 0.7, dbRowW, transformProgress);
+  var currentFieldH = lerp(80, dbRowH, transformProgress);
+  var currentFieldSW = lerp(8, 4, transformProgress);
+
+  // The transforming field
+  s += formField(CX, currentFieldY, currentFieldW, currentFieldH, 15, WHITE, currentFieldSW, 1);
+  // Typed letter (dot) also transforms
+  var typedLetterX = lerp(CX - (formW * 0.7) / 2 + 40, CX - dbRowW * 0.05, transformProgress);
+  var typedLetterY = lerp(middleNameFieldY, dbRowY, transformProgress);
+  s += dot(typedLetterX, typedLetterY, lerp(12, dbRowH * 0.15, transformProgress), WHITE, 1);
+
+  // Other database rows appear
+  var numRows = 5;
+  var rowSpacing = dbRowH + 20;
+  var rowsAppear = smooth(ramp(u, 0.3, 0.6));
+
+  for (var i = 0; i < numRows; i++) {
+    var rowOp = rowsAppear * (1 - Math.abs(i - Math.floor(numRows / 2)) / (numRows / 2 + 1)); // Fade in, center first
+    if (rowOp < 0.05) continue;
+
+    var rowY = dbRowY + (i - Math.floor(numRows / 2)) * rowSpacing;
+    var highlightInitial = (i === Math.floor(numRows / 2)); // Only center row highlights
+
+    var highlightOp = highlightInitial ? ramp(u, 0.6, 0.9) : 0; // Middle initial glows
+    var initialCol = lerpColor(WHITE, BLUE, highlightOp);
+
+    s += databaseRow(CX, rowY, dbRowW, dbRowH, 15, BLUE, 4, rowOp, highlightInitial);
+    // Overwrite the initial dot with the glowing one if highlighted
+    if (highlightInitial) {
+        s += dot(CX - dbRowW * 0.05, rowY, dbRowH * 0.15, initialCol, rowOp);
+    } else {
+        s += dot(CX - dbRowW * 0.05, rowY, dbRowH * 0.15, WHITE, rowOp * 0.6);
+    }
+  }
+
+  // YOU figure
+  s += youFigure(youX, youY, u, 'observing', 1);
+
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var youX = CX - 300, youY = CY + 200;
+
+  var dbRowW = 600, dbRowH = 80;
+  var numRows = 5;
+  var rowSpacing = dbRowH + 20;
+  var dbY = CY;
+
+  // Database grid becomes chaotic
+  var chaosProgress = smooth(ramp(u, 0.1, 0.8));
+  var chaosOp = lerp(0, 1, chaosProgress);
+  var gridOp = lerp(1, 0, chaosProgress);
+
+  // Fading out the clean grid
+  for (var i = 0; i < numRows; i++) {
+    var rowY = dbY + (i - Math.floor(numRows / 2)) * rowSpacing;
+    s += databaseRow(CX, rowY, dbRowW, dbRowH, 15, BLUE, 4, gridOp * (1 - chaosProgress));
+    s += dot(CX - dbRowW * 0.05, rowY, dbRowH * 0.15, WHITE, gridOp * 0.6 * (1 - chaosProgress));
+  }
+
+  // Chaotic lines appear
+  if (chaosOp > 0.01) {
+    s += chaoticLines(CX, dbY, dbRowW * 1.2, (numRows - 1) * rowSpacing * 1.5, chaosProgress, CORAL, chaosOp);
+  }
+
+  // YOU figure
+  s += youFigure(youX, youY, u, 'lost', 1);
+
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var formW = 700, formH = 1200;
+  var formY = CY + 100;
+  var youX = CX - 300, youY = formY + 200;
+
+  // Subtle ordered database in background
+  var reformProgress = smooth(ramp(u, 0.1, 0.6));
+  var dbOp = lerp(0.0, 0.2, reformProgress); // Fades in as ordered
+  var dbRowW = 600, dbRowH = 80;
+  var numRows = 5;
+  var rowSpacing = dbRowH + 20;
+  var dbY = CY;
+
+  for (var i = 0; i < numRows; i++) {
+    var rowY = dbY + (i - Math.floor(numRows / 2)) * rowSpacing;
+    s += databaseRow(CX, rowY, dbRowW, dbRowH, 15, BLUE, 4, dbOp);
+    s += dot(CX - dbRowW * 0.05, rowY, dbRowH * 0.15, WHITE, dbOp * 0.6);
+  }
+
+  // Completed form appears
+  var formAppear = smooth(ramp(u, 0.4, 0.8));
+  if (formAppear > 0.01) {
+    s += rrectStroke(CX, formY, formW, formH, 40, WHITE, 10, formAppear * 0.8);
+    // Filled fields
+    s += rrect(CX, formY - 300, formW * 0.7, 80, 15, WHITE, formAppear * 0.6);
+    s += rrect(CX, formY - 180, formW * 0.7, 80, 15, WHITE, formAppear * 0.6);
+    s += rrect(CX, formY - 60, formW * 0.7, 80, 15, WHITE, formAppear * 0.6); // Middle name field filled
+    s += rrect(CX, formY + 60, formW * 0.7, 80, 15, WHITE, formAppear * 0.6);
+    s += rrect(CX, formY + 180, formW * 0.7, 80, 15, WHITE, formAppear * 0.6);
+  }
+
+  // YOU figure
+  s += youFigure(youX, youY, u, 'knowing', 1);
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

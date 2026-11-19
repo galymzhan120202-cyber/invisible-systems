@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Your Phone Suggests Weird Words</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue  -> system / data
+var AMBER = "#F2A93B";              // warm amber   -> user input / intended words
+var CORAL = "#FF5B5B";              // coral red    -> weird / unintended suggestions
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, fill) {
+  return '<path d="' + d + '" fill="' + (fill || 'none') + '" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom builders ---------- */
+// Stick figure (approx 200px tall)
+function stickFigure(x, y, scale, headTilt, armAngle, typing, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" transform="scale(' + scale + ') translate(' + (x/scale - x) + ' ' + (y/scale - y) + ')">';
+  var headY = y - 90;
+  var bodyY = y - 40;
+  var armLX = x - 40, armRX = x + 40;
+  var armY = bodyY - 20;
+  var legY = y + 40;
+  var footY = y + 80;
+
+  // Head
+  g += dot(x, headY, 25, WHITE);
+  // Head tilt
+  if (headTilt) g += line(x, headY, x + headTilt * 15, headY - 10, WHITE, 7); // simple tilt indicator
+
+  // Body
+  g += line(x, headY + 25, x, legY, WHITE, 7);
+
+  // Arms
+  if (typing) {
+    g += line(x, armY, armLX + 10, armY + 50, WHITE, 7); // Left arm bent for typing
+    g += line(armLX + 10, armY + 50, armLX + 10, armY + 60, WHITE, 7); // Hand on phone
+    g += line(x, armY, armRX - 10, armY + 50, WHITE, 7); // Right arm bent for typing
+    g += line(armRX - 10, armY + 50, armRX - 10, armY + 60, WHITE, 7); // Hand on phone
+  } else if (armAngle) {
+    g += line(x, armY, armLX + Math.cos(armAngle) * 60, armY + Math.sin(armAngle) * 60, WHITE, 7);
+    g += line(x, armY, armRX - Math.cos(armAngle) * 60, armY + Math.sin(armAngle) * 60, WHITE, 7);
+  } else {
+    g += line(x, armY, armLX, bodyY + 10, WHITE, 7);
+    g += line(x, armY, armRX, bodyY + 10, WHITE, 7);
+  }
+
+  // Legs
+  g += line(x, legY, x - 30, footY, WHITE, 7);
+  g += line(x, legY, x + 30, footY, WHITE, 7);
+
+  g += '</g>';
+  return g;
+}
+
+// Phone frame (hero element)
+function phoneFrame(x, y, w, h, rad, col, sw, op) {
+  return rrectStroke(x, y, w, h, rad, col, sw, op);
+}
+
+// Phone screen
+function phoneScreen(x, y, w, h, rad, col, op) {
+  return rrect(x, y, w, h, rad, col, op);
+}
+
+// Text input field
+function textBox(x, y, w, h, rad, col, sw, op) {
+  return rrectStroke(x, y, w, h, rad, col, sw, op);
+}
+
+// Abstract word shapes (no actual text)
+function abstractWord(x, y, size, col, type, op) {
+  var d = '';
+  switch (type) {
+    case 'placeholder': // [ ]
+      return rrectStroke(x, y, size * 0.8, size * 0.8, size * 0.1, col, 5, op);
+    case 'word1': // "How"
+      return rrect(x, y, size * 0.8, size * 0.4, size * 0.1, col, op);
+    case 'word2': // "are"
+      return rrect(x, y, size * 0.6, size * 0.4, size * 0.1, col, op);
+    case 'word3': // "you"
+      return rrect(x, y, size * 0.7, size * 0.4, size * 0.1, col, op);
+    case 'doing': // "doing"
+      return rrect(x, y, size * 1.2, size * 0.5, size * 0.2, col, op);
+    case 'pterodactyl': // "pterodactyl" (jagged, spiky shape)
+      d = "M " + (x - size) + " " + (y + size * 0.2) +
+          " L " + (x - size * 0.5) + " " + (y - size * 0.5) +
+          " L " + (x + size * 0.2) + " " + (y - size * 0.3) +
+          " L " + (x + size) + " " + (y + size * 0.3) +
+          " L " + (x + size * 0.5) + " " + (y + size * 0.6) +
+          " L " + (x - size * 0.2) + " " + (y + size * 0.4) +
+          " Z";
+      return pathTag(d, col, 7, op, col);
+    case 'dataBlock': // for data stream
+      return rrect(x, y, size * 1.2, size * 0.6, size * 0.1, col, op);
+    case 'userIcon': // tiny stick figure for data stream
+      return dot(x, y, size * 0.5, col, op) + line(x, y + size * 0.5, x, y + size * 1.5, col, size * 0.2, op);
+    default:
+      return '';
+  }
+}
+
+// Composed "How are you [ ]" phrase
+function howAreYouPhrase(x, y, size, col, op, placeholderOp) {
+  var s = '';
+  s += abstractWord(x - size * 1.8, y, size, col, 'word1', op);
+  s += abstractWord(x - size * 0.5, y, size, col, 'word2', op);
+  s += abstractWord(x + size * 0.8, y, size, col, 'word3', op);
+  s += abstractWord(x + size * 2.2, y, size, col, 'placeholder', placeholderOp);
+  return s;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+var PHONE_W = 600, PHONE_H = 1000;
+var PHONE_X = CX, PHONE_Y = CY;
+var SCREEN_W = PHONE_W - 40, SCREEN_H = PHONE_H - 100;
+var SCREEN_X = PHONE_X, SCREEN_Y = PHONE_Y - 20; // Screen slightly above center of phone for better composition
+var TEXTBOX_Y = SCREEN_Y + SCREEN_H / 2 - 100;
+var SUGGESTION_BUBBLE_Y = TEXTBOX_Y - 200;
+var SUGGESTION_BAR_Y = SCREEN_Y + SCREEN_H / 2 + 300;
+
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.0, 1.05, smooth(u * 0.9));
+  var driftY = lerp(0, -20, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  // Phone frame
+  s += phoneFrame(PHONE_X, PHONE_Y, PHONE_W, PHONE_H, 60, WHITE, 10, 1);
+  // Phone screen
+  s += phoneScreen(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, 40, '#000000', 1);
+  // Text input field
+  s += textBox(SCREEN_X, TEXTBOX_Y, SCREEN_W - 60, 100, 20, WHITE, 7, 1);
+
+  // Suggestion bubble (amber outline)
+  var bubbleW = lerp(0, 500, easeOut(ramp(u, 0.1, 0.4)));
+  var bubbleH = lerp(0, 120, easeOut(ramp(u, 0.1, 0.4)));
+  var bubbleOp = ramp(u, 0.1, 0.4);
+  s += rrectStroke(SCREEN_X, SUGGESTION_BUBBLE_Y, bubbleW, bubbleH, 30, AMBER, 8, bubbleOp);
+  // "How are you [ ]" words inside bubble
+  if (bubbleOp > 0.1) {
+    s += howAreYouPhrase(SCREEN_X, SUGGESTION_BUBBLE_Y, 30, AMBER, bubbleOp, bubbleOp);
+  }
+
+  // Stick figure typing
+  var headTilt = 0;
+  var armAngle = 0;
+  var typing = true;
+  var stickFigY = PHONE_Y + PHONE_H / 2 + 180;
+  s += stickFigure(PHONE_X, stickFigY, 1, headTilt, armAngle, typing, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14);
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+
+  // Phone frame
+  s += phoneFrame(PHONE_X, PHONE_Y, PHONE_W, PHONE_H, 60, WHITE, 10, 1);
+  // Phone screen
+  s += phoneScreen(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, 40, '#000000', 1);
+  // Text input field
+  s += textBox(SCREEN_X, TEXTBOX_Y, SCREEN_W - 60, 100, 20, WHITE, 7, 1);
+  // "How are you [ ]" words
+  s += howAreYouPhrase(SCREEN_X, SUGGESTION_BUBBLE_Y, 30, AMBER, 1, 1);
+
+  // Suggestion bar slides in
+  var barH = lerp(0, 100, easeOut(ramp(u, 0.0, 0.2)));
+  var barY = lerp(SUGGESTION_BAR_Y + 100, SUGGESTION_BAR_Y, easeOut(ramp(u, 0.0, 0.2)));
+  s += rrectStroke(SCREEN_X, barY, SCREEN_W - 60, barH, 20, WHITE, 7, 1);
+
+  // "Pterodactyl" word appears (coral red)
+  var pterodactylOp = ramp(u, 0.2, 0.4);
+  var pterodactylScale = lerp(0.5, 1.0, easeOut(ramp(u, 0.2, 0.4)));
+  if (pterodactylOp > 0.05) {
+    s += '<g transform="scale(' + pterodactylScale + ') translate(' + (SCREEN_X/pterodactylScale - SCREEN_X) + ' ' + (barY/pterodactylScale - barY) + ')">';
+    s += abstractWord(SCREEN_X, barY, 40, CORAL, 'pterodactyl', pterodactylOp);
+    s += '</g>';
+  }
+
+  // Stick figure confused
+  var headTilt = lerp(0, 0.8, smooth(ramp(u, 0.3, 0.6)));
+  var stickFigY = PHONE_Y + PHONE_H / 2 + 180;
+  s += stickFigure(PHONE_X, stickFigY, 1, headTilt, 0, false, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Phone frame
+  s += phoneFrame(PHONE_X, PHONE_Y, PHONE_W, PHONE_H, 60, WHITE, 10, 1);
+  // Phone screen
+  s += phoneScreen(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, 40, '#000000', 1);
+  // Text input field
+  s += textBox(SCREEN_X, TEXTBOX_Y, SCREEN_W - 60, 100, 20, WHITE, 7, 1);
+  // "How are you [ ]" words
+  s += howAreYouPhrase(SCREEN_X, SUGGESTION_BUBBLE_Y, 30, AMBER, 1, 1);
+
+  // Suggestion bar
+  s += rrectStroke(SCREEN_X, SUGGESTION_BAR_Y, SCREEN_W - 60, 100, 20, WHITE, 7, 1);
+
+  // "Pterodactyl" word shakes, shrinks, disappears
+  var pterodactylOp = lerp(1, 0, easeIn(ramp(u, 0.2, 0.5)));
+  var pterodactylScale = lerp(1, 0.2, easeIn(ramp(u, 0.2, 0.5)));
+  var shakeX = Math.sin(u * 50) * 5 * pulse(u, 0.3, 0.1);
+  if (pterodactylOp > 0.05) {
+    s += '<g transform="translate(' + shakeX + ' 0) scale(' + pterodactylScale + ') translate(' + (SCREEN_X/pterodactylScale - SCREEN_X) + ' ' + (SUGGESTION_BAR_Y/pterodactylScale - SUGGESTION_BAR_Y) + ')">';
+    s += abstractWord(SCREEN_X, SUGGESTION_BAR_Y, 40, CORAL, 'pterodactyl', pterodactylOp);
+    s += '</g>';
+  }
+
+  // "Doing" word appears tentatively (amber)
+  var doingOp = ramp(u, 0.6, 0.9);
+  if (doingOp > 0.05) {
+    s += abstractWord(SCREEN_X - 100, SUGGESTION_BAR_Y, 40, AMBER, 'doing', doingOp);
+  }
+  // Other faint suggestions
+  s += abstractWord(SCREEN_X + 100, SUGGESTION_BAR_Y, 30, DIM, 'word2', doingOp * 0.5);
+  s += abstractWord(SCREEN_X + 220, SUGGESTION_BAR_Y, 30, DIM, 'word3', doingOp * 0.4);
+
+  // Stick figure exasperated, tapping
+  var headTilt = lerp(0.8, -0.5, smooth(ramp(u, 0.5, 0.8)));
+  var armAngle = lerp(0, Math.PI / 4, smooth(ramp(u, 0.1, 0.4)));
+  var typing = false;
+  var stickFigY = PHONE_Y + PHONE_H / 2 + 180;
+  s += stickFigure(PHONE_X, stickFigY, 1, headTilt, armAngle, typing, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  // Phone screen deconstructs into data stream
+  var morphPhase = smooth(ramp(u, 0.0, 0.3)); // 0 = phone, 1 = stream
+  var streamOp = morphPhase;
+  var phoneOp = 1 - morphPhase;
+
+  // Phone frame dissolving
+  if (phoneOp > 0.02) {
+    var phoneScale = lerp(1, 0.8, morphPhase);
+    s += '<g ' + camera(phoneScale, 0, lerp(0, -100, morphPhase)) + '>';
+    s += phoneFrame(PHONE_X, PHONE_Y, PHONE_W, PHONE_H, 60, WHITE, lerp(10, 2, morphPhase), phoneOp);
+    s += phoneScreen(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, 40, '#000000', phoneOp);
+    s += textBox(SCREEN_X, TEXTBOX_Y, SCREEN_W - 60, 100, 20, WHITE, 7, phoneOp);
+    s += howAreYouPhrase(SCREEN_X, SUGGESTION_BUBBLE_Y, 30, AMBER, phoneOp, phoneOp);
+    s += rrectStroke(SCREEN_X, SUGGESTION_BAR_Y, SCREEN_W - 60, 100, 20, WHITE, 7, phoneOp);
+    s += abstractWord(SCREEN_X - 100, SUGGESTION_BAR_Y, 40, AMBER, 'doing', phoneOp);
+    s += '</g>';
+  }
+
+  // Data stream visualization
+  if (streamOp > 0.02) {
+    var streamY = lerp(CY, CY - 100, morphPhase);
+    var streamH = lerp(SCREEN_H, BOT - TOP, morphPhase);
+    var streamW = lerp(SCREEN_W, W - 100, morphPhase);
+    var streamRad = lerp(40, 0, morphPhase);
+    s += rrect(CX, streamY, streamW, streamH, streamRad, BLUE, streamOp * 0.2); // Background blue stream
+
+    // Input lines for data
+    var numLines = 8;
+    for (var i = 0; i < numLines; i++) {
+      var lineX = CX - streamW / 2 + (i + 0.5) * (streamW / numLines);
+      var lineY1 = TOP + 50;
+      var lineY2 = BOT - 50;
+      s += line(lineX, lineY1, lineX, lineY2, BLUE, 4, streamOp * 0.5);
+    }
+
+    // Tiny stick figures (users) feeding in
+    for (var i = 0; i < 5; i++) {
+      var userPhase = (u * 0.8 + rnd(i) * 0.5) % 1;
+      var userY = lerp(BOT, TOP, easeIn(userPhase));
+      var userX = CX - 300 + rnd(i + 10) * 600;
+      s += abstractWord(userX, userY, 15, WHITE, 'userIcon', streamOp * (1 - userPhase));
+    }
+
+    // Blocks of text flowing into central unit
+    var unitX = CX, unitY = CY + 100;
+    var unitW = lerp(0, 400, ramp(u, 0.4, 0.6));
+    var unitH = lerp(0, 300, ramp(u, 0.4, 0.6));
+    s += rrect(unitX, unitY, unitW, unitH, 30, BLUE, streamOp * 0.6); // Central processing unit
+
+    var numBlocks = 10;
+    for (var i = 0; i < numBlocks; i++) {
+      var blockPhase = (u * 1.2 + rnd(i + 20) * 0.7) % 1;
+      var blockY = lerp(BOT, unitY, easeIn(blockPhase));
+      var blockX = CX - 200 + rnd(i + 30) * 400;
+      var blockCol = (rnd(i + 40) < 0.2) ? CORAL : AMBER; // 20% coral for niche/odd
+      var blockOp = streamOp * (1 - blockPhase);
+      if (blockOp > 0.05) {
+        s += abstractWord(blockX, blockY, 20, blockCol, 'dataBlock', blockOp);
+      }
+    }
+  }
+
+  // Stick figure observing
+  var stickFigY = PHONE_Y + PHONE_H / 2 + 180;
+  s += stickFigure(PHONE_X, stickFigY, lerp(1, 0.8, morphPhase), 0, 0, false, phoneOp); // Fades out
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.9, smooth(u));
+  var driftY = lerp(0, -50, smooth(u));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  // Data stream background
+  s += rrect(CX, CY - 100, W - 100, BOT - TOP, 0, BLUE, 0.2);
+
+  // Central processing unit
+  var unitX = CX, unitY = CY + 100;
+  var unitW = 400, unitH = 300;
+  s += rrect(unitX, unitY, unitW, unitH, 30, BLUE, 0.6);
+
+  // Internal connections highlighting
+  var numConnections = 8;
+  for (var i = 0; i < numConnections; i++) {
+    var connPhase = (u * 1.5 + rnd(i) * 0.5) % 1;
+    var connOp = pulse(connPhase, 0.5, 0.4);
+    var x1 = unitX - unitW / 2 + rnd(i + 10) * unitW;
+    var y1 = unitY - unitH / 2 + rnd(i + 20) * unitH;
+    var x2 = unitX - unitW / 2 + rnd(i + 30) * unitW;
+    var y2 = unitY - unitH / 2 + rnd(i + 40) * unitH;
+    var connCol = (rnd(i + 50) < 0.3) ? CORAL : AMBER; // More coral connections
+    s += line(x1, y1, x2, y2, connCol, 4, connOp * 0.8);
+  }
+
+  // "Pterodactyl" reappears, linked to "how are you"
+  var pterodactylOp = ramp(u, 0.3, 0.6);
+  var pterodactylY = lerp(unitY + unitH / 2 + 100, unitY - 50, easeOut(ramp(u, 0.3, 0.6)));
+  var pterodactylX = lerp(CX - 200, CX + 100, easeOut(ramp(u, 0.3, 0.6)));
+  if (pterodactylOp > 0.05) {
+    s += abstractWord(pterodactylX, pterodactylY, 40, CORAL, 'pterodactyl', pterodactylOp);
+    // Link to "how are you" (abstract words)
+    var howAreYouY = unitY - 150;
+    var linkOp = pterodactylOp * 0.7;
+    s += howAreYouPhrase(CX - 150, howAreYouY, 25, AMBER, linkOp, linkOp);
+    s += line(pterodactylX, pterodactylY, CX - 150, howAreYouY, CORAL, 5, linkOp);
+  }
+
+  // Stick figure observing (faintly)
+  s += stickFigure(CX + 300, BOT - 100, 0.7, 0, 0, false, 0.3);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var morphPhase = smooth(ramp(u, 0.3, 0.7)); // 0 = stream, 1 = phone
+  var streamOp = 1 - morphPhase;
+  var phoneOp = morphPhase;
+
+  // Data stream dissolving
+  if (streamOp > 0.02) {
+    var streamY = lerp(CY - 100, CY, streamOp);
+    var streamH = lerp(BOT - TOP, SCREEN_H, streamOp);
+    var streamW = lerp(W - 100, SCREEN_W, streamOp);
+    var streamRad = lerp(0, 40, streamOp);
+    s += rrect(CX, streamY, streamW, streamH, streamRad, BLUE, streamOp * 0.2); // Background blue stream
+    var unitX = CX, unitY = CY + 100;
+    var unitW = 400, unitH = 300;
+    s += rrect(unitX, unitY, unitW, unitH, 30, BLUE, streamOp * 0.6); // Central processing unit
+  }
+
+  // Phone frame reforming
+  if (phoneOp > 0.02) {
+    var phoneScale = lerp(0.8, 1, morphPhase);
+    s += '<g ' + camera(phoneScale, 0, lerp(-100, 0, morphPhase)) + '>';
+    s += phoneFrame(PHONE_X, PHONE_Y, PHONE_W, PHONE_H, 60, WHITE, lerp(2, 10, morphPhase), phoneOp);
+    s += phoneScreen(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, 40, '#000000', phoneOp);
+    s += textBox(SCREEN_X, TEXTBOX_Y, SCREEN_W - 60, 100, 20, WHITE, 7, phoneOp);
+    s += howAreYouPhrase(SCREEN_X, SUGGESTION_BUBBLE_Y, 30, AMBER, phoneOp, phoneOp);
+
+    // Suggestion bar with "doing" (amber) and "pterodactyl" (faint coral)
+    s += rrectStroke(SCREEN_X, SUGGESTION_BAR_Y, SCREEN_W - 60, 100, 20, WHITE, 7, phoneOp);
+    s += abstractWord(SCREEN_X - 100, SUGGESTION_BAR_Y, 40, AMBER, 'doing', phoneOp);
+    s += abstractWord(SCREEN_X + 100, SUGGESTION_BAR_Y, 40, CORAL, 'pterodactyl', phoneOp * 0.2); // Faint coral
+
+    // Stick figure smiling, tapping correct word
+    var headTilt = 0;
+    var armAngle = 0;
+    var typing = true; // Simulating tapping the word
+    var stickFigY = PHONE_Y + PHONE_H / 2 + 180;
+    s += stickFigure(PHONE_X, stickFigY, 1, headTilt, armAngle, typing, phoneOp);
+    // Smile line
+    if (phoneOp > 0.5) {
+      s += line(PHONE_X - 10, stickFigY - 90, PHONE_X + 10, stickFigY - 90, WHITE, 5, phoneOp);
+      s += pathTag("M " + (PHONE_X - 15) + " " + (stickFigY - 80) + " Q " + PHONE_X + " " + (stickFigY - 70) + " " + (PHONE_X + 15) + " " + (stickFigY - 80), WHITE, 5, phoneOp);
+    }
+    s += '</g>';
+  }
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure last frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

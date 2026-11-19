@@ -1,0 +1,15 @@
+{
+  "id": "why-online-forms-ask-for-your-middle-name",
+  "slug": "2026-11-19__why-online-forms-ask-for-your-middle-name",
+  "title_working": "Why Online Forms Ask for Your Middle Name",
+  "system": "data validation and de-duplication heuristics",
+  "cluster": "institutions-and-bureaucracy",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-11-19T15:43:35+00:00",
+  "produced_at": "2026-11-19T15:49:51+00:00",
+  "verify": "PASS",
+  "takeaway": "Online forms ask for your middle name not for legal reasons, but to help systems uniquely identify you amidst millions of similar names, preventing costly errors and improving data accuracy.",
+  "animation_source": "llm"
+}

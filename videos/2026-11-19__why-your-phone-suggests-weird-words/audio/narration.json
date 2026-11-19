@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You’re tapping out a quick message, expecting your phone to intuit your next word. You just want to communicate smoothly and efficiently.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "But then, a bizarre, irrelevant word pops up, hijacking your flow. It feels like your phone suddenly speaks a secret, foreign language.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "You wonder if it’s broken, or if you've typed something strange. You try to correct it, feeling a bit exasperated by this digital hiccup.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "The truth is, your phone’s predictive text isn't just learning from *your* chats. It's trained on vast, diverse datasets from across the internet, including formal texts and niche forums.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "This massive input means it sometimes prioritizes statistically 'correct' but contextually 'weird' words. It's not broken; it's just comprehensive, based on impersonal data.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "Now you see the ghost in the machine. It’s not a mind-reader, just a statistical engine. You can guide it or simply ignore its stranger suggestions.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

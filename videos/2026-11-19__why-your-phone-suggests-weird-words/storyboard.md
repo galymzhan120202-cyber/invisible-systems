@@ -1,0 +1,22 @@
+# Why Your Phone Suggests Weird Words
+
+- **System:** Predictive text algorithm biases based on training data
+- **Narrator:** Bright, energetic adult-female voice (natural American English)
+- **Palette:** `signal blue` (system/data processing), `warm amber` (user input/intended words), `coral red` (weird/unintended suggestions)
+- **Hero Element:** A phone screen/text input field, and a suggestion bubble, that morphs into a data stream and back.
+
+| # | Time | Story beat | Stick-figure scene | Motion / camera / transition | English VO | SFX |
+|---|------|------------|--------------------|------------------------------|------------|-----|
+| 1 | 0–10s | **YOU + NEED** | Stick figure types on a phone. An amber-outlined speech bubble appears above, showing "How are you [ ]". | Camera centered on the phone and stick figure. Soft zoom in as the speech bubble forms. | You’re tapping out a quick message, expecting your phone to intuit your next word. You just want to communicate smoothly and efficiently. | `focus.mp3` (2.5s) |
+| 2 | 10–20s | **GO** | The phone's suggestion bar appears below the text input. Instead of a common word, a `coral red` word like "pterodactyl" appears. Stick figure looks confused, head tilting. | Suggestion bar slides in from bottom. The `coral red` word flashes briefly. | But then, a bizarre, irrelevant word pops up, hijacking your flow. It feels like your phone suddenly speaks a secret, foreign language. | `transform.mp3` (12.0s), `drop-thud.mp3` (14.5s) |
+| 3 | 20–30s | **SEARCH** | Stick figure tries to delete the `coral red` word. The word shakes and disappears. A `warm amber` suggestion like "doing" appears tentatively. Stick figure looks slightly exasperated. | Stick figure's finger taps the screen repeatedly. `Coral red` word shrinks, then vanishes. `Warm amber` word fades in. | You wonder if it’s broken, or if you've typed something strange. You try to correct it, feeling a bit exasperated by this digital hiccup. | `click-soft.mp3` (22.0s), `whoosh.mp3` (24.5s), `focus.mp3` (27.0s) |
+| 4 | 30–40s | **FIND** | The phone screen melts into a `signal blue` data stream. Tiny stick figures (representing "users") feed into it. Blocks of text (some `amber` for common phrases, some `coral red` for niche/odd) flow into a central `signal blue` processing unit. | The phone screen deconstructs into flowing data. Camera pans across the data stream, then zooms into the central processing unit. | The truth is, your phone’s predictive text isn't just learning from *your* chats. It's trained on vast, diverse datasets from across the internet, including formal texts and niche forums. | `transform.mp3` (31.0s), `whoosh-fast.mp3` (34.0s), `focus.mp3` (37.5s) |
+| 5 | 40–50s | **TAKE** | Inside the `signal blue` processing unit, connections highlight. `Coral red` lines (representing weird words) are shown to have strong, unexpected statistical links to common `amber` words due to diverse data weighting. The `coral red` "pterodactyl" reappears, linked to "how are you". | Micro-animations within the processing unit show data connections forming and highlighting. The `coral red` word re-emerges and links to an `amber` phrase. | This massive input means it sometimes prioritizes statistically 'correct' but contextually 'weird' words. It's not broken; it's just comprehensive, based on impersonal data. | `stack-collapse.mp3` (42.0s), `focus.mp3` (45.5s) |
+| 6 | 50–60s | **RETURN + CHANGE** | Phone screen reforms. Stick figure types "How are you [ ]". The phone suggests "doing" (`amber`), but also "pterodactyl" (faint `coral red`, easily ignorable). Stick figure smiles knowingly, tapping the correct word. | Screen reconstructs. Stick figure interaction is smooth. A subtle visual distinction (e.g., opacity) between the desired and the strange suggestion. | Now you see the ghost in the machine. It’s not a mind-reader, just a statistical engine. You can guide it or simply ignore its stranger suggestions. | `transform.mp3` (52.0s), `complete-done.mp3` (55.0s), `click-soft.mp3` (57.5s) |
+
+**Continuity map:**
+- **Scene 1 to 2:** The text input field and the stick figure typing persist.
+- **Scene 2 to 3:** The phone screen and suggestion bar remain, with the problematic word being addressed.
+- **Scene 3 to 4:** The phone screen transforms directly into the data stream visualization.
+- **Scene 4 to 5:** The central processing unit remains the focus, now highlighting internal connections.
+- **Scene 5 to 6:** The data visualization reforms back into the phone screen with the stick figure.

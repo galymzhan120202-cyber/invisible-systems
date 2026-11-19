@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why You Always Get Stuck Behind a Slow Walker</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary elements
+var BLUE  = "#4C86F0";              // signal blue  -> system / personal space
+var AMBER = "#F2A93B";              // warm amber   -> YOU / desire
+var CORAL = "#FF5B5B";              // coral red    -> friction / naive model
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, fill) {
+  return '<path d="' + d + '" fill="' + (fill || 'none') + '" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+// Stick figure helper
+function stickFigure(x, y, col, headR, bodyH, armAngle, legAngle, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += dot(x, y - bodyH - headR, headR, col); // Head
+  g += line(x, y - bodyH, x, y, col, 10); // Body
+  // Arms
+  var armLen = bodyH * 0.7;
+  g += line(x, y - bodyH * 0.7, x + Math.cos(armAngle) * armLen, y - bodyH * 0.7 + Math.sin(armAngle) * armLen, col, 8);
+  g += line(x, y - bodyH * 0.7, x - Math.cos(armAngle) * armLen, y - bodyH * 0.7 + Math.sin(armAngle) * armLen, col, 8);
+  // Legs
+  var legLen = bodyH * 0.9;
+  g += line(x, y, x + Math.cos(legAngle) * legLen, y + Math.sin(legAngle) * legLen, col, 10);
+  g += line(x, y, x - Math.cos(legAngle) * legLen, y + Math.sin(legAngle) * legLen, col, 10);
+  g += '</g>';
+  return g;
+}
+
+// Personal space bubble
+function spaceBubble(x, y, r, col, op, sw) {
+  return ring(x, y, r, col, sw || 8, op);
+}
+
+// Path element (hero element)
+function pathGround(y, width, col, sw, op) {
+  return line(CX - width / 2, y, CX + width / 2, y, col, sw, op);
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var pathY = BOT - 180;
+  var pathW = 700;
+  var headR = 30, bodyH = 120; // Figure height ~180px
+  var figureY = pathY - 10; // Figure stands on the path
+
+  // Path (hero element)
+  s += pathGround(pathY, pathW, WHITE, 10, 0.8);
+
+  // YOU stick figure
+  var walkCycle = u * Math.PI * 2; // Full cycle over 10s
+  var armAngle = Math.sin(walkCycle * 2) * 0.4 + Math.PI / 2;
+  var legAngle = Math.sin(walkCycle * 2 + Math.PI / 2) * 0.6 + Math.PI / 2;
+  var bob = Math.sin(walkCycle * 2) * 5; // Subtle up/down bob
+  var figureX = CX + lerp(-200, 0, smooth(u * 0.8)); // Walks into frame and settles
+
+  s += stickFigure(figureX, figureY + bob, AMBER, headR, bodyH, armAngle, legAngle, 1);
+
+  // Personal space bubble (hero element)
+  var bubbleR = lerp(80, 100, smooth(u * 0.5));
+  var pulseOp = 0.2 + 0.1 * Math.sin(u * Math.PI * 4); // Subtle pulse
+  if (u > 0.2) { // Bubble appears after 2s (VO: "personal space bubble moves with you.")
+    s += spaceBubble(figureX, figureY - bodyH / 2 + bob, bubbleR, BLUE, pulseOp, 10);
+  }
+
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var pathY = BOT - 180;
+  var pathW = 700;
+  var headR = 30, bodyH = 120;
+  var figureY = pathY - 10;
+
+  // Path
+  s += pathGround(pathY, pathW, WHITE, 10, 0.8);
+
+  // YOU stick figure
+  var walkCycleYou = u * Math.PI * 3; // Faster walk cycle
+  var armAngleYou = Math.sin(walkCycleYou * 2) * 0.5 + Math.PI / 2;
+  var legAngleYou = Math.sin(walkCycleYou * 2 + Math.PI / 2) * 0.7 + Math.PI / 2;
+  var bobYou = Math.sin(walkCycleYou * 2) * 6;
+  var figureXYou = CX + lerp(0, 50, smooth(u * 0.5)); // YOU tries to speed up
+  var gazeOp = ramp(u, 0.4, 0.6); // Gaze appears when trying to pass
+
+  s += stickFigure(figureXYou, figureY + bobYou, AMBER, headR, bodyH, armAngleYou, legAngleYou, 1);
+  s += spaceBubble(figureXYou, figureY - bodyH / 2 + bobYou, 100, BLUE, 0.2 + 0.1 * Math.sin(u * Math.PI * 6), 10);
+
+  // Slow Walker stick figure
+  var walkCycleWalker = u * Math.PI * 1; // Slower walk cycle
+  var armAngleWalker = Math.sin(walkCycleWalker * 2) * 0.3 + Math.PI / 2;
+  var legAngleWalker = Math.sin(walkCycleWalker * 2 + Math.PI / 2) * 0.5 + Math.PI / 2;
+  var bobWalker = Math.sin(walkCycleWalker * 2) * 4;
+  var figureXWalker = CX + lerp(300, 150, smooth(u)); // Walker appears ahead and moves slower
+
+  s += stickFigure(figureXWalker, figureY + bobWalker, WHITE, headR, bodyH, armAngleWalker, legAngleWalker, 1);
+
+  // Interaction: YOU tries to pass, look ahead
+  if (gazeOp > 0) {
+    s += line(figureXYou + headR, figureY - bodyH - headR + bobYou, figureXYou + headR + 20, figureY - bodyH - headR - 10 + bobYou, WHITE, 7, gazeOp);
+  }
+
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var pathY = BOT - 180;
+  var pathW = 700;
+  var headR = 30, bodyH = 120;
+  var figureY = pathY - 10;
+
+  // Path
+  s += pathGround(pathY, pathW, WHITE, 10, 0.8);
+
+  // YOU stick figure
+  var walkCycleYou = u * Math.PI * 4; // Frantic walk cycle
+  var armAngleYou = Math.sin(walkCycleYou * 2) * 0.6 + Math.PI / 2;
+  var legAngleYou = Math.sin(walkCycleYou * 2 + Math.PI / 2) * 0.8 + Math.PI / 2;
+  var bobYou = Math.sin(walkCycleYou * 2) * 8;
+
+  var weaveAmp = 80;
+  var weaveX = Math.sin(u * Math.PI * 4) * weaveAmp; // Weaving motion
+  var figureXYou = CX + weaveX;
+
+  s += stickFigure(figureXYou, figureY + bobYou, AMBER, headR, bodyH, armAngleYou, legAngleYou, 1);
+  // YOU's bubble slightly fades when frustration/coral is high
+  var youBubbleOp = lerp(0.2 + 0.1 * Math.sin(u * Math.PI * 8), 0.1, pulse(u, 0.2, 0.1) + pulse(u, 0.7, 0.1));
+  s += spaceBubble(figureXYou, figureY - bodyH / 2 + bobYou, 100, BLUE, youBubbleOp, 10);
+
+  // Slow Walker stick figure
+  var walkCycleWalker = u * Math.PI * 1;
+  var armAngleWalker = Math.sin(walkCycleWalker * 2) * 0.3 + Math.PI / 2;
+  var legAngleWalker = Math.sin(walkCycleWalker * 2 + Math.PI / 2) * 0.5 + Math.PI / 2;
+  var bobWalker = Math.sin(walkCycleWalker * 2) * 4;
+  var figureXWalker = CX + 150; // Walker stays relatively fixed ahead
+
+  s += stickFigure(figureXWalker, figureY + bobWalker, WHITE, headR, bodyH, armAngleWalker, legAngleWalker, 1);
+
+  // Coral red aura for Slow Walker's blocking space
+  var auraPulse = pulse(u, 0.2, 0.1) + pulse(u, 0.7, 0.1); // Flashes when YOU tries to pass
+  var auraR = lerp(100, 150, auraPulse);
+  s += spaceBubble(figureXWalker, figureY - bodyH / 2 + bobWalker, auraR, CORAL, 0.15 * auraPulse, 12);
+
+  // Exasperation for YOU
+  var exasperation = ramp(u, 0.4, 0.6);
+  if (exasperation > 0) {
+    s += line(figureXYou, figureY - bodyH * 0.7, figureXYou - 40, figureY - bodyH * 0.7 - 40, WHITE, 8, exasperation);
+    s += line(figureXYou, figureY - bodyH * 0.7, figureXYou + 40, figureY - bodyH * 0.7 - 40, WHITE, 8, exasperation);
+  }
+
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND (Overhead View) */
+function scene4(u) {
+  var s = '';
+  var headR = 20, bodyH = 80; // Smaller figures for overhead
+  var figureYOffset = -bodyH/2; // Center bubble on body
+
+  var scale = lerp(1.0, 0.5, smooth(u)); // Zoom out for overhead view
+  var camY = lerp(0, CY - 300, smooth(u)); // Shift camera up for overhead feel
+
+  s += '<g ' + camera(scale, 0, camY) + '>';
+
+  // Grid of paths (morph from single path)
+  var pathOp = lerp(0.8, 0.2, smooth(u));
+  var gridYSpacing = lerp(0, 200, smooth(u));
+  var numPaths = 5;
+  for (var i = 0; i < numPaths; i++) {
+    var currentPathY = TOP + 200 + i * gridYSpacing;
+    s += pathGround(currentPathY, W * 1.5, WHITE, 6, pathOp);
+  }
+
+  // YOU stick figure (amber)
+  var figureXYou = CX + lerp(0, -100, smooth(u));
+  var figureYYou = TOP + 200 + 2 * gridYSpacing; // YOU on a specific path
+  s += stickFigure(figureXYou, figureYYou, AMBER, headR, bodyH, Math.PI/2, Math.PI/2, 1); // Static pose
+  s += spaceBubble(figureXYou, figureYYou + figureYOffset, 80, BLUE, 0.2, 8);
+
+  // Other walkers (white)
+  var numWalkers = 8;
+  for (var i = 0; i < numWalkers; i++) {
+    var walkerSeed = i + 10;
+    var walkerPathIdx = Math.floor(rnd(walkerSeed) * numPaths);
+    var walkerY = TOP + 200 + walkerPathIdx * gridYSpacing;
+
+    var speedFactor = rnd(walkerSeed + 1) * 0.8 + 0.2; // Some faster, some slower
+    var walkerX = (CX - 300 + (u * 600 * speedFactor + rnd(walkerSeed + 2) * 100));
+    // Loop walkers around the screen horizontally
+    while (walkerX > W + 200) walkerX -= (W + 200);
+    while (walkerX < -200) walkerX += (W + 200);
+
+    var bubbleCol = BLUE;
+    var bubbleOp = 0.2;
+
+    // Highlight interaction: YOU catching up to a slow walker
+    if (walkerPathIdx === 2) { // If on YOU's path
+      var interactionDist = figureXYou - walkerX; // Positive if YOU is ahead
+      if (interactionDist > -150 && interactionDist < 100) { // If walker is just ahead of YOU
+        bubbleCol = CORAL;
+        bubbleOp = lerp(0.2, 0.5, clamp(1 - Math.abs(interactionDist) / 150, 0, 1));
+      }
+    }
+
+    s += stickFigure(walkerX, walkerY, WHITE, headR, bodyH, Math.PI/2, Math.PI/2, 1);
+    s += spaceBubble(walkerX, walkerY + figureYOffset, 80, bubbleCol, bubbleOp, 8);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE (Timeline Graphic) */
+function scene5(u) {
+  var s = '';
+  var pathY = BOT - 180;
+  var pathW = 700;
+  var headR = 30, bodyH = 120;
+  var figureY = pathY - 10;
+
+  // Path fades out
+  s += pathGround(pathY, pathW, WHITE, 10, lerp(0.8, 0.1, smooth(u)));
+
+  // YOU stick figure watches
+  var figureXYou = CX - 300;
+  s += stickFigure(figureXYou, figureY, AMBER, headR, bodyH, Math.PI/2, Math.PI/2, 1);
+  s += line(figureXYou + headR, figureY - bodyH - headR, figureXYou + headR + 30, figureY - bodyH - headR - 10, WHITE, 7, 0.9); // Gaze right
+
+  // Timeline graphic
+  var timelineY = CY - 100;
+  var timelineW = 700;
+  var barH = 60;
+  var markerW = 20;
+
+  // Coral red bar: time stuck behind slow walkers
+  var coralBarLen = lerp(0, timelineW * 0.7, easeOut(ramp(u, 0.1, 0.8)));
+  s += rrect(CX - timelineW / 2 + coralBarLen / 2, timelineY - barH / 2 - 80, coralBarLen, barH, 10, CORAL, 0.9);
+  s += rrectStroke(CX, timelineY - barH / 2 - 80, timelineW, barH, 10, CORAL, 4, 0.3);
+  // Coral marker
+  if (coralBarLen > 0) {
+      s += rrect(CX - timelineW / 2 + coralBarLen, timelineY - barH / 2 - 80, markerW, barH + 20, 5, CORAL, 0.95);
+  }
+
+
+  // Amber dashes: time spent passing faster walkers
+  var amberTimelineY = timelineY + barH / 2 + 80;
+  s += rrectStroke(CX, amberTimelineY, timelineW, barH, 10, AMBER, 4, 0.3);
+  var numDashes = 5;
+  for (var i = 0; i < numDashes; i++) {
+    var dashAppear = ramp(u, 0.2 + i * 0.1, 0.9);
+    if (dashAppear > 0) {
+        var dashX = CX - timelineW / 2 + rnd(i+1) * (timelineW - 100) + 50;
+        var dashLength = 60;
+        s += rrect(dashX, amberTimelineY, dashLength, barH * 0.7, 8, AMBER, dashAppear);
+    }
+  }
+
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var pathY = BOT - 180;
+  var pathW = 700;
+  var headR = 30, bodyH = 120;
+  var figureY = pathY - 10;
+
+  // Path returns to focus
+  s += pathGround(pathY, pathW, WHITE, 10, lerp(0.1, 0.8, smooth(u)));
+
+  // YOU stick figure, confident walk
+  var walkCycle = u * Math.PI * 2;
+  var armAngle = Math.sin(walkCycle * 2) * 0.4 + Math.PI / 2;
+  var legAngle = Math.sin(walkCycle * 2 + Math.PI / 2) * 0.6 + Math.PI / 2;
+  var bob = Math.sin(walkCycle * 2) * 5;
+  var figureX = CX; // Centered, confident
+
+  s += stickFigure(figureX, figureY + bob, AMBER, headR, bodyH, armAngle, legAngle, 1);
+
+  // Personal space bubble, stable and clear
+  s += spaceBubble(figureX, figureY - bodyH / 2 + bob, 100, BLUE, 0.2, 10);
+
+  // Faint other walkers, no longer an obstacle
+  var numOtherWalkers = 3;
+  for (var i = 0; i < numOtherWalkers; i++) {
+    var walkerX = CX + (i % 2 === 0 ? 300 : -300) + Math.sin(u * Math.PI + i) * 50;
+    var walkerY = pathY + 100 + i * 200 - u * 50;
+    if (walkerY < TOP) walkerY += (BOT - TOP);
+    s += stickFigure(walkerX, walkerY, DIM, headR * 0.7, bodyH * 0.7, Math.PI/2, Math.PI/2, 0.3 * lerp(0, 1, smooth(u)));
+    if (u > 0.5) s += spaceBubble(walkerX, walkerY - bodyH * 0.7 / 2, 70, BLUE, 0.1 * lerp(0, 1, smooth(u)), 6);
+  }
+
+  // A subtle "open path" visual cue, an upward arrow
+  var arrowOp = smooth(ramp(u, 0.7, 1.0));
+  if (arrowOp > 0.05) {
+      s += line(CX - 80, TOP + 200, CX, TOP + 100, WHITE, 8, arrowOp * 0.6);
+      s += line(CX + 80, TOP + 200, CX, TOP + 100, WHITE, 8, arrowOp * 0.6);
+      s += line(CX, TOP + 100, CX, TOP + 300, WHITE, 8, arrowOp * 0.6);
+  }
+
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

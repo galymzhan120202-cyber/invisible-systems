@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You're flying through an online form, checking boxes, typing quickly, eager to get to the finish line and move on with your day.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "Then you hit it. That seemingly pointless field: 'Middle Name (optional)'. You pause. Why is this even here? Do I really need to fill it out?",
+    "rate": "+5%",
+    "start": 9.8
+  },
+  {
+    "id": "scene-03",
+    "text": "You probably think it’s some archaic legal requirement, or a way to ensure your full official name is on record. A minor annoyance, but what’s the big deal?",
+    "rate": "+5%",
+    "start": 19.8
+  },
+  {
+    "id": "scene-04",
+    "text": "But the truth is, it's not for *you* at all. It's for the system. Imagine millions of 'John Smith' entries. That middle initial becomes a crucial piece of data.",
+    "rate": "+5%",
+    "start": 29.8
+  },
+  {
+    "id": "scene-05",
+    "text": "Without that extra piece of data, systems struggle to distinguish between individuals, leading to errors, duplicate accounts, and costly manual fixes.",
+    "rate": "+5%",
+    "start": 39.8
+  },
+  {
+    "id": "scene-06",
+    "text": "So next time you type it in, remember: you're not just filling a field. You're helping an invisible system quickly and reliably identify *you*.",
+    "rate": "+5%",
+    "start": 49.8
+  }
+]
