@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Supermarkets Put Expensive Items at Eye Level</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var SHELF_LEFT_X = 200;             // Left edge of the left shelf unit
+var SHELF_RIGHT_X = W - SHELF_LEFT_X; // Right edge of the right shelf unit
+var SHELF_UNIT_WIDTH = 300;         // Width of a single shelf unit
+
+var SHOPPER_Y = 1400;               // Shopper's base Y position
+var EYE_LEVEL_Y = 800;              // Consistent eye-level for items
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary items
+var BLUE  = "#4C86F0";              // signal blue  -> the system / rules
+var AMBER = "#F2A93B";              // warm amber   -> the shopper / desire
+var CORAL = "#FF5B5B";              // coral red    -> expensive items / cost
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, fill, op) {
+  return '<path d="' + d + '" fill="' + (fill || 'none') + '" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* shopper figure: head, body, arms, legs. Pose variations via angles.
+   gazeX, gazeY are relative to head center for eye dots. */
+function stickFigure(x, y, col, headR, bodyH, armAngle, legAngle, gazeX, gazeY, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += dot(x, y - headR - bodyH / 2, headR, col); // Head
+  g += line(x, y - bodyH / 2, x, y + bodyH / 2, col, 8); // Body
+  // Arms
+  g += line(x, y - bodyH / 4, x + Math.cos(armAngle) * headR * 1.8, y - bodyH / 4 + Math.sin(armAngle) * headR * 1.8, col, 8);
+  g += line(x, y - bodyH / 4, x - Math.cos(armAngle) * headR * 1.8, y - bodyH / 4 + Math.sin(armAngle) * headR * 1.8, col, 8);
+  // Legs
+  g += line(x, y + bodyH / 2, x + Math.cos(legAngle) * headR * 1.6, y + bodyH / 2 + Math.sin(legAngle) * headR * 1.6, col, 8);
+  g += line(x, y + bodyH / 2, x - Math.cos(legAngle) * headR * 1.6, y + bodyH / 2 + Math.sin(legAngle) * headR * 1.6, col, 8);
+  // Eyes (small dots inside head)
+  g += dot(x + gazeX, y - headR - bodyH / 2 + gazeY, headR * 0.2, WHITE);
+  g += '</g>';
+  return g;
+}
+
+/* shopping cart: body, handle, wheels */
+function shoppingCart(x, y, col, wheelPhase, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var cartW = 160, cartH = 100, cartR = 12;
+  g += rrectStroke(x, y, cartW, cartH, cartR, col, 10); // Body
+  g += line(x - cartW / 2 + cartR, y - cartH / 2, x - cartW / 2 + cartR, y - cartH / 2 - 40, col, 10); // Handle support
+  g += line(x - cartW / 2 + cartR, y - cartH / 2 - 40, x + cartW / 2 - cartR, y - cartH / 2 - 40, col, 10); // Handle bar
+  // Wheels
+  var wheelR = 15;
+  g += dot(x - cartW / 2 + wheelR * 1.5, y + cartH / 2 + wheelR, wheelR, col);
+  g += dot(x + cartW / 2 - wheelR * 1.5, y + cartH / 2 + wheelR, wheelR, col);
+  // Wheel detail for animation
+  g += line(x - cartW / 2 + wheelR * 1.5, y + cartH / 2 + wheelR,
+            x - cartW / 2 + wheelR * 1.5 + Math.cos(wheelPhase * Math.PI * 2) * wheelR * 0.6,
+            y + cartH / 2 + wheelR + Math.sin(wheelPhase * Math.PI * 2) * wheelR * 0.6, col, 6);
+  g += line(x + cartW / 2 - wheelR * 1.5, y + cartH / 2 + wheelR,
+            x + cartW / 2 - wheelR * 1.5 + Math.cos(wheelPhase * Math.PI * 2) * wheelR * 0.6,
+            y + cartH / 2 + wheelR + Math.sin(wheelPhase * Math.PI * 2) * wheelR * 0.6, col, 6);
+  g += '</g>';
+  return g;
+}
+
+/* generic shelf item box */
+function shelfItem(x, y, w, h, col, op) {
+  return rrect(x, y, w, h, 8, col, op);
+}
+
+/* question mark glyph */
+function questionMark(x, y, size, col, op) {
+  var s = size * 0.5;
+  var d = "M " + (x) + " " + (y - s) +
+          " A " + s + " " + s + " 0 1 1 " + (x + s) + " " + (y) +
+          " L " + (x + s * 0.6) + " " + (y + s * 0.4) +
+          " M " + (x + s * 0.2) + " " + (y + s * 0.8) +
+          " L " + (x + s * 0.2) + " " + (y + s * 1.2);
+  return pathTag(d, col, 10, 'none', op);
+}
+
+/* checkmark glyph */
+function checkmark(x, y, size, col, op) {
+  var s = size * 0.5;
+  var d = "M " + (x - s) + " " + (y + s * 0.2) +
+          " L " + (x - s * 0.2) + " " + (y + s) +
+          " L " + (x + s) + " " + (y - s * 0.6);
+  return pathTag(d, col, 10, 'none', op);
+}
+
+/* arrow glyph */
+function arrow(x, y, size, col, op) {
+  var s = size * 0.5;
+  var d = "M " + x + " " + (y + s) + " L " + x + " " + (y - s) +
+          " M " + (x - s * 0.6) + " " + (y - s * 0.2) + " L " + x + " " + (y - s) + " L " + (x + s * 0.6) + " " + (y - s * 0.2);
+  return pathTag(d, col, 10, 'none', op);
+}
+
+/* coin stack */
+function coin(x, y, r, col, op) {
+  var g = '<g opacity="' + op + '">';
+  g += dot(x, y, r, col); // Top face
+  g += '<ellipse cx="' + x + '" cy="' + (y + r * 0.2) + '" rx="' + r + '" ry="' + r * 0.2 + '" fill="' + col + '" opacity="0.6"/>'; // Bottom edge for depth
+  g += '</g>';
+  return g;
+}
+
+/* persistent faint aisle structure (hero element) */
+function aisleStructure(op) {
+  op = (op == null ? 0.16 : op);
+  var s = '';
+  // Floor perspective lines
+  var floorY = BOT - 80;
+  s += line(SHELF_LEFT_X - SHELF_UNIT_WIDTH/2, floorY, CX - 100, TOP + 100, WHITE, 2, op * 0.6);
+  s += line(SHELF_RIGHT_X + SHELF_UNIT_WIDTH/2, floorY, CX + 100, TOP + 100, WHITE, 2, op * 0.6);
+  s += line(SHELF_LEFT_X, floorY, CX - 50, TOP + 100, WHITE, 2, op * 0.8);
+  s += line(SHELF_RIGHT_X, floorY, CX + 50, TOP + 100, WHITE, 2, op * 0.8);
+  return s;
+}
+
+/* shelf unit with items */
+function shelfUnit(unitX, u, defaultItemColor, highlightY, pulseStrength, op) {
+  var s = '';
+  var shelfYPositions = [TOP + 120, TOP + 400, EYE_LEVEL_Y, BOT - 400, BOT - 120]; // 5 shelves
+  var itemW = 100, itemH = 120;
+  var itemSpacing = 120;
+  var itemsPerShelf = Math.floor(SHELF_UNIT_WIDTH / itemSpacing); // Adjusted for better fit
+
+  for (var i = 0; i < shelfYPositions.length; i++) {
+    var y = shelfYPositions[i];
+    s += line(unitX - SHELF_UNIT_WIDTH / 2, y, unitX + SHELF_UNIT_WIDTH / 2, y, WHITE, 8, op * 0.8); // Horizontal shelf line
+    for (var j = 0; j < itemsPerShelf; j++) {
+      var itemX = unitX - SHELF_UNIT_WIDTH / 2 + itemSpacing / 2 + j * itemSpacing + (rnd(i*10+j*3) * 20 - 10); // Slight random offset
+      var currentItemColor = defaultItemColor || DIM;
+      var currentOp = op;
+      if (y === highlightY) {
+        currentOp = op * (1 + pulseStrength * Math.sin(u * Math.PI * 4));
+      }
+      s += shelfItem(itemX, y - itemH/2 - 10, itemW, itemH, currentItemColor, currentOp);
+    }
+  }
+  return s;
+}
+
+/* zoned shelf unit (Scene 4/6) */
+function zonedShelfUnit(unitX, u, highlightZoneY, op) {
+  var s = '';
+  var zoneHeights = [200, 200, 200, 200, 200]; // Example zone heights
+  var zoneYPositions = [TOP + 220, TOP + 500, EYE_LEVEL_Y, BOT - 400, BOT - 120]; // Center Y of zones
+  
+  for (var i = 0; i < zoneYPositions.length; i++) {
+    var y = zoneYPositions[i];
+    var h = zoneHeights[i];
+    var currentOp = op * 0.2; // Faint blue zones
+
+    if (y === highlightZoneY) {
+      currentOp = op * (0.3 + 0.2 * Math.sin(u * Math.PI * 2)); // Pulsing highlight
+    }
+
+    s += rrect(unitX, y, SHELF_UNIT_WIDTH, h, 10, BLUE, currentOp);
+    s += rrectStroke(unitX, y, SHELF_UNIT_WIDTH, h, 10, WHITE, 4, op * 0.4); // Zone outlines
+  }
+  return s;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+  s += aisleStructure(0.12);
+
+  // Shopper and cart movement
+  var moveX = lerp(CX + 300, CX, smooth(u * 0.8));
+  var wheelPhase = u * 2; // Cart wheels rotate
+  var armAngle = Math.sin(u * Math.PI * 2) * 0.1 + Math.PI * 0.7; // Pushing pose
+  var legAngle = Math.sin(u * Math.PI * 2) * 0.1 + Math.PI * 0.5; // Walking pose
+
+  s += shoppingCart(moveX + 100, SHOPPER_Y + 40, AMBER, wheelPhase, 1);
+  s += stickFigure(moveX, SHOPPER_Y, AMBER, 30, 160, armAngle, legAngle, 0, 0, 1);
+
+  // Simple shelves with generic items
+  s += shelfUnit(SHELF_LEFT_X, u, DIM, 0, 0, 1);
+  s += shelfUnit(SHELF_RIGHT_X, u, DIM, 0, 0, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14);
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+  s += aisleStructure(0.12);
+
+  // Shopper and cart stopped, shopper reaches
+  var reachProgress = smooth(ramp(u, 0.1, 0.4));
+  var armAngle = lerp(Math.PI * 0.7, Math.PI * 0.3, reachProgress); // Reaching arm
+  
+  s += shoppingCart(CX + 100, SHOPPER_Y + 40, AMBER, 0, 1);
+  s += stickFigure(CX, SHOPPER_Y, AMBER, 30, 160, armAngle, Math.PI * 0.5, 0, 0, 1);
+
+  // Shelf items
+  var itemW = 100, itemH = 120;
+  var itemSpacing = 120;
+  var itemsPerShelf = Math.floor(SHELF_UNIT_WIDTH / itemSpacing);
+
+  for (var i = 0; i < 5; i++) {
+    var shelfY = [TOP + 120, TOP + 400, EYE_LEVEL_Y, BOT - 400, BOT - 120][i];
+    for (var j = 0; j < itemsPerShelf; j++) {
+      var itemX = SHELF_LEFT_X - SHELF_UNIT_WIDTH / 2 + itemSpacing / 2 + j * itemSpacing + (rnd(i*10+j*3) * 20 - 10);
+      var itemOp = 1;
+      var itemColor = DIM;
+
+      if (shelfY === EYE_LEVEL_Y && j === 1) { // The target item
+        itemColor = CORAL;
+        var dropProgress = smooth(ramp(u, 0.5, 0.7));
+        var currentItemY = lerp(shelfY - itemH/2 - 10, SHOPPER_Y + 40, dropProgress);
+        var currentItemX = lerp(itemX, CX + 100, dropProgress);
+        itemOp = 1 - dropProgress; // Fade out as it drops
+        s += shelfItem(currentItemX, currentItemY, itemW, itemH, CORAL, itemOp); // Item in transit
+      } else {
+        s += shelfItem(itemX, shelfY - itemH/2 - 10, itemW, itemH, itemColor, itemOp);
+      }
+    }
+  }
+  s += shelfUnit(SHELF_RIGHT_X, u, DIM, 0, 0, 1); // Other side remains generic
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH — noticing the pattern */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += aisleStructure(0.12);
+
+  // Shopper looking around
+  var headTilt = Math.sin(u * Math.PI * 2) * 0.05;
+  s += stickFigure(CX, SHOPPER_Y, AMBER, 30, 160, Math.PI * 0.6, Math.PI * 0.5, headTilt * 10, 0, 1);
+
+  // Shelves with eye-level items highlighted
+  var pulseStrength = Math.sin(u * Math.PI * 4) * 0.5 + 0.5;
+  s += shelfUnit(SHELF_LEFT_X, u, CORAL, EYE_LEVEL_Y, pulseStrength, 1);
+  s += shelfUnit(SHELF_RIGHT_X, u, CORAL, EYE_LEVEL_Y, pulseStrength, 1);
+
+  // Question mark appears
+  var qOp = ramp(u, 0.7, 0.9);
+  s += questionMark(CX, SHOPPER_Y - 200, 80, WHITE, qOp);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND — the system revealed */
+function scene4(u) {
+  var s = '';
+  var transformProgress = smooth(ramp(u, 0.0, 0.3)); // Morph shelves
+  
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += aisleStructure(0.12);
+
+  // Shelves morph from lines to zones
+  if (transformProgress < 1) {
+    // Fading out old shelves
+    s += shelfUnit(SHELF_LEFT_X, u, CORAL, EYE_LEVEL_Y, 0, 1 - transformProgress);
+    s += shelfUnit(SHELF_RIGHT_X, u, CORAL, EYE_LEVEL_Y, 0, 1 - transformProgress);
+  }
+  if (transformProgress > 0) {
+    // Fading in new zoned shelves
+    s += zonedShelfUnit(SHELF_LEFT_X, u, EYE_LEVEL_Y, transformProgress);
+    s += zonedShelfUnit(SHELF_RIGHT_X, u, EYE_LEVEL_Y, transformProgress);
+
+    // Arrow pointing to eye-level zone
+    var arrowOp = ramp(u, 0.5, 0.8);
+    s += arrow(CX + 200, EYE_LEVEL_Y, 80, WHITE, arrowOp);
+  }
+
+  // Shopper observing
+  s += stickFigure(CX, SHOPPER_Y, AMBER, 30, 160, Math.PI * 0.6, Math.PI * 0.5, 0, 0, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE — losing moments stack into a tall coral memory column */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.8, smooth(u));
+  s += '<g ' + camera(scale, 0, lerp(0, 90, smooth(u))) + '>';
+
+  s += zonedShelfUnit(SHELF_LEFT_X, u, EYE_LEVEL_Y, 0.6);
+  s += zonedShelfUnit(SHELF_RIGHT_X, u, EYE_LEVEL_Y, 0.6);
+
+  // Hand reaching for an eye-level item
+  var reachProgress = smooth(ramp(u, 0.0, 0.3));
+  var armX = SHELF_LEFT_X - 50;
+  var armY = lerp(SHOPPER_Y - 100, EYE_LEVEL_Y - 50, reachProgress);
+  s += line(armX, armY, armX + 60, armY + 20, AMBER, 10, 1); // Arm
+  s += dot(armX + 60, armY + 20, 20, AMBER, 1); // Hand
+
+  // The item itself, becoming prominent
+  var itemProminence = smooth(ramp(u, 0.3, 0.6));
+  var itemW = lerp(100, 120, itemProminence);
+  var itemH = lerp(120, 140, itemProminence);
+  s += shelfItem(SHELF_LEFT_X - 50, EYE_LEVEL_Y - 70, itemW, itemH, CORAL, 1);
+
+  // Stack of coins draining away
+  var coinStackX = CX + 200;
+  var coinBaseY = BOT - 200;
+  var numCoins = 8;
+  var drainProgress = smooth(ramp(u, 0.4, 0.8));
+  var visibleCoins = Math.ceil(numCoins * (1 - drainProgress));
+
+  for (var i = 0; i < numCoins; i++) {
+    if (i < visibleCoins) {
+      s += coin(coinStackX, coinBaseY - i * 20, 30, CORAL, 1);
+    } else {
+      // Coins falling away
+      var fallU = clamp((drainProgress - (i / numCoins)) * numCoins, 0, 1);
+      var fallY = lerp(coinBaseY - i * 20, BOT + 50, easeIn(fallU));
+      var fallOp = 1 - fallU;
+      s += coin(coinStackX, fallY, 30, CORAL, fallOp);
+    }
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE — one shared finish line, then snap back to plain lanes */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.8, 0.92, smooth(clamp(u / 0.7, 0, 1)));
+  s += '<g ' + camera(scale, 0, lerp(90, 0, smooth(u))) + '>';
+
+  s += zonedShelfUnit(SHELF_LEFT_X, u, EYE_LEVEL_Y, 0.8);
+  s += zonedShelfUnit(SHELF_RIGHT_X, u, EYE_LEVEL_Y, 0.8);
+
+  // Shopper with confident posture
+  s += stickFigure(CX, SHOPPER_Y, AMBER, 30, 160, Math.PI * 0.6, Math.PI * 0.5, 0, 0, 1);
+
+  // Gaze line sweeping up and down
+  var gazeSweepProgress = smooth(ramp(u, 0.0, 0.6));
+  var gazeY = lerp(BOT - 100, TOP + 100, gazeSweepProgress);
+  var gazeXOffset = Math.sin(gazeSweepProgress * Math.PI * 2) * 50; // Slight side-to-side for scanning
+  s += line(CX + gazeXOffset - 100, gazeY, CX + gazeXOffset + 100, gazeY, AMBER, 8, 0.8);
+
+  // Checkmark appears
+  var checkOp = ramp(u, 0.7, 0.9);
+  s += checkmark(CX, SHOPPER_Y - 200, 80, WHITE, checkOp);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
