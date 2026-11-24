@@ -1,0 +1,15 @@
+{
+  "id": "why-app-notifications-are-urgent",
+  "slug": "2026-11-24__why-app-notifications-are-urgent",
+  "title_working": "Why App Notifications Feel So Urgent",
+  "system": "intermittent reinforcement and attention economy",
+  "cluster": "platforms-and-algorithms",
+  "ratio": "9:16",
+  "theme": "dark",
+  "status": "produced",
+  "created_at": "2026-11-24T17:31:42+00:00",
+  "produced_at": "2026-11-24T17:37:48+00:00",
+  "verify": "PASS",
+  "takeaway": "App notifications are designed to feel urgent through intermittent reinforcement, training you to always check for a potential reward.",
+  "animation_source": "llm"
+}

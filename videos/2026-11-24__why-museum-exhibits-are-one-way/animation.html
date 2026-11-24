@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Museum Exhibits Force You Down One Path</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var BLACK = "#000000";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue  -> system / path
+var AMBER = "#F2A93B";              // warm amber   -> YOU / visitor
+var CORAL = "#FF5B5B";              // coral red    -> frustration / bottleneck
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function chevron(x, y, size, col, op) {
+  var d = "M " + (x - size) + " " + (y + size * 0.55) + " L " + x + " " + (y - size * 0.55) + " L " + (x + size) + " " + (y + size * 0.55);
+  return pathTag(d, col, 14, op);
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* the stick figure: head, body, two arms, two legs */
+// x, y: base position of the figure (feet center)
+// headRot: degrees, horizontal head rotation (0=forward, +ve=right, -ve=left)
+// bodyRot: degrees, horizontal body rotation
+// armPhase: [0,1] for arm swing (0=down, 0.5=up)
+// legPhase: [0,1] for leg swing (0=standing, 0.5=mid-stride)
+function stickFigure(x, y, col, headRot, bodyRot, armPhase, legPhase, op, thought) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ')">';
+
+  // Body and head base
+  var bodyLen = 80;
+  var headRadius = 20;
+
+  // Body rotation
+  var bodyAngleRad = bodyRot * Math.PI / 180;
+  var bodyDx = -bodyLen * Math.sin(bodyAngleRad);
+  var bodyDy = -bodyLen * Math.cos(bodyAngleRad);
+
+  // Body
+  g += line(0, 0, bodyDx, bodyDy, col, 10);
+
+  // Head
+  var headX = bodyDx + headRadius * Math.sin(headRot * Math.PI / 180);
+  var headY = bodyDy - headRadius * Math.cos(headRot * Math.PI / 180);
+  g += dot(headX, headY, headRadius, col);
+
+  // Arms (relative to shoulders, which are at bodyDx*0.8, bodyDy*0.8)
+  var shoulderX = bodyDx * 0.8;
+  var shoulderY = bodyDy * 0.8;
+  var armLen = 50;
+  var armSwing = Math.sin(armPhase * Math.PI * 2) * 30; // Swing angle in degrees
+  
+  // Right arm
+  var rArmAngle = (90 + armSwing) * Math.PI / 180;
+  g += line(shoulderX, shoulderY, shoulderX + armLen * Math.cos(rArmAngle), shoulderY + armLen * Math.sin(rArmAngle), col, 8);
+  // Left arm (opposite swing)
+  var lArmAngle = (90 - armSwing) * Math.PI / 180;
+  g += line(shoulderX, shoulderY, shoulderX - armLen * Math.cos(lArmAngle), shoulderY + armLen * Math.sin(lArmAngle), col, 8);
+
+
+  // Legs (relative to hip, which is at (0,0))
+  var legLen = 60;
+  var legSwing = Math.sin(legPhase * Math.PI * 2) * 20; // Swing angle in degrees
+
+  // Right leg
+  var rLegAngle = (90 + legSwing) * Math.PI / 180;
+  g += line(0, 0, legLen * Math.cos(rLegAngle), legLen * Math.sin(rLegAngle), col, 8);
+  // Left leg (opposite swing)
+  var lLegAngle = (90 - legSwing) * Math.PI / 180;
+  g += line(0, 0, -legLen * Math.cos(lLegAngle), legLen * Math.sin(lLegAngle), col, 8);
+
+  // Thought bubble
+  if (thought && thought.op > 0.05) {
+    var bubbleX = headX + (headRot > 0 ? 50 : -50); // Position bubble to the side of head
+    var bubbleY = headY - 60;
+    var bubbleSize = 30;
+    
+    g += ring(bubbleX, bubbleY, bubbleSize, thought.color, 4, thought.op);
+    if (thought.type === 'smile') {
+      g += line(bubbleX - 10, bubbleY - 5, bubbleX + 10, bubbleY - 5, thought.color, 4, thought.op); // Eyes
+      g += pathTag("M " + (bubbleX - 10) + " " + (bubbleY + 8) + " Q " + bubbleX + " " + (bubbleY + 15) + " " + (bubbleX + 10) + " " + (bubbleY + 8), thought.color, 4, thought.op); // Smile
+    } else if (thought.type === 'frustration') {
+      g += line(bubbleX - 10, bubbleY + 8, bubbleX + 10, bubbleY + 8, thought.color, 4, thought.op); // Mouth
+      g += line(bubbleX - 10, bubbleY - 8, bubbleX - 0, bubbleY - 15, thought.color, 4, thought.op); // Brows
+      g += line(bubbleX + 10, bubbleY - 8, bubbleX + 0, bubbleY - 15, thought.color, 4, thought.op);
+    } else if (thought.type === 'arrow') {
+      g += chevron(bubbleX, bubbleY, 15, thought.color, thought.op);
+    }
+  }
+
+  g += '</g>';
+  return g;
+}
+
+/* Museum path and environment elements */
+function museumPath(u, sceneIdx) {
+  var s = '';
+  var pathCol = BLUE;
+  var pathSW = 10;
+  var pathOpacity = 0.8;
+
+  // Pillars (persistent, but fade/morph)
+  var pillarOp = 0.2;
+  var pillarWidth = 6;
+  var pillarBaseY = BOT - 100;
+  var pillarTopY = TOP + 100;
+  
+  if (sceneIdx === 0) { // S1: Subtle white arrows, pillars
+    var arrowOp = lerp(0.1, 0.6, ramp(u, 0.6, 1.0)); // Arrow brightens
+    var arrowX = CX + 100;
+    var arrowY = CY + 200;
+    s += chevron(arrowX, arrowY, 40, WHITE, arrowOp);
+
+    s += line(CX - 150, pillarBaseY, CX - 150, pillarTopY, WHITE, pillarWidth, pillarOp); // Left pillar
+    s += line(CX + 150, pillarBaseY, CX + 150, pillarTopY, WHITE, pillarWidth, pillarOp); // Right pillar
+    s += line(CX - 300, pillarBaseY + 100, CX - 300, pillarTopY - 100, WHITE, pillarWidth, pillarOp * 0.6); // Far left pillar
+    s += line(CX + 300, pillarBaseY + 100, CX + 300, pillarTopY - 100, WHITE, pillarWidth, pillarOp * 0.6); // Far right pillar
+
+  } else if (sceneIdx === 1) { // S2: Signal blue ropes
+    // Morph from S1 arrow/pillars to S2 ropes
+    var ropeFadeIn = ramp(u, 0.0, 0.3);
+    var pathX1 = CX - 150;
+    var pathX2 = CX + 150;
+    
+    s += line(pathX1, TOP, pathX1, BOT, pathCol, pathSW, pathOpacity * ropeFadeIn);
+    s += line(pathX2, TOP, pathX2, BOT, pathCol, pathSW, pathOpacity * ropeFadeIn);
+
+    // Generic white stick figures behind
+    for (var i = 0; i < 4; i++) {
+        var figY = BOT - 200 - i * 300 - u * 100 + rnd(i) * 50;
+        while (figY < TOP) figY += (BOT - TOP);
+        s += stickFigure(CX - 150 + (i % 2 == 0 ? 50 : -50), figY, WHITE, 0, 0, u * 2 + i, u * 2 + i, 0.6);
+    }
+
+  } else if (sceneIdx === 2) { // S3: Narrower ropes, blockages
+    var narrow = smooth(ramp(u, 0.3, 0.6));
+    var pathX1 = lerp(CX - 150, CX - 100, narrow);
+    var pathX2 = lerp(CX + 150, CX + 100, narrow);
+    s += line(pathX1, TOP, pathX1, BOT, pathCol, pathSW, pathOpacity);
+    s += line(pathX2, TOP, pathX2, BOT, pathCol, pathSW, pathOpacity);
+
+    // Blockages (generic white stick figures forming a slow clump)
+    var blockageY = CY + 200;
+    var clumpOp = ramp(u, 0.4, 0.7);
+    for (var i = 0; i < 5; i++) {
+        var xOffset = Math.sin(rnd(i) * Math.PI * 2) * 40;
+        var yOffset = Math.cos(rnd(i+1) * Math.PI * 2) * 30;
+        s += stickFigure(CX + xOffset, blockageY + yOffset, WHITE, 0, 0, 0, 0, clumpOp);
+    }
+
+  } else if (sceneIdx === 3) { // S4: Overhead flow system
+    var pullBack = smooth(ramp(u, 0.0, 0.3));
+    var pathWidth = lerp(pathSW, 120, pullBack); // Ropes widen to flow bands
+    var pathOp = lerp(pathOpacity, 0.6, pullBack);
+    
+    // Complex flow system (simplified for now as two main bands)
+    s += rrect(CX - 150, CY, pathWidth, BOT - TOP, pathWidth / 2, pathCol, pathOp);
+    s += rrect(CX + 150, CY, pathWidth, BOT - TOP, pathWidth / 2, pathCol, pathOp);
+
+    // Amber dots (visitors) moving smoothly
+    for (var i = 0; i < 15; i++) {
+        var flowY = lerp(BOT, TOP, (u * 0.8 + rnd(i)) % 1);
+        var flowX = (i % 2 === 0) ? CX - 150 : CX + 150;
+        s += dot(flowX + Math.sin(flowY/100 + u*2) * 20, flowY, 12, AMBER, 0.9);
+    }
+    // Dissipating coral red clumps
+    var coralDissipate = 1 - ramp(u, 0.0, 0.2);
+    if (coralDissipate > 0.05) {
+        for (var i = 0; i < 3; i++) {
+            s += dot(CX + Math.sin(rnd(i+5)*10) * 80, CY + Math.cos(rnd(i+6)*10) * 80, 20, CORAL, coralDissipate * 0.7);
+        }
+    }
+
+  } else if (sceneIdx === 4) { // S5: Clear open ropes, exhibits
+    var returnToEyeLevel = smooth(ramp(u, 0.0, 0.3));
+    var pathX1 = lerp(CX - 150, CX - 200, returnToEyeLevel);
+    var pathX2 = lerp(CX + 150, CX + 200, returnToEyeLevel);
+    var pathOp = lerp(0.6, pathOpacity, returnToEyeLevel);
+    s += line(pathX1, TOP, pathX1, BOT, pathCol, pathSW, pathOp);
+    s += line(pathX2, TOP, pathX2, BOT, pathCol, pathSW, pathOp);
+
+    // Exhibits (simple shapes)
+    var exhibitOp = ramp(u, 0.2, 0.6);
+    s += rrectStroke(CX, CY - 300, 160, 200, 10, WHITE, 8, exhibitOp);
+    s += rrectStroke(CX - 250, CY + 100, 120, 150, 8, WHITE, 8, exhibitOp);
+    s += rrectStroke(CX + 250, CY + 200, 100, 120, 6, WHITE, 8, exhibitOp);
+
+  } else if (sceneIdx === 5) { // S6: Guiding arrow fades
+    var fadeOut = smooth(ramp(u, 0.6, 1.0));
+    var pathX1 = CX - 200, pathX2 = CX + 200;
+    s += line(pathX1, TOP, pathX1, BOT, pathCol, pathSW, pathOpacity * (1 - fadeOut));
+    s += line(pathX2, TOP, pathX2, BOT, pathCol, pathSW, pathOpacity * (1 - fadeOut));
+
+    // Rope subtly transforms into a gentle guiding arrow
+    var arrowMorph = ramp(u, 0.2, 0.6);
+    var arrowX = lerp(CX - 200, CX, arrowMorph);
+    var arrowY = lerp(CY, CY - 100, arrowMorph);
+    s += chevron(arrowX, arrowY, lerp(0, 40, arrowMorph), pathCol, arrowMorph * (1 - fadeOut));
+  }
+  return s;
+}
+
+/* Global stick figure resting position */
+var AMBER_FIG_X = CX;
+var AMBER_FIG_Y_REST = CY + 400;
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  // Stick figure looks around, wants to choose.
+  var headRot = lerp(0, Math.sin(u * Math.PI * 2) * 20, smooth(ramp(u, 0.1, 0.5)));
+  var bodyRot = lerp(0, Math.sin(u * Math.PI * 2 + Math.PI/2) * 5, smooth(ramp(u, 0.1, 0.5)));
+  var armPhase = lerp(0, u * 0.5, smooth(ramp(u, 0.1, 0.5))); // Subtle arm movement
+  
+  // Camera subtle pan as the stick figure looks
+  var camPanX = lerp(0, Math.sin(u * Math.PI * 2) * 10, smooth(ramp(u, 0.1, 0.5)));
+  var camPanY = lerp(0, Math.cos(u * Math.PI * 2) * 5, smooth(ramp(u, 0.1, 0.5)));
+
+  s += '<g ' + camera(1.0, camPanX, camPanY) + '>';
+  s += museumPath(u, 0);
+  s += stickFigure(AMBER_FIG_X, AMBER_FIG_Y_REST, AMBER, headRot, bodyRot, armPhase, 0, 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  // Camera tracks the warm amber stick figure.
+  var figMoveY = lerp(AMBER_FIG_Y_REST, CY + 100, smooth(u));
+  var cameraTrackY = lerp(0, AMBER_FIG_Y_REST - (CY + 100), smooth(u)); // Camera moves up to keep figure centered
+  var legPhase = u * 2; // Walking animation
+  var armPhase = u * 2; // Arm swing
+
+  s += '<g ' + camera(1.0, 0, cameraTrackY) + '>';
+  s += museumPath(u, 1);
+  s += stickFigure(AMBER_FIG_X, figMoveY, AMBER, 0, 0, armPhase, legPhase, 1);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  // Amber stick figure stops, turns, coral red 'thought bubbles' or lines briefly appear.
+  var stopTurn = ramp(u, 0.1, 0.3);
+  var headRot = lerp(0, -45, smooth(stopTurn)); // Look back
+  var bodyRot = lerp(0, -10, smooth(stopTurn));
+  var armPhase = lerp(u * 2, 0.5, smooth(stopTurn)); // Arms up in frustration
+  var legPhase = lerp(u * 2, 0, smooth(stopTurn)); // Stop walking
+
+  var frustrationThoughtOp = ramp(u, 0.3, 0.6) * (1 - ramp(u, 0.6, 0.8));
+  var frustrationThought = { type: 'frustration', color: CORAL, op: frustrationThoughtOp };
+
+  // Reluctantly continue
+  var continueMove = ramp(u, 0.7, 1.0);
+  var figMoveY = lerp(CY + 100, CY, smooth(continueMove));
+  var legPhaseContinue = continueMove * 2;
+  var armPhaseContinue = continueMove * 2;
+
+  s += museumPath(u, 2);
+  s += stickFigure(AMBER_FIG_X, figMoveY, AMBER, headRot, bodyRot, armPhaseContinue, legPhaseContinue, 1, frustrationThought);
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  // Camera pulls back to reveal an aerial view.
+  var scale = lerp(1.0, 0.5, smooth(u));
+  var camY = lerp(0, CY - (BOT - TOP) / 2, smooth(u)); // Adjust camera Y to center the path from overhead
+  
+  // Stick figure fades out, becomes amber dots
+  var figOp = 1 - ramp(u, 0.0, 0.2);
+
+  s += '<g ' + camera(scale, 0, camY) + '>';
+  s += museumPath(u, 3);
+  s += stickFigure(AMBER_FIG_X, CY + 100, AMBER, 0, 0, 0, 0, figOp);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  // Back to eye-level. The amber stick figure moves effortlessly.
+  var scale = lerp(0.5, 1.0, smooth(u));
+  var camY = lerp(CY - (BOT - TOP) / 2, 0, smooth(u));
+  
+  // Stick figure fades in from dots
+  var figOp = ramp(u, 0.0, 0.2);
+  var figMoveY = CY + 100;
+  var legPhase = u * 2;
+  var armPhase = u * 2;
+
+  s += '<g ' + camera(scale, 0, camY) + '>';
+  s += museumPath(u, 4);
+  s += stickFigure(AMBER_FIG_X, figMoveY, AMBER, 0, 0, armPhase, legPhase, figOp);
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  // Amber stick figure stands by a signal blue rope. Instead of frustration, they nod knowingly.
+  var figY = AMBER_FIG_Y_REST;
+  var headRot = lerp(0, 10, smooth(ramp(u, 0.2, 0.4))); // Nod
+  var thoughtOp = ramp(u, 0.3, 0.7) * (1 - ramp(u, 0.7, 1.0)); // Smiling thought bubble appears then fades
+  var smileThought = { type: 'smile', color: AMBER, op: thoughtOp };
+
+  s += museumPath(u, 5);
+  s += stickFigure(AMBER_FIG_X, figY, AMBER, headRot, 0, 0, 0, 1, smileThought);
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure last frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

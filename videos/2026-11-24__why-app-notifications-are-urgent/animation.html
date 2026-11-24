@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why App Notifications Feel So Urgent</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var BLACK = "#000000";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue  -> system / rule
+var AMBER = "#F2A93B";              // warm amber   -> YOU / desire
+var CORAL = "#FF5B5B";              // coral red    -> naive model / false signal
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+// Stick figure constants
+var SF_HEAD_R = 40;
+var SF_BODY_H = 120;
+var SF_ARM_L = 80;
+var SF_LEG_L = 90;
+var SF_STROKE = 10;
+var SF_SHOULDER_W = 60;
+
+/* Stick figure:
+   x, y: center of head
+   headAngle: rotation of head (0=forward, positive=right)
+   bodyScaleY: vertical scale of body (1=normal, <1=squashed, >1=stretched)
+   bodyWobble: horizontal displacement of body segments for fragmentation
+   opacity: overall opacity
+   armBend: 0=straight, 1=bent (for reaching)
+   legsBent: 0=straight, 1=bent (for sitting)
+*/
+function stickFigure(x, y, col, headAngle, bodyScaleY, bodyWobble, opacity, armBend, legsBent) {
+  opacity = (opacity == null ? 1 : opacity);
+  headAngle = headAngle == null ? 0 : headAngle;
+  bodyScaleY = bodyScaleY == null ? 1 : bodyScaleY;
+  bodyWobble = bodyWobble == null ? 0 : bodyWobble;
+  armBend = armBend == null ? 0 : armBend;
+  legsBent = legsBent == null ? 0 : legsBent;
+
+  var g = '<g opacity="' + opacity + '">';
+
+  // Head
+  g += dot(x, y, SF_HEAD_R, col);
+
+  // Neck
+  var neckY = y + SF_HEAD_R + 10;
+  g += line(x, y + SF_HEAD_R, x, neckY, col, SF_STROKE);
+
+  // Body
+  var bodyTopY = neckY;
+  var bodyBotY = bodyTopY + SF_BODY_H * bodyScaleY;
+  
+  if (bodyWobble > 0) { // Fragmented body
+    var segH = SF_BODY_H * bodyScaleY / 3;
+    g += line(x - bodyWobble, bodyTopY, x + bodyWobble, bodyTopY + segH, col, SF_STROKE);
+    g += line(x + bodyWobble, bodyTopY + segH, x - bodyWobble, bodyTopY + segH * 2, col, SF_STROKE);
+    g += line(x - bodyWobble, bodyTopY + segH * 2, x + bodyWobble, bodyBotY, col, SF_STROKE);
+  } else { // Normal body
+    g += line(x, bodyTopY, x, bodyBotY, col, SF_STROKE);
+  }
+
+  // Arms
+  var armStartY = neckY + 20;
+  var armMidY = bodyTopY + (SF_BODY_H * bodyScaleY) / 2 + 10;
+  var armXOffset = SF_SHOULDER_W / 2;
+
+  // Left arm
+  var armL1x = x - armXOffset;
+  var armL1y = armStartY;
+  var armL2x = x - armXOffset - (armBend * 30);
+  var armL2y = armMidY;
+  g += line(armL1x, armL1y, armL2x, armL2y, col, SF_STROKE);
+
+  // Right arm
+  var armR1x = x + armXOffset;
+  var armR1y = armStartY;
+  var armR2x = x + armXOffset + (armBend * 30);
+  var armR2y = armMidY;
+  g += line(armR1x, armR1y, armR2x, armR2y, col, SF_STROKE);
+
+  // Legs
+  var legStartY = bodyBotY;
+  var legXOffset = SF_SHOULDER_W / 3;
+
+  // Left leg
+  var legL1x = x - legXOffset;
+  var legL1y = legStartY;
+  var legL2x = x - legXOffset - (legsBent * 20);
+  var legL2y = legStartY + SF_LEG_L - (legsBent * 40);
+  g += line(legL1x, legL1y, legL2x, legL2y, col, SF_STROKE);
+
+  // Right leg
+  var legR1x = x + legXOffset;
+  var legR1y = legStartY;
+  var legR2x = x + legXOffset + (legsBent * 20);
+  var legR2y = legStartY + SF_LEG_L - (legsBent * 40);
+  g += line(legR1x, legR1y, legR2x, legR2y, col, SF_STROKE);
+
+  // Head rotation
+  if (headAngle !== 0) {
+    g = '<g transform="rotate(' + headAngle + ' ' + x + ' ' + y + ')">' + g + '</g>';
+  }
+
+  return g;
+}
+
+/* Notification Bell Icon */
+function bellIcon(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var s = size / 2;
+  var d = "M " + (x - s) + " " + (y - s * 0.4) +
+          " L " + (x - s) + " " + (y + s * 0.6) +
+          " Q " + (x - s * 0.8) + " " + (y + s * 0.9) + " " + x + " " + (y + s) +
+          " Q " + (x + s * 0.8) + " " + (y + s * 0.9) + " " + (x + s) + " " + (y + s * 0.6) +
+          " L " + (x + s) + " " + (y - s * 0.4) +
+          " L " + (x + s * 0.7) + " " + (y - s * 0.7) +
+          " L " + (x - s * 0.7) + " " + (y - s * 0.7) +
+          " Z";
+  var clapper = dot(x, y + s * 0.7, s * 0.15, col, op);
+  return '<g opacity="' + op + '">' + pathTag(d, col, 8) + clapper + '</g>';
+}
+
+/* Slot Machine Lever Icon */
+function leverIcon(x, y, size, col, leverState, op) {
+  op = (op == null ? 1 : op);
+  leverState = clamp(leverState, 0, 1); // 0 = up, 1 = pulled down
+  var s = size / 2;
+  var leverX = x + s * 0.6;
+  var leverY = y - s * 0.4;
+  var handleLen = s * 1.5;
+  var handleAngle = lerp(-30, 40, easeOut(leverState)); // Angle from vertical
+  var handleTipX = leverX + handleLen * Math.sin(handleAngle * Math.PI / 180);
+  var handleTipY = leverY - handleLen * Math.cos(handleAngle * Math.PI / 180);
+
+  var g = '<g opacity="' + op + '">';
+  // Base machine body
+  g += rrect(x, y + s * 0.2, s * 1.2, s * 1.6, s * 0.2, col, op * 0.2);
+  g += rrectStroke(x, y + s * 0.2, s * 1.2, s * 1.6, s * 0.2, col, 8, op);
+
+  // Lever arm
+  g += line(leverX, leverY, handleTipX, handleTipY, col, 10, op);
+  g += dot(handleTipX, handleTipY, s * 0.2, col, op); // Handle knob
+  g += '</g>';
+  return g;
+}
+
+/* Thought Bubble with Question Mark */
+function thoughtBubble(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var bubbleR = size / 2;
+  var tailX = x - bubbleR * 0.8;
+  var tailY = y + bubbleR * 0.6;
+
+  var d = "M " + x + " " + (y - bubbleR) +
+          " A " + bubbleR + " " + bubbleR + " 0 0 1 " + (x + bubbleR) + " " + y +
+          " A " + bubbleR + " " + bubbleR + " 0 0 1 " + x + " " + (y + bubbleR) +
+          " A " + bubbleR + " " + bubbleR + " 0 0 1 " + (x - bubbleR) + " " + y +
+          " A " + bubbleR + " " + bubbleR + " 0 0 1 " + x + " " + (y - bubbleR) +
+          " Z";
+  // Tail
+  d += " M " + (tailX - 20) + " " + (tailY - 20) + " Q " + tailX + " " + tailY + " " + (tailX + 20) + " " + (tailY - 20);
+
+  // Question mark glyph
+  var qmX = x, qmY = y - bubbleR * 0.1;
+  var qmSize = bubbleR * 0.5;
+  var qm = "M " + (qmX - qmSize * 0.2) + " " + (qmY - qmSize * 0.5) +
+           " Q " + (qmX + qmSize * 0.5) + " " + (qmY - qmSize * 0.5) + " " + (qmX + qmSize * 0.5) + " " + (qmY) +
+           " S " + (qmX + qmSize * 0.2) + " " + (qmY + qmSize * 0.3) + " " + (qmX) + " " + (qmY + qmSize * 0.3) +
+           " L " + (qmX) + " " + (qmY + qmSize * 0.4) + " M " + qmX + " " + (qmY + qmSize * 0.6) + " L " + qmX + " " + (qmY + qmSize * 0.7);
+
+  return '<g opacity="' + op + '">' + pathTag(d, col, 8) + pathTag(qm, col, 8) + '</g>';
+}
+
+/* Star glyph */
+function star(x, y, r, col, op) {
+  op = (op == null ? 1 : op);
+  var d = "";
+  for (var i = 0; i < 5; i++) {
+    var angle = Math.PI / 2 + i * Math.PI * 2 / 5;
+    var x1 = x + r * Math.cos(angle);
+    var y1 = y - r * Math.sin(angle);
+    var x2 = x + r * 0.4 * Math.cos(angle + Math.PI / 5);
+    var y2 = y - r * 0.4 * Math.sin(angle + Math.PI / 5);
+    if (i === 0) d += "M " + x1 + " " + y1;
+    else d += " L " + x1 + " " + y1;
+    d += " L " + x2 + " " + y2;
+  }
+  d += " Z";
+  return '<path d="' + d + '" fill="' + col + '" opacity="' + op + '"/>';
+}
+
+/* Desk element */
+function desk(x, y, w, h, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, 15, col, sw);
+  g += line(x - w/2 + sw/2, y + h/2 - 10, x - w/2 + sw/2, y + h/2 + 100, col, sw); // Left leg
+  g += line(x + w/2 - sw/2, y + h/2 - 10, x + w/2 - sw/2, y + h/2 + 100, col, sw); // Right leg
+  g += '</g>';
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+var SF_X = CX;
+var SF_Y = CY + 100; // Stick figure head Y
+var DESK_Y = SF_Y + SF_HEAD_R + SF_BODY_H + SF_LEG_L + 60;
+var DESK_W = 700;
+var DESK_H = 100;
+
+var NOTIF_X = W - 180;
+var NOTIF_Y = TOP + 180;
+var NOTIF_SIZE = 120;
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  // Desk
+  s += desk(CX, DESK_Y, DESK_W, DESK_H, WHITE, 8, 0.7);
+
+  // Stick figure
+  s += stickFigure(SF_X, SF_Y, AMBER, 0, 1, 0, 1, 0.2, 0.8); // Sitting posture, slightly bent arms/legs
+
+  // Focus aura
+  var auraPulse = 0.5 + 0.5 * Math.sin(u * Math.PI * 4);
+  var auraRadius = lerp(180, 220, auraPulse);
+  var auraOpacity = lerp(0.8, 0.1, ramp(u, 0.4, 0.9)); // Fades out towards end
+  s += ring(SF_X, SF_Y + SF_HEAD_R + SF_BODY_H / 2, auraRadius, AMBER, 12, auraOpacity);
+  s += ring(SF_X, SF_Y + SF_HEAD_R + SF_BODY_H / 2, auraRadius * 0.6, AMBER, 8, auraOpacity * 0.6);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14); // Camera shake for "suddenly"
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+
+  // Desk
+  s += desk(CX, DESK_Y, DESK_W, DESK_H, WHITE, 8, 0.7);
+
+  // Stick figure
+  var headTurn = lerp(0, 45, easeOut(ramp(u, 0.3, 0.6))); // Head turns right
+  s += stickFigure(SF_X, SF_Y, AMBER, headTurn, 1, 0, 1, 0.2, 0.8);
+
+  // Notification icon
+  var iconPopScale = lerp(0.1, 1.0, easeOut(ramp(u, 0.05, 0.25))); // Pop in and grow
+  var iconPopOpacity = ramp(u, 0.05, 0.25);
+  s += bellIcon(NOTIF_X, NOTIF_Y, NOTIF_SIZE * iconPopScale, BLUE, iconPopOpacity);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Desk
+  s += desk(CX, DESK_Y, DESK_W, DESK_H, WHITE, 8, 0.7);
+
+  // Stick figure (looking at icon)
+  s += stickFigure(SF_X, SF_Y, AMBER, 45, 1, 0, 1, 0.2, 0.8);
+
+  // Notification icon (static)
+  s += bellIcon(NOTIF_X, NOTIF_Y, NOTIF_SIZE, BLUE, 1);
+
+  // Thought bubble with question mark
+  var bubbleOpacity = lerp(0, 1, ramp(u, 0.0, 0.3));
+  var bubbleScale = lerp(0.5, 1.0, easeOut(ramp(u, 0.0, 0.3)));
+  var bubbleShimmer = Math.sin(u * Math.PI * 6) * 0.1;
+  s += '<g transform="translate(0 0) scale(' + bubbleScale + ' ' + bubbleScale + ') translate(0 0)">';
+  s += thoughtBubble(SF_X + 100, SF_Y - 200, 180, CORAL, bubbleOpacity * (1 + bubbleShimmer));
+  s += '</g>';
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Desk
+  s += desk(CX, DESK_Y, DESK_W, DESK_H, WHITE, 8, 0.7);
+
+  // Stick figure (observing)
+  s += stickFigure(SF_X, SF_Y, AMBER, 0, 1, 0, 1, 0.2, 0.8);
+
+  // Thought bubble dissolves
+  var bubbleDissolve = 1 - ramp(u, 0.0, 0.2);
+  if (bubbleDissolve > 0.02) {
+    s += thoughtBubble(SF_X + 100, SF_Y - 200, 180, CORAL, bubbleDissolve);
+  }
+
+  // Notification icon morphs to lever
+  var morph = ramp(u, 0.2, 0.5); // Morph phase
+  var bellOpacity = 1 - morph;
+  var leverOpacity = morph;
+  var leverPull = ramp(u, 0.6, 0.9); // Lever pull phase
+
+  if (bellOpacity > 0.02) {
+    s += bellIcon(NOTIF_X, NOTIF_Y, NOTIF_SIZE, BLUE, bellOpacity);
+  }
+  if (leverOpacity > 0.02) {
+    s += leverIcon(NOTIF_X, NOTIF_Y, NOTIF_SIZE, BLUE, leverPull, leverOpacity);
+  }
+
+  // Falling dots and stars from lever
+  var dropYOffset = NOTIF_Y + NOTIF_SIZE / 2 + 30;
+  for (var i = 0; i < 8; i++) {
+    var dropPhase = (u * 0.8 + rnd(i * 10) * 0.2) % 1;
+    var dropDelay = rnd(i * 10 + 1) * 0.5;
+    if (u > dropDelay) {
+      var dropU = (u - dropDelay) / (1 - dropDelay);
+      var fallY = lerp(dropYOffset, BOT + 50, easeIn(dropU));
+      var fallX = NOTIF_X + lerp(-40, 40, rnd(i * 10 + 2)) * (1 - dropU);
+      var fallOpacity = 1 - dropU;
+      var isStar = (i % 3 === 0); // Every 3rd is a star
+      if (isStar) {
+        s += star(fallX, fallY, 20, BLUE, fallOpacity * 0.8);
+      } else {
+        s += dot(fallX, fallY, 10, DIM, fallOpacity * 0.7);
+      }
+    }
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.8, smooth(u));
+  s += '<g ' + camera(scale, 0, lerp(0, 90, smooth(u))) + '>';
+
+  // Desk
+  s += desk(CX, DESK_Y, DESK_W, DESK_H, WHITE, 8, 0.7);
+
+  // Stick figure (fragmented attention)
+  var bodyStretch = lerp(1, 1.4, smooth(u));
+  var bodyFragment = lerp(0, 30, smooth(u));
+  var armReach = lerp(0.2, 0.8, smooth(u));
+  s += stickFigure(SF_X, SF_Y, AMBER, 0, bodyStretch, bodyFragment, 1, armReach, 0.8);
+
+  // Slot machine lever (continues dropping shapes)
+  s += leverIcon(NOTIF_X, NOTIF_Y, NOTIF_SIZE, BLUE, 1, 1); // Lever remains pulled
+
+  // Falling dots and stars from lever
+  var dropYOffset = NOTIF_Y + NOTIF_SIZE / 2 + 30;
+  for (var i = 0; i < 8; i++) {
+    var dropPhase = (u * 0.8 + rnd(i * 10) * 0.2) % 1;
+    var dropDelay = rnd(i * 10 + 1) * 0.5;
+    if (u > dropDelay) {
+      var dropU = (u - dropDelay) / (1 - dropDelay);
+      var fallY = lerp(dropYOffset, BOT + 50, easeIn(dropU));
+      var fallX = NOTIF_X + lerp(-40, 40, rnd(i * 10 + 2)) * (1 - dropU);
+      var fallOpacity = 1 - dropU;
+      var isStar = (i % 3 === 0);
+      if (isStar) {
+        s += star(fallX, fallY, 20, BLUE, fallOpacity * 0.8);
+      } else {
+        s += dot(fallX, fallY, 10, DIM, fallOpacity * 0.7);
+      }
+    }
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.8, 0.92, smooth(clamp(u / 0.7, 0, 1)));
+  s += '<g ' + camera(scale, 0, lerp(90, 0, smooth(u))) + '>';
+
+  // Desk
+  s += desk(CX, DESK_Y, DESK_W, DESK_H, WHITE, 8, 0.7);
+
+  // Stick figure restores, looks calmly, then turns away
+  var restoreBodyScale = lerp(1.4, 1, smooth(ramp(u, 0.0, 0.3)));
+  var restoreBodyFragment = lerp(30, 0, smooth(ramp(u, 0.0, 0.3)));
+  var restoreArmReach = lerp(0.8, 0.2, smooth(ramp(u, 0.0, 0.3)));
+  var headTurnAway = lerp(45, -45, easeOut(ramp(u, 0.6, 0.9))); // Turns from icon to left
+  var finalOpacity = lerp(1, 0.8, ramp(u, 0.8, 1.0)); // Slight fade at very end
+
+  s += stickFigure(SF_X, SF_Y, AMBER, headTurnAway, restoreBodyScale, restoreBodyFragment, finalOpacity, restoreArmReach, 0.8);
+
+  // Notification icon transforms back to bell, smaller, neutral
+  var morphBack = ramp(u, 0.2, 0.5);
+  var leverOpacity = 1 - morphBack;
+  var bellOpacity = morphBack;
+  var bellSize = lerp(NOTIF_SIZE, NOTIF_SIZE * 0.6, smooth(ramp(u, 0.5, 0.8)));
+
+  if (leverOpacity > 0.02) {
+    s += leverIcon(NOTIF_X, NOTIF_Y, NOTIF_SIZE, BLUE, 1, leverOpacity);
+  }
+  if (bellOpacity > 0.02) {
+    s += bellIcon(NOTIF_X, NOTIF_Y, bellSize, BLUE, bellOpacity);
+  }
+
+  // Faint intermittent blue flashes in background
+  for (var i = 0; i < 4; i++) {
+    var flashPhase = (u * 0.5 + rnd(i * 100) * 0.5) % 1;
+    var flashOpacity = pulse(flashPhase, 0.5, 0.4) * 0.1;
+    var flashX = lerp(W * 0.2, W * 0.8, rnd(i * 100 + 1));
+    var flashY = lerp(TOP + 200, BOT - 200, rnd(i * 100 + 2));
+    s += dot(flashX, flashY, 50, BLUE, flashOpacity);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You’re deep in focus, absorbed in your task. Your mind is sharp, concentration unwavering. You just want to stay in that productive flow, undisturbed.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "Suddenly, a tiny flicker. A notification pops. You feel an irresistible tug. Focus breaks, you reach for your device.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "Why does that alert feel urgent? You might assume every notification is crucial, a vital piece you can't miss.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "But the real mechanism is intermittent reinforcement. Most notifications are trivial, yet some deliver a true reward. That unpredictability trains you to check every time.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "This system has a cost. Your attention fragments, constantly pulled. You pay with lost focus and anxiety, always waiting for that next hit.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "Tomorrow, the pings will still come. But now you see the hidden machinery: apps aren't just sending messages; they're training you, hooked on the *chance* of reward.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

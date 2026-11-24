@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why You Always Get the Last Parking Spot</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary elements
+var BLUE  = "#4C86F0";              // signal blue  -> parking spot/system
+var AMBER = "#F2A93B";              // warm amber   -> YOU / your car
+var CORAL = "#FF5B5B";              // coral red    -> frustration / naive model
+
+var DUR = 60;
+window.__duration = DUR;
+
+// Parking lot layout constants
+var LOT_COLS = 3;
+var LOT_ROWS = 6;
+var SPOT_W = 160;
+var SPOT_H = 260;
+var LANE_W = 180;
+// Calculate padding to center the lot horizontally
+var LOT_PAD_X = (W - (LOT_COLS * SPOT_W + (LOT_COLS - 1) * LANE_W)) / 2;
+// Calculate padding to center the lot vertically within the TOP/BOT band
+var LOT_PAD_Y = (BOT - TOP - (LOT_ROWS * SPOT_H + (LOT_ROWS - 1) * LANE_W)) / 2;
+
+// Car dimensions (approximate for top-down view)
+var CAR_BODY_W = 130;
+var CAR_BODY_H = 80;
+var CAR_WHEEL_R = 12;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+/* Custom shape builders for this animation */
+
+// A simple car (top-down view)
+function car(x, y, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, CAR_BODY_W, CAR_BODY_H, 16, col); // Body
+  g += dot(x - CAR_BODY_W / 2 + 18, y + CAR_BODY_H / 2 - 10, CAR_WHEEL_R, WHITE); // Front Wheel
+  g += dot(x + CAR_BODY_W / 2 - 18, y + CAR_BODY_H / 2 - 10, CAR_WHEEL_R, WHITE); // Back Wheel
+  g += dot(x - CAR_BODY_W / 2 + 18, y - CAR_BODY_H / 2 + 10, CAR_WHEEL_R, WHITE); // Front Wheel
+  g += dot(x + CAR_BODY_W / 2 - 18, y - CAR_BODY_H / 2 + 10, CAR_WHEEL_R, WHITE); // Back Wheel
+  g += '</g>';
+  return g;
+}
+
+// A stick figure (side view)
+function stickFigure(x, y, scale, pose, col, op) {
+  op = (op == null ? 1 : op);
+  scale = scale || 1;
+  var headR = 20 * scale;
+  var bodyH = 60 * scale;
+  var armL = 40 * scale;
+  var legL = 50 * scale;
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ')">';
+  g += dot(0, -headR - bodyH / 2, headR, col); // Head
+  g += line(0, -bodyH / 2, 0, bodyH / 2, col, 8 * scale); // Body
+
+  switch (pose) {
+    case 1: // Agitated (hands on hips)
+      g += line(0, -bodyH / 4, -armL * 0.7, -bodyH / 4, col, 8 * scale); // Left arm
+      g += line(0, -bodyH / 4, armL * 0.7, -bodyH / 4, col, 8 * scale); // Right arm
+      g += line(0, bodyH / 2, -legL * 0.4, bodyH / 2 + legL, col, 8 * scale); // Left leg
+      g += line(0, bodyH / 2, legL * 0.4, bodyH / 2 + legL, col, 8 * scale); // Right leg
+      break;
+    case 2: // Exasperated (hands up)
+      g += line(0, -bodyH / 4, -armL * 0.8, -bodyH / 4 - armL * 0.8, col, 8 * scale); // Left arm
+      g += line(0, -bodyH / 4, armL * 0.8, -bodyH / 4 - armL * 0.8, col, 8 * scale); // Right arm
+      g += line(0, bodyH / 2, -legL * 0.3, bodyH / 2 + legL, col, 8 * scale); // Left leg
+      g += line(0, bodyH / 2, legL * 0.3, bodyH / 2 + legL, col, 8 * scale); // Right leg
+      break;
+    case 3: // Looking back (body turned, head looking left)
+      g += line(0, -bodyH / 4, -armL * 0.6, -bodyH / 4 + 10 * scale, col, 8 * scale); // Left arm
+      g += line(0, -bodyH / 4, armL * 0.6, -bodyH / 4 + 10 * scale, col, 8 * scale); // Right arm
+      g += line(0, bodyH / 2, -legL * 0.2, bodyH / 2 + legL, col, 8 * scale); // Left leg
+      g += line(0, bodyH / 2, legL * 0.2, bodyH / 2 + legL, col, 8 * scale); // Right leg
+      g += line(0, -headR - bodyH / 2, -headR * 0.8, -headR - bodyH / 2 + headR * 0.4, col, 7 * scale); // Gaze line
+      break;
+    default: // Neutral
+      g += line(0, -bodyH / 4, -armL, -bodyH / 4 + 10 * scale, col, 8 * scale); // Left arm
+      g += line(0, -bodyH / 4, armL, -bodyH / 4 + 10 * scale, col, 8 * scale); // Right arm
+      g += line(0, bodyH / 2, -legL * 0.3, bodyH / 2 + legL, col, 8 * scale); // Left leg
+      g += line(0, bodyH / 2, legL * 0.3, bodyH / 2 + legL, col, 8 * scale); // Right leg
+      break;
+  }
+  g += '</g>';
+  return g;
+}
+
+// A parking spot (rectangle with dashed lines)
+function parkingSpot(x, y, w, h, col, sw, fillCol, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 10, fillCol, op);
+  // Dashed lines for the spot boundary
+  var dashLen = 20, dashGap = 20;
+  g += line(x - w / 2, y - h / 2, x + w / 2, y - h / 2, col, sw, op); // Top line
+  g += line(x - w / 2, y + h / 2, x + w / 2, y + h / 2, col, sw, op); // Bottom line
+  // Left dashed line
+  for (var i = 0; i < h / (dashLen + dashGap); i++) {
+    g += line(x - w / 2, y - h / 2 + i * (dashLen + dashGap), x - w / 2, y - h / 2 + i * (dashLen + dashGap) + dashLen, col, sw, op);
+  }
+  // Right dashed line
+  for (var i = 0; i < h / (dashLen + dashGap); i++) {
+    g += line(x + w / 2, y - h / 2 + i * (dashLen + dashGap), x + w / 2, y - h / 2 + i * (dashLen + dashGap) + dashLen, col, sw, op);
+  }
+  g += '</g>';
+  return g;
+}
+
+// A "filled" parking spot (car placeholder)
+function filledSpot(x, y, w, h, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 10, col, op); // The car body
+  g += dot(x - w / 2 + 15, y + h / 2 - 10, 10, WHITE, op); // Wheel
+  g += dot(x + w / 2 - 15, y + h / 2 - 10, 10, WHITE, op); // Wheel
+  g += dot(x - w / 2 + 15, y - h / 2 + 10, 10, WHITE, op); // Wheel
+  g += dot(x + w / 2 - 15, y - h / 2 + 10, 10, WHITE, op); // Wheel
+  g += '</g>';
+  return g;
+}
+
+// Parking lot grid generator
+function parkingLotGrid(offsetX, offsetY, carDensity, specialSpotIdx, specialSpotCol, specialSpotFillCol, specialSpotOp, excludeCarIdx, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  offsetX = offsetX || 0;
+  offsetY = offsetY || 0;
+
+  var currentX = LOT_PAD_X + SPOT_W / 2 + offsetX;
+  var currentY = TOP + LOT_PAD_Y + SPOT_H / 2 + offsetY;
+
+  for (var r = 0; r < LOT_ROWS; r++) {
+    for (var c = 0; c < LOT_COLS; c++) {
+      var spotIdx = r * LOT_COLS + c;
+      var spotX = currentX + c * (SPOT_W + LANE_W);
+      var spotY = currentY + r * (SPOT_H + LANE_W);
+
+      if (spotIdx === specialSpotIdx) {
+        g += parkingSpot(spotX, spotY, SPOT_W, SPOT_H, specialSpotCol, 8, specialSpotFillCol, specialSpotOp);
+      } else {
+        g += parkingSpot(spotX, spotY, SPOT_W, SPOT_H, WHITE, 8, "#000000", op * 0.2); // Empty spot outline
+        if (rnd(spotIdx) < carDensity && spotIdx !== excludeCarIdx) { // Fill with a car based on density
+          g += filledSpot(spotX, spotY, SPOT_W * 0.8, SPOT_H * 0.7, DIM, op);
+        }
+      }
+    }
+  }
+  g += '</g>';
+  return g;
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var lotScale = lerp(1.1, 1.0, smooth(u * 0.8));
+  var lotOffsetY = lerp(-60, 0, smooth(u * 0.8));
+  
+  // Car enters from bottom-left, moves right, then up into the lane
+  var carEnterProgress = easeOut(u * 0.6);
+  var carX = lerp(-CAR_BODY_W, LOT_PAD_X + SPOT_W + LANE_W / 2, carEnterProgress);
+  var carY = lerp(BOT + CAR_BODY_H, TOP + LOT_PAD_Y + (LOT_ROWS - 1) * (SPOT_H + LANE_W) + LANE_W / 2, carEnterProgress);
+  var carRot = lerp(90, 0, smooth(u * 0.6)); // Start vertical, turn horizontal
+
+  s += '<g ' + camera(lotScale, 0, lotOffsetY) + '>';
+  s += parkingLotGrid(0, 0, 0.85, -1, null, null, null, -1, 1); // Mostly full lot
+  s += '<g transform="rotate(' + carRot + ' ' + carX + ' ' + carY + ')">';
+  s += car(carX, carY, AMBER, 1); // Your car enters
+  s += '</g>';
+  s += '</g>';
+
+  // "Want" chevrons ahead of the car, relative to its path
+  var chevronOp = ramp(u, 0.4, 0.8);
+  for (var c = 0; c < 3; c++) {
+    var cp = (u * 1.5 + c / 3) % 1;
+    var cy = lerp(carY - 100, carY - 200, cp);
+    var cx = carX;
+    s += pathTag("M " + (cx - 20) + " " + (cy + 20) + " L " + cx + " " + (cy - 20) + " L " + (cx + 20) + " " + (cy + 20), AMBER, 10, (1 - cp) * chevronOp);
+  }
+
+  return s;
+}
+
+/* SCENE 2 (10-20s): GO */
+function scene2(u) {
+  var s = '';
+  var carCircleRadius = 200;
+  var carCenterX = CX - 100;
+  var carCenterY = CY + 100;
+  var carAngle = lerp(0, Math.PI * 2 * 1.5, easeOut(u)); // Circle 1.5 times
+  var carX = carCenterX + Math.cos(carAngle) * carCircleRadius;
+  var carY = carCenterY + Math.sin(carAngle) * carCircleRadius;
+  var carRot = carAngle * 180 / Math.PI + 90; // Rotate car to follow path
+
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14); // Agitation shake
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+  s += parkingLotGrid(0, 0, 0.85, -1, null, null, null, -1, 1); // Full lot
+
+  // Simulate empty spots appearing and filling
+  var tempSpotIdx = Math.floor(rnd(Math.floor(u * 10)) * (LOT_COLS * LOT_ROWS));
+  var tempSpotFade = pulse(u * 2, 0.5, 0.2); // Spot appears and fills quickly
+  if (tempSpotFade > 0.1) {
+    var spotX = LOT_PAD_X + SPOT_W / 2 + (tempSpotIdx % LOT_COLS) * (SPOT_W + LANE_W);
+    var spotY = TOP + LOT_PAD_Y + SPOT_H / 2 + Math.floor(tempSpotIdx / LOT_COLS) * (SPOT_H + LANE_W);
+    s += parkingSpot(spotX, spotY, SPOT_W, SPOT_H, BLUE, 8, "#000000", tempSpotFade * 0.5);
+    s += filledSpot(spotX, spotY, SPOT_W * 0.8, SPOT_H * 0.7, DIM, tempSpotFade); // Fills quickly
+  }
+
+  s += '<g transform="rotate(' + carRot + ' ' + carX + ' ' + carY + ')">';
+  s += car(carX, carY, AMBER, 1);
+  s += '</g>';
+
+  // Stick figure inside car, showing agitation
+  var driverX = carX + Math.cos(carAngle + Math.PI/2) * 20; // Offset slightly for driver
+  var driverY = carY + Math.sin(carAngle + Math.PI/2) * 20;
+  s += stickFigure(driverX, driverY, 0.7, 1, WHITE, 0.8); // Agitated pose
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30s): SEARCH */
+function scene3(u) {
+  var s = '';
+  var carCircleRadius = 160;
+  var carCenterX = CX - 100;
+  var carCenterY = CY + 100;
+  var carAngle = lerp(Math.PI * 2 * 1.5, Math.PI * 2 * 2.2, easeOut(u)); // Continue circling
+  var carX = carCenterX + Math.cos(carAngle) * carCircleRadius;
+  var carY = carCenterY + Math.sin(carAngle) * carCircleRadius;
+  var carRot = carAngle * 180 / Math.PI + 90;
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += parkingLotGrid(0, 0, 0.85, -1, null, null, null, -1, 0.8); // Slightly faded lot
+
+  // Coral red streaks/cloud around the car
+  var coralStrength = smooth(ramp(u, 0.1, 0.7)) * (1 - smooth(ramp(u, 0.8, 1.0)));
+  if (coralStrength > 0.05) {
+    var numStreaks = 8;
+    for (var i = 0; i < numStreaks; i++) {
+      var angle = (i / numStreaks) * Math.PI * 2 + u * Math.PI * 0.5;
+      var len = lerp(80, 120, Math.sin(u * 10 + i) * 0.5 + 0.5);
+      var x1 = carX + Math.cos(angle) * CAR_BODY_W * 0.8;
+      var y1 = carY + Math.sin(angle) * CAR_BODY_W * 0.8;
+      var x2 = carX + Math.cos(angle) * (CAR_BODY_W * 0.8 + len);
+      var y2 = carY + Math.sin(angle) * (CAR_BODY_W * 0.8 + len);
+      s += line(x1, y1, x2, y2, CORAL, 10, coralStrength * (0.3 + 0.7 * Math.sin(u * 20 + i) * 0.5 + 0.5));
+    }
+    s += ring(carX, carY, CAR_BODY_W, CORAL, 12, coralStrength * 0.3); // Outer glow
+  }
+
+  s += '<g transform="rotate(' + carRot + ' ' + carX + ' ' + carY + ')">';
+  s += car(carX, carY, AMBER, 1);
+  s += '</g>';
+
+  // Stick figure inside car, exasperated pose
+  var driverX = carX + Math.cos(carAngle + Math.PI/2) * 20;
+  var driverY = carY + Math.sin(carAngle + Math.PI/2) * 20;
+  s += stickFigure(driverX, driverY, 0.7, 2, WHITE, 0.9); // Exasperated pose
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40s): FIND */
+function scene4(u) {
+  var s = '';
+  var targetSpotIdx = LOT_COLS * 3 + 1; // Example spot in the middle
+  var targetSpotX = LOT_PAD_X + SPOT_W / 2 + (targetSpotIdx % LOT_COLS) * (SPOT_W + LANE_W);
+  var targetSpotY = TOP + LOT_PAD_Y + SPOT_H / 2 + Math.floor(targetSpotIdx / LOT_COLS) * (SPOT_H + LANE_W);
+
+  // Car's initial position (from circling in S3 end)
+  var initialCarX = CX - 100 + Math.cos(Math.PI * 2 * 2.2) * 160;
+  var initialCarY = CY + 100 + Math.sin(Math.PI * 2 * 2.2) * 160;
+  var initialCarRot = (Math.PI * 2 * 2.2) * 180 / Math.PI + 90;
+
+  var spotAppear = ramp(u, 0.0, 0.2);
+  var carMove = ramp(u, 0.3, 0.7);
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += parkingLotGrid(0, 0, 0.85, targetSpotIdx, BLUE, "#000000", 0.3, targetSpotIdx, 1); // Lot with one special spot
+
+  // The special spot glowing
+  if (spotAppear > 0) {
+    s += parkingSpot(targetSpotX, targetSpotY, SPOT_W, SPOT_H, BLUE, 8, BLUE, spotAppear * 0.2);
+    s += ring(targetSpotX, targetSpotY, SPOT_W * 0.6, BLUE, 10, spotAppear * (0.5 + 0.5 * Math.sin(u * 30)));
+  }
+
+  // Car moving towards the spot
+  var currentCarX = lerp(initialCarX, targetSpotX, easeOut(carMove));
+  var currentCarY = lerp(initialCarY, targetSpotY, easeOut(carMove));
+  var currentCarRot = lerp(initialCarRot, 0, easeOut(carMove)); // Assume spot is straight ahead
+
+  s += '<g transform="rotate(' + currentCarRot + ' ' + currentCarX + ' ' + currentCarY + ')">';
+  s += car(currentCarX, currentCarY, AMBER, 1);
+  s += '</g>';
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50s): TAKE */
+function scene5(u) {
+  var s = '';
+  var targetSpotIdx = LOT_COLS * 3 + 1;
+  var targetSpotX = LOT_PAD_X + SPOT_W / 2 + (targetSpotIdx % LOT_COLS) * (SPOT_W + LANE_W);
+  var targetSpotY = TOP + LOT_PAD_Y + SPOT_H / 2 + Math.floor(targetSpotIdx / LOT_COLS) * (SPOT_H + LANE_W);
+
+  var zoom = lerp(1.0, 1.4, smooth(u));
+  var panX = lerp(0, CX - targetSpotX, smooth(u));
+  var panY = lerp(0, CY - targetSpotY, smooth(u));
+
+  s += '<g ' + camera(zoom, panX, panY) + '>';
+  s += parkingLotGrid(0, 0, 0.85, targetSpotIdx, BLUE, "#000000", 0.3, targetSpotIdx, 1); // Faded lot, special spot highlighted
+
+  // Car parked in the spot
+  s += car(targetSpotX, targetSpotY, AMBER, 1);
+  s += parkingSpot(targetSpotX, targetSpotY, SPOT_W, SPOT_H, BLUE, 8, BLUE, 0.5); // Blue fill for the spot
+
+  // Stick figure exiting car and looking back
+  var figureX = targetSpotX + CAR_BODY_W / 2 + 40;
+  var figureY = targetSpotY + CAR_BODY_H / 2 + 30;
+  var exitAnim = ramp(u, 0.1, 0.6);
+  var figurePose = (exitAnim < 0.5) ? 0 : 3; // Neutral then looking back
+  var figureOpacity = easeOut(exitAnim);
+  s += stickFigure(figureX, figureY, 1.5, figurePose, WHITE, figureOpacity); // Larger scale for figure outside car
+
+  // Small "accomplishment" sparkle/ring around the spot
+  var sparkle = ramp(u, 0.7, 0.9);
+  if (sparkle > 0) {
+    s += ring(targetSpotX, targetSpotY, SPOT_W * 0.7 + sparkle * 30, WHITE, 6, sparkle * 0.8);
+  }
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60s): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var targetSpotIdx = LOT_COLS * 3 + 1;
+  var targetSpotX = LOT_PAD_X + SPOT_W / 2 + (targetSpotIdx % LOT_COLS) * (SPOT_W + LANE_W);
+  var targetSpotY = TOP + LOT_PAD_Y + SPOT_H / 2 + Math.floor(targetSpotIdx / LOT_COLS) * (SPOT_H + LANE_W);
+
+  var zoom = lerp(1.4, 0.8, smooth(u));
+  var panX = lerp(CX - targetSpotX, 0, smooth(u));
+  var panY = lerp(CY - targetSpotY, 0, smooth(u));
+
+  s += '<g ' + camera(zoom, panX, panY) + '>';
+
+  // Base parking lot with many amber cars
+  s += parkingLotGrid(0, 0, 0.6, -1, null, null, null, -1, 1); // Slightly less dense, more turnover
+
+  // Dynamic spots opening and closing
+  var turnoverSpeed = 10; // How many spots change per second
+  var numDynamicSpots = 5; // Number of spots that will actively change
+  for (var i = 0; i < numDynamicSpots; i++) {
+    var dynamicSpotIdx = Math.floor(rnd(i + 100) * (LOT_COLS * LOT_ROWS));
+    var spotX = LOT_PAD_X + SPOT_W / 2 + (dynamicSpotIdx % LOT_COLS) * (SPOT_W + LANE_W);
+    var spotY = TOP + LOT_PAD_Y + SPOT_H / 2 + Math.floor(dynamicSpotIdx / LOT_COLS) * (SPOT_H + LANE_W);
+
+    var phase = (u * turnoverSpeed + rnd(i + 200)) % 1; // Cycle through phases
+    var spotOpen = pulse(phase, 0.5, 0.4); // Spot is "open" for a period
+
+    if (spotOpen > 0.05) {
+      s += parkingSpot(spotX, spotY, SPOT_W, SPOT_H, BLUE, 8, BLUE, spotOpen * 0.4);
+      s += ring(spotX, spotY, SPOT_W * 0.6, BLUE, 6, spotOpen * 0.6);
+    } else {
+      s += filledSpot(spotX, spotY, SPOT_W * 0.8, SPOT_H * 0.7, DIM, 1); // Filled when not open
+    }
+  }
+
+  // Your car (now one of many)
+  s += car(targetSpotX, targetSpotY, AMBER, 1); // Your car remains parked
+  s += parkingSpot(targetSpotX, targetSpotY, SPOT_W, SPOT_H, BLUE, 8, BLUE, 0.5); // Your spot remains blue
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
