@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You start a new online game, ready to explore its vast world and level up. Your character is fresh, eager to unlock abilities and see what awaits.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "Soon, a notification: 'Daily Quests!' Complete simple tasks for a bonus. It feels like a chore, but the tempting rewards pull you in.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "Why do games do this? You might think it's just extra loot, a simple thank you. But there's a deeper reason for these daily tasks.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "This isn't just rewards; it's about forming a habit. By offering predictable, small tasks daily, games create a consistent loop. Complete a task, get a reward, reinforcing the cycle.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "Before you know it, logging in becomes automatic. Even on busy days, you might hop on for five minutes to clear quests. It's less about deep engagement, more routine.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "Game designers know consistency builds loyalty. Next time you log in, remember: 'daily tasks' aren't just gifts. They're carefully crafted hooks for your attention.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Your Phone Knows What You Want to Say</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / the rule
+var AMBER = "#F2A93B";              // warm amber   -> YOU / your data
+var CORAL = "#FF5B5B";              // coral red    -> the naive model / false signal
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathFill(d, col, op) {
+  return '<path d="' + d + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom elements ---------- */
+// A simple stick figure
+function stickFigure(x, y, scale, headTilt, armAngle, legAngle, bodyColor, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '" transform="translate(' + x + ' ' + y + ') scale(' + scale + ')">';
+  // Head
+  g += dot(0, -60, 20, bodyColor);
+  // Body
+  g += line(0, -40, 0, 0, bodyColor, 8);
+  // Arms
+  var armY = -20;
+  var armX = 30 * Math.cos(armAngle);
+  var armDY = 30 * Math.sin(armAngle);
+  g += line(0, armY, armX, armY + armDY, bodyColor, 8);
+  g += line(0, armY, -armX, armY + armDY, bodyColor, 8);
+  // Legs
+  var legY = 0;
+  var legX = 25 * Math.cos(legAngle);
+  var legDY = 25 * Math.sin(legAngle);
+  g += line(0, legY, legX, legY + legDY, bodyColor, 8);
+  g += line(0, legY, -legX, legY + legDY, bodyColor, 8);
+  // Head tilt (simplified gaze line)
+  if (headTilt !== 0) {
+    g += line(0, -60, 20 * Math.sin(headTilt), -60 + 20 * Math.cos(headTilt), bodyColor, 7);
+  }
+  g += '</g>';
+  return g;
+}
+
+// A smartphone held by a stick figure
+function phone(x, y, w, h, screenContent, phoneColor, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  // Phone body
+  g += rrect(x, y, w, h, 20, phoneColor, op);
+  // Screen
+  g += rrect(x, y, w * 0.88, h * 0.9, 14, "#000000", op); // Black screen
+  // Screen content
+  g += '<g transform="translate(' + x + ' ' + y + ')">' + screenContent + '</g>';
+  g += '</g>';
+  return g;
+}
+
+// A text bubble, can contain suggestions
+function textBubble(x, y, w, h, content, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, 18, WHITE, 6, op);
+  g += content;
+  g += '</g>';
+  return g;
+}
+
+// Custom question mark glyph
+function questionMark(x, y, size, col, sw, op) {
+  var d = "M " + x + " " + (y - size * 0.5) +
+          " A " + (size * 0.3) + " " + (size * 0.3) + " 0 1 1 " + (x + size * 0.3) + " " + (y - size * 0.1) +
+          " L " + (x + size * 0.05) + " " + (y + size * 0.15) +
+          " M " + x + " " + (y + size * 0.35) + " L " + x + " " + (y + size * 0.45);
+  return pathTag(d, col, sw, op);
+}
+
+// Custom ear glyph
+function earIcon(x, y, size, col, sw, op) {
+  var d = "M " + (x - size * 0.3) + " " + (y - size * 0.4) +
+          " Q " + (x - size * 0.6) + " " + y + " " + (x - size * 0.3) + " " + (y + size * 0.4) +
+          " M " + (x - size * 0.2) + " " + (y - size * 0.2) +
+          " Q " + (x - size * 0.4) + " " + y + " " + (x - size * 0.2) + " " + (y + size * 0.2);
+  return pathTag(d, col, sw, op);
+}
+
+// Custom eye glyph
+function eyeIcon(x, y, size, col, sw, op) {
+  var d = "M " + (x - size * 0.5) + " " + y +
+          " Q " + x + " " + (y - size * 0.4) + " " + (x + size * 0.5) + " " + y +
+          " Q " + x + " " + (y + size * 0.4) + " " + (x - size * 0.5) + " " + y +
+          " Z";
+  var pupil = dot(x, y, size * 0.15, col, op);
+  return pathTag(d, col, sw, op) + pupil;
+}
+
+// Custom CPU/processing unit glyph
+function cpuIcon(x, y, size, col, sw, op) {
+  var g = '';
+  g += rrect(x, y, size, size, size * 0.1, col, op);
+  g += rrect(x, y, size * 0.6, size * 0.6, size * 0.08, "#000000", op); // Inner black square
+  g += line(x - size * 0.3, y - size * 0.4, x - size * 0.3, y - size * 0.2, col, sw, op);
+  g += line(x + size * 0.3, y - size * 0.4, x + size * 0.3, y - size * 0.2, col, sw, op);
+  g += line(x - size * 0.3, y + size * 0.4, x - size * 0.3, y + size * 0.2, col, sw, op);
+  g += line(x + size * 0.3, y + size * 0.4, x + size * 0.3, y + size * 0.2, col, sw, op);
+  return g;
+}
+
+// A grid of lines for data representation
+function dataGrid(x, y, w, h, density, col, sw, op) {
+  var g = '';
+  var dx = w / density, dy = h / density;
+  for (var i = 0; i <= density; i++) {
+    g += line(x - w / 2 + i * dx, y - h / 2, x - w / 2 + i * dx, y + h / 2, col, sw, op);
+    g += line(x - w / 2, y - h / 2 + i * dy, x + w / 2, y - h / 2 + i * dy, col, sw, op);
+  }
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var figureX = CX;
+  var figureY = CY + 300;
+  var phoneW = 200, phoneH = 380;
+  var phoneX = CX + 100, phoneY = CY + 200;
+  var bubbleW = 320, bubbleH = 180;
+  var bubbleX = phoneX, bubbleY = phoneY - 200;
+
+  // Camera zoom and pan for intro
+  var camScale = lerp(1.5, 1.0, smooth(u * 0.8));
+  var camTX = lerp(phoneX - CX, 0, smooth(u * 0.8));
+  var camTY = lerp(phoneY - CY, 0, smooth(u * 0.8));
+
+  s += '<g ' + camera(camScale, camTX, camTY) + '>';
+
+  // Stick figure typing slowly
+  var armAngle = lerp(Math.PI * 0.8, Math.PI * 0.7, smooth(u * 2) % 1);
+  var legAngle = Math.sin(u * Math.PI * 0.5) * 0.1;
+  s += stickFigure(figureX, figureY, 1.0, 0, armAngle, legAngle, WHITE, 1);
+
+  // Phone held by figure
+  s += phone(phoneX, phoneY, phoneW, phoneH, '', WHITE, 1);
+
+  // Text bubble above phone
+  var bubbleContent = '';
+  var lineCount = Math.floor(ramp(u, 0.4, 0.9) * 3);
+  for (var i = 0; i < lineCount; i++) {
+    bubbleContent += rrect(0, -50 + i * 40, lerp(100, 200, rnd(i)), 12, 6, WHITE, 0.6);
+  }
+  s += textBubble(bubbleX, bubbleY, bubbleW, bubbleH, bubbleContent, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var figureX = CX;
+  var figureY = CY + 300;
+  var phoneW = 200, phoneH = 380;
+  var phoneX = CX + 100, phoneY = CY + 200;
+  var bubbleW = 320, bubbleH = 180;
+  var bubbleX = phoneX, bubbleY = phoneY - 200;
+
+  // Camera zoom into text bubble
+  var camScale = lerp(1.0, 1.6, smooth(u * 0.8));
+  var camTX = lerp(0, bubbleX - CX, smooth(u * 0.8));
+  var camTY = lerp(0, bubbleY - CY, smooth(u * 0.8));
+  s += '<g ' + camera(camScale, camTX, camTY) + '>';
+
+  // Stick figure, still typing
+  var armAngle = lerp(Math.PI * 0.7, Math.PI * 0.6, smooth(u * 2) % 1);
+  var legAngle = Math.sin(u * Math.PI * 0.5) * 0.1;
+  s += stickFigure(figureX, figureY, 1.0, 0, armAngle, legAngle, WHITE, 1);
+
+  // Phone
+  s += phone(phoneX, phoneY, phoneW, phoneH, '', WHITE, 1);
+
+  // Text bubble with suggestions
+  var bubbleContent = '';
+  var suggestionFade = ramp(u, 0.1, 0.4);
+  var complexSuggest = ramp(u, 0.5, 0.9);
+
+  // Simple white suggestions
+  bubbleContent += rrect(0, -50, 180, 12, 6, WHITE, suggestionFade * 0.8);
+  bubbleContent += rrect(0, -10, 120, 12, 6, WHITE, suggestionFade * 0.8);
+  bubbleContent += rrect(0, 30, 150, 12, 6, WHITE, suggestionFade * 0.8);
+
+  // Complex amber phrases
+  var phraseY = -60;
+  var phraseH = 26;
+  var phraseOpacity = complexSuggest;
+  var phraseWidth = lerp(0, 280, easeOut(complexSuggest));
+
+  bubbleContent += rrect(0, phraseY, phraseWidth, phraseH, 10, AMBER, phraseOpacity);
+  bubbleContent += rrect(0, phraseY + 40, phraseWidth * 0.8, phraseH, 10, AMBER, phraseOpacity);
+  bubbleContent += rrect(0, phraseY + 80, phraseWidth * 0.9, phraseH, 10, AMBER, phraseOpacity);
+  bubbleContent += rrect(0, phraseY + 120, phraseWidth * 0.7, phraseH, 10, AMBER, phraseOpacity);
+
+  s += textBubble(bubbleX, bubbleY, bubbleW, bubbleH, bubbleContent, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var figureX = CX;
+  var figureY = CY + 300;
+  var phoneW = 200, phoneH = 380;
+  var phoneX = CX + 100, phoneY = CY + 200;
+  var bubbleW = 320, bubbleH = 180;
+  var bubbleX = phoneX, bubbleY = phoneY - 200;
+
+  // Camera pulls back to figure, then focuses on icons
+  var camScale = lerp(1.6, 1.0, smooth(ramp(u, 0.0, 0.3)));
+  var camTX = lerp(bubbleX - CX, 0, smooth(ramp(u, 0.0, 0.3)));
+  var camTY = lerp(bubbleY - CY, 0, smooth(ramp(u, 0.0, 0.3)));
+  s += '<g ' + camera(camScale, camTX, camTY) + '>';
+
+  // Stick figure perplexed
+  var headTilt = lerp(0, Math.PI / 6, smooth(ramp(u, 0.2, 0.5)));
+  var armAngle = Math.PI * 0.7; // Holding phone
+  var legAngle = 0;
+  s += stickFigure(figureX, figureY, 1.0, headTilt, armAngle, legAngle, WHITE, 1);
+
+  // Phone
+  s += phone(phoneX, phoneY, phoneW, phoneH, '', WHITE, 1);
+
+  // Text bubble with coral question mark and naive icons
+  var bubbleContent = '';
+  var qMarkFade = (0.5 + 0.5 * Math.sin(u * Math.PI * 8)) * ramp(u, 0.0, 0.5) * (1 - ramp(u, 0.6, 0.9));
+  bubbleContent += questionMark(0, 0, 80, CORAL, 10, qMarkFade);
+
+  var iconFade = ramp(u, 0.4, 0.7) * (1 - ramp(u, 0.8, 1.0));
+  var iconOffset = Math.sin(u * Math.PI * 6) * 10;
+  bubbleContent += earIcon(-60 + iconOffset, 0, 60, CORAL, 8, iconFade * 0.8);
+  bubbleContent += eyeIcon(60 - iconOffset, 0, 60, CORAL, 8, iconFade * 0.8);
+
+  s += textBubble(bubbleX, bubbleY, bubbleW, bubbleH, bubbleContent, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var figureX = CX;
+  var figureY = CY + 300;
+  var phoneW = 200, phoneH = 380;
+  var phoneX = CX + 100, phoneY = CY + 200;
+  var screenW = phoneW * 0.88, screenH = phoneH * 0.9;
+
+  // Camera focuses on phone screen
+  var camScale = lerp(1.0, 1.8, smooth(ramp(u, 0.0, 0.3)));
+  var camTX = lerp(0, phoneX - CX, smooth(ramp(u, 0.0, 0.3)));
+  var camTY = lerp(0, phoneY - CY, smooth(ramp(u, 0.0, 0.3)));
+  s += '<g ' + camera(camScale, camTX, camTY) + '>';
+
+  // Stick figure fades out
+  s += stickFigure(figureX, figureY, 1.0, 0, Math.PI * 0.7, 0, WHITE, 1 - ramp(u, 0.0, 0.2));
+
+  // Phone held by figure
+  var screenContent = '';
+  var gridOpacity = ramp(u, 0.2, 0.5);
+  var cpuOpacity = ramp(u, 0.4, 0.7);
+  var dataStreamOpacity = ramp(u, 0.5, 0.9);
+
+  // Data grid on phone screen
+  screenContent += dataGrid(0, 0, screenW, screenH, 8, BLUE, 2, gridOpacity * 0.6);
+
+  // CPU icon
+  screenContent += cpuIcon(0, 0, 60, BLUE, 4, cpuOpacity);
+
+  // Data streams from figure (represented by amber dots)
+  var streamCount = 8;
+  for (var i = 0; i < streamCount; i++) {
+    var phase = (u * 1.5 + rnd(i)) % 1;
+    var startX = lerp(-screenW / 2 - 80, -screenW / 2 + 20, easeOut(phase));
+    var startY = lerp(screenH / 2 + 100, screenH / 2 - 20, easeOut(phase));
+    
+    var streamX = lerp(startX, 0, smooth(phase));
+    var streamY = lerp(startY, 0, smooth(phase));
+    var streamOp = dataStreamOpacity * (1 - phase);
+
+    screenContent += dot(streamX, streamY, 8, AMBER, streamOp);
+  }
+
+  s += phone(phoneX, phoneY, phoneW, phoneH, screenContent, WHITE, 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var phoneW = 200, phoneH = 380;
+  var phoneX = CX + 100, phoneY = CY + 200;
+  var screenW = phoneW * 0.88, screenH = phoneH * 0.9;
+
+  // Camera pans across intricate data network
+  var expandScale = lerp(1.8, 0.8, smooth(ramp(u, 0.0, 0.3)));
+  var expandTX = lerp(phoneX - CX, 0, smooth(ramp(u, 0.0, 0.3)));
+  var expandTY = lerp(phoneY - CY, 0, smooth(ramp(u, 0.0, 0.3)));
+
+  s += '<g ' + camera(expandScale, expandTX, expandTY) + '>';
+
+  // Data grid expands to fill screen
+  var gridScale = lerp(screenW / W, 1.0, smooth(ramp(u, 0.0, 0.5)));
+  var gridOpacity = lerp(0.6, 1.0, smooth(ramp(u, 0.0, 0.5)));
+  var gridSW = lerp(2, 4, smooth(ramp(u, 0.0, 0.5)));
+
+  s += '<g transform="translate(' + CX + ' ' + CY + ') scale(' + gridScale + ') translate(' + (-CX) + ' ' + (-CY) + ')">';
+  s += dataGrid(CX, CY, W, H, 10, BLUE, gridSW, gridOpacity);
+  s += '</g>';
+
+  // Amber dots (user inputs) creating complex blue lines
+  var dotCount = 20;
+  var lineCount = 10;
+  var dotFade = ramp(u, 0.1, 0.6);
+  var lineFade = ramp(u, 0.3, 0.8);
+
+  // Small amber stick figure icon at the center
+  var figScale = lerp(0, 0.5, smooth(ramp(u, 0.6, 0.9)));
+  s += stickFigure(CX, CY, figScale, 0, Math.PI * 0.7, 0, AMBER, dotFade);
+
+  for (var i = 0; i < dotCount; i++) {
+    var dx = rnd(i * 3) * W * 0.8 - W * 0.4;
+    var dy = rnd(i * 5) * H * 0.8 - H * 0.4;
+    s += dot(CX + dx, CY + dy, 10, AMBER, dotFade * (0.5 + 0.5 * rnd(i * 7)));
+  }
+
+  for (var j = 0; j < lineCount; j++) {
+    var x1 = CX + (rnd(j * 2) * W - W / 2) * 0.8;
+    var y1 = CY + (rnd(j * 3) * H - H / 2) * 0.8;
+    var x2 = CX + (rnd(j * 5) * W - W / 2) * 0.8;
+    var y2 = CY + (rnd(j * 7) * H - H / 2) * 0.8;
+    s += line(x1, y1, x2, y2, BLUE, 5, lineFade * (0.5 + 0.5 * rnd(j * 9)));
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var figureX = CX;
+  var figureY = CY + 300;
+  var phoneW = 200, phoneH = 380;
+  var phoneX = CX + 100, phoneY = CY + 200;
+  var bubbleW = 320, bubbleH = 180;
+  var bubbleX = phoneX, bubbleY = phoneY - 200;
+  var screenW = phoneW * 0.88, screenH = phoneH * 0.9;
+
+  // Data grid collapses back into phone screen
+  var collapseScale = lerp(0.8, 1.0, smooth(ramp(u, 0.0, 0.4)));
+  var collapseTX = lerp(0, 0, smooth(ramp(u, 0.0, 0.4))); // No camera pan for this part
+  var collapseTY = lerp(0, 0, smooth(ramp(u, 0.0, 0.4)));
+
+  s += '<g ' + camera(collapseScale, collapseTX, collapseTY) + '>';
+
+  // Collapsing grid
+  var gridCollapse = smooth(ramp(u, 0.0, 0.4));
+  var currentGridScale = lerp(1.0, screenW / W, gridCollapse);
+  var currentGridOpacity = lerp(1.0, 0.6, gridCollapse);
+  var currentGridSW = lerp(4, 2, gridCollapse);
+
+  s += '<g transform="translate(' + CX + ' ' + CY + ') scale(' + currentGridScale + ') translate(' + (-CX) + ' ' + (-CY) + ')">';
+  s += dataGrid(CX, CY, W, H, 10, BLUE, currentGridSW, currentGridOpacity);
+  s += '</g>';
+
+  // Phone appears as grid collapses into it
+  var phoneOpacity = ramp(u, 0.3, 0.6);
+  var phoneScreenContent = '';
+
+  // Fluid, accurate amber suggestions
+  var suggestionFade = ramp(u, 0.6, 0.9);
+  var phraseH = 26;
+  phoneScreenContent += rrect(0, -60, 260, phraseH, 10, AMBER, suggestionFade);
+  phoneScreenContent += rrect(0, -20, 200, phraseH, 10, AMBER, suggestionFade);
+  phoneScreenContent += rrect(0, 20, 240, phraseH, 10, AMBER, suggestionFade);
+  phoneScreenContent += rrect(0, 60, 180, phraseH, 10, AMBER, suggestionFade);
+
+  s += phone(phoneX, phoneY, phoneW, phoneH, phoneScreenContent, WHITE, phoneOpacity);
+
+  // Stick figure back to typing, nodding
+  var figureOpacity = ramp(u, 0.5, 0.8);
+  var headTilt = lerp(0, -Math.PI / 12, smooth(ramp(u, 0.7, 1.0))); // Nod of understanding
+  var armAngle = lerp(Math.PI * 0.7, Math.PI * 0.6, smooth(u * 2) % 1);
+  s += stickFigure(figureX, figureY, 1.0, headTilt, armAngle, 0, WHITE, figureOpacity);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

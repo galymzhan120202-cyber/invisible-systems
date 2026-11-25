@@ -1,0 +1,22 @@
+# Why Your Phone Knows What You Want to Say
+
+- **System:** Predictive input and user behavior modeling
+- **Narrator:** Bright, energetic adult-female voice
+- **Palette:** Dark theme (black canvas, white line art); accent colors: signal blue (system/rule), warm amber (you/desire), coral red (naive/wrong model)
+- **Hero Element:** A stick-figure with a smartphone. The phone's screen displays a text bubble that evolves from simple input to complex predictive suggestions, representing the system learning.
+
+| # | Time | Story beat | Stick-figure scene | Motion / camera / transition | English VO | SFX |
+|---|---|---|---|---|---|---|
+| 1 | 0-10s | **1 YOU + 2 NEED** | A stick figure holds a phone, typing slowly. A blank text bubble floats above the phone. | Camera close on phone showing typing, then pulls back to show the stick figure. | You're typing a message, fingers flying, but your thoughts race ahead. You just wish your phone could keep up, anticipating every word you want to say. | `focus.mp3` (0.6), `click-soft.mp3` (3.0) |
+| 2 | 10-20s | **3 GO** | The stick figure is still typing. The text bubble now has a few simple, common word suggestions (white). Then, complex phrases appear rapidly in warm amber, filling the bubble. | Camera zooms in on the text bubble as suggestions appear and expand. | Then, it starts. A few suggestions appear, then whole phrases. Your phone is finishing your sentences, predicting your exact intentions with uncanny accuracy. | `whoosh-fast.mp3` (10.8), `transform.mp3` (14.0) |
+| 3 | 20-30s | **4 SEARCH** | The stick figure looks perplexed, head tilted. The text bubble flickers with a coral red question mark, then briefly shows abstract "ears" or "eyes" icons, suggesting naive assumptions. | Camera pulls back to show the stick figure's bewildered posture, then focuses on the flickering coral red icons. | You might briefly wonder: is it listening? Is it reading your mind? It feels impossible, a magical feat, far beyond simple pattern matching. | `focus.mp3` (21.0), `drop-thud.mp3` (24.0) |
+| 4 | 30-40s | **5 FIND** | The stick figure's phone screen transforms. The text bubble becomes a transparent signal blue grid, showing data streams flowing from the stick figure (amber outline) into a central processing unit (signal blue icon) on the phone. | Camera follows the data flow from the stick figure to the phone's internal representation. | But there's no magic. A vast language model combines with a deep dive into *your* unique texting history. It learns your common words, phrases, and even quirks. | `transform.mp3` (31.0), `whoosh.mp3` (34.0) |
+| 5 | 40-50s | **6 TAKE** | The signal blue grid from the phone expands to fill the screen, showing amber dots (user inputs) creating complex, interconnected blue lines (linguistic trends/patterns). A small amber stick figure icon is at the center. | Camera pans across the intricate blue-amber data network, emphasizing complexity and personal data. | This system maps your personal style onto broader linguistic trends. Every word typed, every correction, refines this invisible model, making it more uniquely *you*. | `click-soft.mp3` (41.0), `stack-collapse.mp3` (44.0) |
+| 6 | 50-60s | **7 RETURN + 8 CHANGE** | The stick figure is back to typing, but now the text bubble instantly fills with fluid, accurate amber suggestions (not just white). The stick figure nods with understanding. | Camera close on phone screen showing effortless suggestions, then pulls back to stick figure's knowing smile. | So next time you text, know it's not psychic. It's a complex, evolving system reflecting your linguistic fingerprint, making communication faster every day. | `complete-done.mp3` (51.0), `click-soft.mp3` (54.0) |
+
+**Continuity map:**
+- **Scene 1-2:** The stick figure and phone persist; the text bubble evolves from blank to showing suggested words.
+- **Scene 2-3:** The stick figure and phone persist; the suggestions transform into coral red question marks and naive "listening" icons.
+- **Scene 3-4:** The phone persists; the naive icons transform into a signal blue data grid with amber input streams.
+- **Scene 4-5:** The data grid expands from the phone screen to fill the entire canvas, showing intricate patterns.
+- **Scene 5-6:** The data grid collapses back into the phone screen, now displaying fluid, accurate amber suggestions. The stick figure is back, visibly enlightened.

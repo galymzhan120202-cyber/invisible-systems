@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Supermarket Checkouts Call You Over</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+var LANE_W = 180;                   // width of a checkout lane
+var LANE_GAP = 60;                  // gap between lanes
+var LANE_X1 = CX - LANE_W - LANE_GAP/2; // Left lane X (center)
+var LANE_X2 = CX + LANE_GAP/2;      // Middle lane X (center)
+var LANE_X3 = CX + LANE_W + LANE_GAP/2; // Right lane X (center)
+
+var FIGURE_Y = 1500;                // "you" resting height
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / the wave
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want
+var CORAL = "#FF5B5B";              // coral red    -> the naive model / false signal
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function chevron(x, y, size, col, op) {
+  var d = "M " + (x - size) + " " + (y + size * 0.55) + " L " + x + " " + (y - size * 0.55) + " L " + (x + size) + " " + (y + size * 0.55);
+  return pathTag(d, col, 14, op);
+}
+
+/* stick figure: head + body + arms + legs */
+function stickFigure(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  // Head
+  g += dot(x, y - 60, 18, col);
+  // Body
+  g += line(x, y - 40, x, y + 20, col, 8);
+  // Arms
+  if (pose === 'waving') {
+    g += line(x, y - 20, x - 40, y - 50, col, 8); // left arm up
+    g += line(x, y - 20, x + 40, y + 10, col, 8); // right arm down
+  } else if (pose === 'annoyed') {
+    g += line(x, y - 20, x - 30, y - 5, col, 8);
+    g += line(x, y - 20, x + 30, y - 5, col, 8);
+    g += line(x - 15, y - 70, x - 5, y - 65, col, 6); // annoyed brow
+    g += line(x + 15, y - 70, x + 5, y - 65, col, 6);
+  } else if (pose === 'observant') {
+    g += line(x, y - 20, x - 30, y + 10, col, 8);
+    g += line(x, y - 20, x + 30, y + 10, col, 8);
+    g += line(x, y - 60, x + 18, y - 70, col, 7); // gaze right
+  } else if (pose === 'looking_back') {
+    g += line(x, y - 20, x - 30, y + 10, col, 8);
+    g += line(x, y - 20, x + 30, y + 10, col, 8);
+    g += line(x, y - 60, x - 18, y - 70, col, 7); // gaze left
+  } else { // default: standing
+    g += line(x, y - 20, x - 30, y + 10, col, 8);
+    g += line(x, y - 20, x + 30, y + 10, col, 8);
+  }
+  // Legs
+  g += line(x, y + 20, x - 20, y + 70, col, 8);
+  g += line(x, y + 20, x + 20, y + 70, col, 8);
+  g += '</g>';
+  return g;
+}
+
+/* clock icon */
+function clock(x, y, r, col, sw, u, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, r, col, sw);
+  // Minute hand (moves faster)
+  var minAngle = (u * 360 * 3) % 360; // 3 full rotations in 10s
+  var minRad = (minAngle - 90) * Math.PI / 180;
+  g += line(x, y, x + Math.cos(minRad) * r * 0.8, y + Math.sin(minRad) * r * 0.8, col, sw * 0.8);
+  // Hour hand (moves slower)
+  var hrAngle = (u * 360 * 3 / 12) % 360; // 1/12th of min hand speed
+  var hrRad = (hrAngle - 90) * Math.PI / 180;
+  g += line(x, y, x + Math.cos(hrRad) * r * 0.5, y + Math.sin(hrRad) * r * 0.5, col, sw * 0.8);
+  g += dot(x, y, sw / 2, col); // center dot
+  g += '</g>';
+  return g;
+}
+
+/* scrolling dashed lines for flow/items */
+function laneFlow(x, yStart, yEnd, phase, col, sw, dashLen, gapLen, op) {
+  var g = '', totalLen = dashLen + gapLen;
+  var off = (phase % 1) * totalLen;
+  for (var y = yStart - totalLen + off; y < yEnd; y += totalLen) {
+    var a = Math.max(y, yStart), b = Math.min(y + dashLen, yEnd);
+    if (b > a) g += line(x, a, x, b, col, sw, op);
+  }
+  return g;
+}
+
+/* generic item/box for queues */
+function queueItem(x, y, w, h, rad, col, op) {
+  return rrect(x, y, w, h, rad, col, op);
+}
+
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var queueItemW = 100, queueItemH = 60, queueItemRad = 10;
+  var queueSpacing = 120;
+  var numItems = 10;
+
+  // Draw queue items with a wavy path
+  var itemOffset = u * 40; // Slow forward motion
+  for (var i = 0; i < numItems; i++) {
+    var itemY = FIGURE_Y + 100 + i * queueSpacing - itemOffset * 2;
+    var itemX = CX - 100 + Math.sin((itemY + itemOffset * 0.5) / 200) * 50; // Wavy motion
+    if (itemY > TOP - 100 && itemY < BOT + 100) {
+      s += queueItem(itemX, itemY, queueItemW, queueItemH, queueItemRad, WHITE, 0.9);
+    }
+  }
+
+  // "You" stick figure
+  s += stickFigure(CX - 100, FIGURE_Y, AMBER, 'standing', 1);
+
+  // Clock icon in corner
+  s += clock(W - 100, TOP + 80, 40, WHITE, 6, u, 1);
+
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var queueItemW = 100, queueItemH = 60, queueItemRad = 10;
+  var queueSpacing = 120;
+  var numItems = 8;
+
+  // Transition from winding queue to parallel lanes
+  var laneAppear = smooth(ramp(u, 0.0, 0.2)); // New lane snaps in
+  var moveSpeed = easeOut(ramp(u, 0.2, 0.6)); // Stick figure moves rapidly
+
+  // Old lane items (now straight)
+  var oldLaneX = LANE_X1;
+  for (var i = 0; i < numItems; i++) {
+    var itemY = FIGURE_Y + 100 + i * queueSpacing - u * 150; // Items still move
+    if (itemY > TOP - 100 && itemY < BOT + 100) {
+      s += queueItem(oldLaneX, itemY, queueItemW, queueItemH, queueItemRad, WHITE, 0.9);
+    }
+  }
+  s += rrectStroke(oldLaneX, CY, LANE_W, BOT - TOP, 20, WHITE, 7, 1); // Old lane outline
+
+  // New lane (blue outline)
+  var newLaneX = LANE_X2;
+  s += rrectStroke(newLaneX, CY, LANE_W, BOT - TOP, 20, BLUE, 7, laneAppear);
+
+  // Cashier stick figure (waving)
+  var cashierX = newLaneX;
+  var cashierY = TOP + 200;
+  s += stickFigure(cashierX, cashierY, WHITE, 'waving', laneAppear);
+
+  // "You" stick figure moving
+  var startX = oldLaneX;
+  var startY = FIGURE_Y;
+  var endX = newLaneX;
+  var endY = TOP + 400; // Front of the new lane
+  var currentX = lerp(startX, endX, moveSpeed);
+  var currentY = lerp(startY, endY, moveSpeed);
+  var hopY = Math.sin(moveSpeed * Math.PI) * 80; // Arc for movement
+  s += stickFigure(currentX, currentY - hopY, AMBER, 'standing', 1);
+
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH — why me? */
+function scene3(u) {
+  var s = '';
+  var queueItemW = 100, queueItemH = 60, queueItemRad = 10;
+  var queueSpacing = 120;
+  var numItems = 6;
+
+  var zoomOut = smooth(ramp(u, 0.0, 0.4));
+  var cameraScale = lerp(1.0, 0.7, zoomOut);
+  var cameraY = lerp(0, -CY * (1 - cameraScale) + 100, zoomOut); // Adjust camera Y to keep focus
+
+  s += '<g ' + camera(cameraScale, 0, cameraY) + '>';
+
+  // Multiple lanes
+  var laneXs = [LANE_X1, LANE_X2, LANE_X3];
+  var laneColors = [WHITE, BLUE, WHITE]; // Old, new, another old
+  var laneOps = [1, 1, 0.8];
+
+  for (var l = 0; l < laneXs.length; l++) {
+    s += rrectStroke(laneXs[l], CY, LANE_W, BOT - TOP, 20, laneColors[l], 7, laneOps[l]);
+    for (var i = 0; i < numItems; i++) {
+      var itemY = BOT - 100 - i * queueSpacing - u * 50 + rnd(l * 10 + i) * 40;
+      while (itemY < TOP) itemY += (BOT - TOP);
+      s += queueItem(laneXs[l], itemY, queueItemW, queueItemH, queueItemRad, WHITE, 0.9 * laneOps[l]);
+    }
+  }
+
+  // "You" stick figure in the new lane, looking back
+  s += stickFigure(LANE_X2, TOP + 400, AMBER, 'looking_back', 1);
+
+  // Other stick figures in old queue, looking annoyed
+  var annoyedOp = ramp(u, 0.3, 0.6);
+  if (annoyedOp > 0) {
+    s += stickFigure(LANE_X1, FIGURE_Y - 100, WHITE, 'annoyed', annoyedOp);
+    s += stickFigure(LANE_X3, FIGURE_Y - 200, WHITE, 'annoyed', annoyedOp * 0.7);
+  }
+
+  // Thought bubble with coral question mark
+  var bubbleScale = 1 + Math.sin(u * Math.PI * 4) * 0.05 * pulse(u, 0.5, 0.4);
+  var bubbleOp = ramp(u, 0.2, 0.8) * (1 - ramp(u, 0.8, 1.0));
+  if (bubbleOp > 0.02) {
+    var bubbleX = LANE_X2 + 100, bubbleY = TOP + 200;
+    s += ring(bubbleX, bubbleY, 60 * bubbleScale, WHITE, 8, bubbleOp);
+    // Question mark glyph
+    var qmScale = bubbleScale * 0.8;
+    var qmX = bubbleX, qmY = bubbleY - 10;
+    var qmD = "M " + qmX + " " + (qmY - 30 * qmScale) +
+              " Q " + (qmX + 20 * qmScale) + " " + (qmY - 50 * qmScale) + " " + (qmX + 30 * qmScale) + " " + (qmY - 20 * qmScale) +
+              " Q " + (qmX + 30 * qmScale) + " " + (qmY + 10 * qmScale) + " " + (qmX) + " " + (qmY + 10 * qmScale) +
+              " L " + (qmX) + " " + (qmY + 30 * qmScale);
+    s += pathTag(qmD, CORAL, 10, bubbleOp);
+    s += dot(qmX, qmY + 45 * qmScale, 8, CORAL, bubbleOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND — the real mechanism: total items across all lanes. */
+function scene4(u) {
+  var s = '';
+  var itemR = 12; // Radius for abstract item dots
+  var numLanes = 3;
+  var laneXs = [CX - 200, CX, CX + 200]; // Overhead view, abstract lanes
+  var laneWidth = 10; // Lane line width
+
+  var cameraScale = lerp(0.7, 0.8, smooth(u));
+  var cameraY = lerp(-CY * (1 - 0.7) + 100, -CY * (1 - 0.8) + 100, smooth(u));
+  s += '<g ' + camera(cameraScale, 0, cameraY) + '>';
+
+  // Lanes as simple lines
+  for (var l = 0; l < numLanes; l++) {
+    s += line(laneXs[l], TOP, laneXs[l], BOT, WHITE, laneWidth, 0.7);
+  }
+
+  // Items flowing through lanes
+  var itemSpeed = 200; // pixels per second
+  var numItemsPerLane = 10;
+  for (var l = 0; l < numLanes; l++) {
+    for (var i = 0; i < numItemsPerLane; i++) {
+      var itemY = BOT - (u * itemSpeed + i * 150 + rnd(l * 100 + i) * 50) % (BOT - TOP + 200);
+      if (itemY < TOP - 100) itemY += (BOT - TOP + 200);
+      s += dot(laneXs[l], itemY, itemR, WHITE, 0.9);
+    }
+  }
+
+  // System brain (signal blue simple icon)
+  var brainX = CX, brainY = TOP + 180;
+  var brainR = 80;
+  s += ring(brainX, brainY, brainR, BLUE, 10, 0.9);
+  s += dot(brainX, brainY, 20, BLUE, 0.9); // Central core
+
+  // Lines connecting brain to lanes
+  for (var l = 0; l < numLanes; l++) {
+    var angle = Math.atan2(laneXs[l] - brainX, brainY - (BOT - 100)); // Connect to bottom of lanes
+    var startX = brainX + Math.sin(angle) * brainR;
+    var startY = brainY - Math.cos(angle) * brainR;
+    s += line(startX, startY, laneXs[l], BOT - 100, BLUE, 4, 0.6);
+  }
+
+  // Item count bar
+  var barX = brainX, barY = brainY + 200;
+  var barW = brainR * 2.5, barH = 30;
+  s += rrectStroke(barX, barY, barW, barH, 8, WHITE, 3, 0.5);
+  var fillAmount = smooth(u); // Bar fills incrementally
+  s += rrect(barX - barW/2 + (barW * fillAmount)/2, barY, barW * fillAmount, barH - 6, 6, WHITE, 0.9);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE — threshold reached, new lane opens */
+function scene5(u) {
+  var s = '';
+  var itemR = 12;
+  var numLanes = 3;
+  var laneXs = [CX - 200, CX, CX + 200];
+  var laneWidth = 10;
+
+  var cameraScale = lerp(0.8, 0.8, smooth(u)); // Keep scale stable
+  var cameraY = lerp(-CY * (1 - 0.8) + 100, -CY * (1 - 0.8) + 100, smooth(u));
+  s += '<g ' + camera(cameraScale, 0, cameraY) + '>';
+
+  // System brain (signal blue)
+  var brainX = CX, brainY = TOP + 180;
+  var brainR = 80;
+  s += ring(brainX, brainY, brainR, BLUE, 10, 0.9);
+  s += dot(brainX, brainY, 20, BLUE, 0.9);
+
+  // Item count bar hits maximum
+  var barX = brainX, barY = brainY + 200;
+  var barW = brainR * 2.5, barH = 30;
+  s += rrectStroke(barX, barY, barW, barH, 8, WHITE, 3, 0.5);
+  s += rrect(barX, barY, barW, barH - 6, 6, WHITE, 0.9); // Full bar
+
+  // New lane materializes
+  var newLaneX = CX + 400; // Position for the new lane
+  var newLaneAppear = easeOut(ramp(u, 0.1, 0.3));
+  s += line(newLaneX, TOP, newLaneX, BOT, BLUE, laneWidth, newLaneAppear);
+
+  // Lanes as simple lines (existing lanes slightly fade)
+  for (var l = 0; l < numLanes; l++) {
+    s += line(laneXs[l], TOP, laneXs[l], BOT, WHITE, laneWidth, 0.7 * (1 - newLaneAppear * 0.2));
+  }
+
+  // Items flowing and re-routing
+  var itemSpeed = 200;
+  var numItemsPerLane = 10;
+  for (var l = 0; l < numLanes; l++) {
+    for (var i = 0; i < numItemsPerLane; i++) {
+      var initialY = BOT - (u * itemSpeed + i * 150 + rnd(l * 100 + i) * 50) % (BOT - TOP + 200);
+      if (initialY < TOP - 100) initialY += (BOT - TOP + 200);
+
+      var rerouteFactor = easeIn(ramp(u, 0.4, 0.8)); // Items start rerouting
+      var targetX = lerp(laneXs[l], newLaneX, rerouteFactor);
+      var targetY = lerp(initialY, initialY - 100, rerouteFactor); // Slight upward pull
+
+      s += dot(targetX, targetY, itemR, WHITE, 0.9);
+
+      // Subtle blue guiding lines for flow
+      if (rerouteFactor > 0.05) {
+        s += line(laneXs[l], initialY, targetX, targetY, BLUE, 2, rerouteFactor * 0.4);
+      }
+    }
+  }
+
+  // Overall smooth flow emphasized by subtle blue guiding lines
+  var flowOp = smooth(ramp(u, 0.6, 1.0));
+  if (flowOp > 0.02) {
+    s += laneFlow(CX - 100, TOP, BOT, u * 0.8, BLUE, 4, 80, 80, flowOp * 0.3);
+    s += laneFlow(CX + 100, TOP, BOT, u * 0.8 + 0.5, BLUE, 4, 80, 80, flowOp * 0.3);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE — you now see the invisible system at work. */
+function scene6(u) {
+  var s = '';
+  var queueItemW = 100, queueItemH = 60, queueItemRad = 10;
+
+  var cameraScale = lerp(0.8, 1.0, smooth(u));
+  var cameraY = lerp(-CY * (1 - 0.8) + 100, 0, smooth(u));
+  s += '<g ' + camera(cameraScale, 0, cameraY) + '>';
+
+  // Lanes (now back to stick figure perspective, but with flow)
+  var laneXs = [LANE_X1, LANE_X2]; // Two main lanes visible
+  for (var l = 0; l < laneXs.length; l++) {
+    s += rrectStroke(laneXs[l], CY, LANE_W, BOT - TOP, 20, WHITE, 7, 1);
+    // Items flowing smoothly
+    s += laneFlow(laneXs[l], TOP + 100, BOT - 100, u * 1.5 + rnd(l) * 0.2, WHITE, 8, 40, 80, 0.8);
+  }
+
+  // "You" stick figure, calm and observant
+  var figureX = LANE_X1;
+  var figureY = FIGURE_Y;
+  s += stickFigure(figureX, figureY, AMBER, 'observant', 1);
+
+  // Subtle blue aura/invisible hand around the flow
+  var auraOp = smooth(ramp(u, 0.2, 0.8));
+  if (auraOp > 0.02) {
+    s += rrect(LANE_X1, CY, LANE_W + 20, BOT - TOP, 30, BLUE, auraOp * 0.1);
+    s += rrect(LANE_X2, CY, LANE_W + 20, BOT - TOP, 30, BLUE, auraOp * 0.1);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

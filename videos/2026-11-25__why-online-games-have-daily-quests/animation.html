@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Online Games Have Daily Quests</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> the system / the loop
+var AMBER = "#F2A93B";              // warm amber   -> YOU / what you want
+var CORAL = "#FF5B5B";              // coral red    -> the naive model / friction
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op, fill) {
+  return '<path d="' + d + '" ' + (fill ? 'fill="' + fill + '"' : 'fill="none"') + ' stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom elements ---------- */
+// Stick-figure player: ~198px tall
+function player(x, y, headRot, armBend, legBend, op, color) {
+  color = color || AMBER;
+  op = (op == null ? 1 : op);
+  headRot = headRot || 0; // 0 = straight, positive = tilt right
+  armBend = armBend || 0; // 0 = straight down, positive = bend up
+  legBend = legBend || 0; // 0 = straight, positive = bend back
+  var g = '<g opacity="' + op + '">';
+  // Head
+  g += '<circle cx="' + x + '" cy="' + (y - 80) + '" r="28" fill="' + color + '"/>';
+  // Body
+  g += line(x, y - 50, x, y + 20, color, 10);
+  // Arms
+  g += line(x, y - 30, x + 40 * Math.sin(armBend), y + 30 + 40 * Math.cos(armBend), color, 10);
+  g += line(x, y - 30, x - 40 * Math.sin(armBend), y + 30 + 40 * Math.cos(armBend), color, 10);
+  // Legs
+  g += line(x, y + 20, x + 30 * Math.sin(legBend), y + 90 + 30 * Math.cos(legBend), color, 10);
+  g += line(x, y + 20, x - 30 * Math.sin(legBend), y + 90 + 30 * Math.cos(legBend), color, 10);
+  g += '</g>';
+  return g;
+}
+
+// Abstract world icon
+function worldGlobe(x, y, r, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, r, col, 8);
+  g += pathTag("M " + (x - r * 0.7) + " " + (y - r * 0.4) + " Q " + x + " " + (y - r * 0.8) + " " + (x + r * 0.7) + " " + (y - r * 0.4), col, 6);
+  g += pathTag("M " + (x - r * 0.7) + " " + (y + r * 0.4) + " Q " + x + " " + (y + r * 0.8) + " " + (x + r * 0.7) + " " + (y + r * 0.4), col, 6);
+  g += '</g>';
+  return g;
+}
+
+// UI Panel for Daily Quests
+function questLogPanel(x, y, w, h, col, sw, op) {
+  op = (op == null ? 1 : op);
+  return rrectStroke(x, y, w, h, 20, col, sw, op);
+}
+
+// Checkmark icon
+function checkmark(x, y, size, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var d = "M " + (x - size) + " " + (y + size * 0.2) + " L " + (x - size * 0.2) + " " + (y + size) + " L " + (x + size) + " " + (y - size * 0.8);
+  return pathTag(d, col, sw, op);
+}
+
+// Small pile of glowing rewards
+function rewardPile(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += dot(x, y, size * 0.8, col);
+  g += dot(x - size * 0.6, y + size * 0.4, size * 0.6, col);
+  g += dot(x + size * 0.6, y + size * 0.4, size * 0.6, col);
+  g += '</g>';
+  return g;
+}
+
+// Question mark
+function questionMark(x, y, size, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var d = "M " + x + " " + (y - size) +
+          " A " + (size * 0.6) + " " + (size * 0.6) + " 0 1 1 " + (x + size * 0.6) + " " + (y - size * 0.2) +
+          " L " + (x + size * 0.6) + " " + (y + size * 0.2) +
+          " M " + x + " " + (y + size * 0.5);
+  return pathTag(d, col, sw, op);
+}
+
+// Thought bubble
+function thoughtBubble(x, y, w, h, rad, col, sw, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrectStroke(x, y, w, h, rad, col, sw);
+  // Bubble tail
+  g += pathTag("M " + (x - w / 2 + rad * 1.5) + " " + (y + h / 2 - rad * 0.5) +
+               " L " + (x - w / 2 + rad * 0.5) + " " + (y + h / 2 + 20) +
+               " L " + (x - w / 2 + rad * 0.8) + " " + (y + h / 2 - rad * 0.5), col, sw);
+  g += '</g>';
+  return g;
+}
+
+// Generic treasure chest
+function treasureChest(x, y, size, col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y + size * 0.2, size * 1.6, size * 0.8, size * 0.1, col); // Body
+  g += rrect(x, y - size * 0.2, size * 1.8, size * 0.4, size * 0.1, col); // Lid
+  g += dot(x, y - size * 0.2, size * 0.1, WHITE); // Lock
+  g += '</g>';
+  return g;
+}
+
+// Clock icon
+function clock(x, y, r, col, sw, hourAngle, minuteAngle, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += ring(x, y, r, col, sw);
+  // Hour hand
+  var hx = x + r * 0.4 * Math.sin(hourAngle);
+  var hy = y - r * 0.4 * Math.cos(hourAngle);
+  g += line(x, y, hx, hy, col, sw * 0.8);
+  // Minute hand
+  var mx = x + r * 0.7 * Math.sin(minuteAngle);
+  var my = y - r * 0.7 * Math.cos(minuteAngle);
+  g += line(x, y, mx, my, col, sw);
+  g += '</g>';
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+// Player resting position
+var PLAYER_X = CX - 300;
+var PLAYER_Y = CY + 200;
+
+// Quest log panel default position and size
+var QUEST_PANEL_X = CX + 200;
+var QUEST_PANEL_Y = CY - 100;
+var QUEST_PANEL_W = 400;
+var QUEST_PANEL_H = 600;
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var panX = lerp(-200, 200, smooth(u));
+  var playerMoveX = lerp(CX - 400, CX - 100, easeOut(ramp(u, 0.0, 0.6)));
+  var playerMoveY = lerp(BOT - 100, PLAYER_Y, easeOut(ramp(u, 0.0, 0.6)));
+  var playerArmBend = Math.sin(u * Math.PI * 4) * 0.3 * ramp(u, 0.0, 0.6);
+  var playerLegBend = Math.cos(u * Math.PI * 4) * 0.3 * ramp(u, 0.0, 0.6);
+  var worldIconX = lerp(CX + 400, CX + 150, easeOut(ramp(u, 0.0, 0.6)));
+  var worldIconY = lerp(TOP + 200, CY - 100, easeOut(ramp(u, 0.0, 0.6)));
+
+  s += '<g ' + camera(1.0, panX, 0) + '>';
+  // Abstract landscape lines
+  s += line(CX - 400, BOT, CX - 100, TOP + 100, WHITE, 3, 0.2);
+  s += line(CX + 400, BOT, CX + 100, TOP + 100, WHITE, 3, 0.2);
+  s += line(CX - 200, BOT, CX, TOP + 200, WHITE, 3, 0.15);
+  s += line(CX + 200, BOT, CX, TOP + 200, WHITE, 3, 0.15);
+
+  s += player(playerMoveX, playerMoveY, 0, playerArmBend, playerLegBend, 1, AMBER);
+  s += worldGlobe(worldIconX, worldIconY, 80, BLUE, 1);
+
+  // "World" icon pulse on arrival
+  var worldPulse = pulse(u, 0.6, 0.1);
+  if (worldPulse > 0) {
+    s += ring(worldIconX, worldIconY, 80 + worldPulse * 20, BLUE, 10, worldPulse);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): GO */
+function scene2(u) {
+  var s = '';
+  var panelSlideY = lerp(H + QUEST_PANEL_H / 2, QUEST_PANEL_Y, easeOut(ramp(u, 0.0, 0.3)));
+  var panelOpacity = ramp(u, 0.0, 0.1);
+  var rewardsOpacity = ramp(u, 0.4, 0.6);
+  var playerHeadRot = lerp(0, 0.5, smooth(ramp(u, 0.3, 0.5))); // Player looks right
+  var rewardsGlow = pulse(u, 0.6, 0.1);
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+  s += player(PLAYER_X, PLAYER_Y, playerHeadRot, 0, 0, 1, AMBER);
+
+  // Quest Log Panel
+  s += questLogPanel(QUEST_PANEL_X, panelSlideY, QUEST_PANEL_W, QUEST_PANEL_H, BLUE, 10, panelOpacity);
+  s += checkmark(QUEST_PANEL_X, panelSlideY - QUEST_PANEL_H / 2 + 100, 50, WHITE, 12, panelOpacity); // Checkmark icon
+
+  // Rewards pile
+  s += rewardPile(QUEST_PANEL_X, panelSlideY + QUEST_PANEL_H / 2 - 150, 40, AMBER, rewardsOpacity);
+  if (rewardsGlow > 0) {
+    s += ring(QUEST_PANEL_X, panelSlideY + QUEST_PANEL_H / 2 - 150, 40 + rewardsGlow * 15, AMBER, 8, rewardsGlow);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): SEARCH */
+function scene3(u) {
+  var s = '';
+  var playerHeadRot = lerp(0.5, -0.2, smooth(ramp(u, 0.0, 0.2))); // Player looks at panel, then question mark
+  var qMarkOpacity = ramp(u, 0.0, 0.2) * (1 - ramp(u, 0.6, 0.8));
+  var bubbleOpacity = ramp(u, 0.2, 0.4) * (1 - ramp(u, 0.7, 0.9));
+  var chestScale = lerp(1.0, 1.2, smooth(ramp(u, 0.5, 0.6)));
+  var camZoom = lerp(1.0, 1.2, smooth(ramp(u, 0.5, 0.6)));
+  var camTx = lerp(0, QUEST_PANEL_X - CX, smooth(ramp(u, 0.5, 0.6)));
+  var camTy = lerp(0, QUEST_PANEL_Y - CY, smooth(ramp(u, 0.5, 0.6)));
+
+  s += '<g ' + camera(camZoom, camTx, camTy) + '>';
+  s += player(PLAYER_X, PLAYER_Y, playerHeadRot, 0, 0, 1, AMBER);
+  s += questLogPanel(QUEST_PANEL_X, QUEST_PANEL_Y, QUEST_PANEL_W, QUEST_PANEL_H, BLUE, 10, 1);
+  s += checkmark(QUEST_PANEL_X, QUEST_PANEL_Y - QUEST_PANEL_H / 2 + 100, 50, WHITE, 12, 1);
+  s += rewardPile(QUEST_PANEL_X, QUEST_PANEL_Y + QUEST_PANEL_H / 2 - 150, 40, AMBER, 1);
+
+  // Question mark above player's head
+  s += questionMark(PLAYER_X + 50, PLAYER_Y - 180, 50, WHITE, 10, qMarkOpacity);
+
+  // Thought bubble with treasure chest
+  var bubbleX = PLAYER_X + 200, bubbleY = PLAYER_Y - 220;
+  s += thoughtBubble(bubbleX, bubbleY, 300, 200, 20, CORAL, 8, bubbleOpacity);
+  s += treasureChest(bubbleX, bubbleY, 60 * chestScale, AMBER, bubbleOpacity);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): FIND */
+function scene4(u) {
+  var s = '';
+  var bubbleFade = 1 - ramp(u, 0.0, 0.1);
+  var panelMorph = smooth(ramp(u, 0.1, 0.4)); // 0 = panel, 1 = loop
+  var loopRadius = lerp(QUEST_PANEL_H / 2 * 0.8, 300, panelMorph);
+  var loopX = lerp(QUEST_PANEL_X, CX, panelMorph);
+  var loopY = lerp(QUEST_PANEL_Y, CY, panelMorph);
+  var loopStroke = lerp(10, 16, panelMorph);
+
+  // Player moving along the loop
+  var playerLoopPhase = (u * 0.8) % 1; // Player completes a cycle
+  var playerAngle = playerLoopPhase * Math.PI * 2 - Math.PI / 2; // Start from top, go clockwise
+  var playerX = loopX + loopRadius * Math.cos(playerAngle);
+  var playerY = loopY + loopRadius * Math.sin(playerAngle) + 90; // Adjust for player height
+
+  var playerArmBend = Math.sin(u * Math.PI * 6) * 0.2;
+  var playerLegBend = Math.cos(u * Math.PI * 6) * 0.2;
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Thought bubble dissolving
+  s += thoughtBubble(PLAYER_X + 200, PLAYER_Y - 220, 300, 200, 20, CORAL, 8, bubbleFade);
+  s += treasureChest(PLAYER_X + 200, PLAYER_Y - 220, 60, AMBER, bubbleFade);
+
+  // Morphing Quest Log to Loop
+  if (panelMorph < 1) { // Panel phase
+    s += questLogPanel(QUEST_PANEL_X, QUEST_PANEL_Y, QUEST_PANEL_W, QUEST_PANEL_H, BLUE, loopStroke, 1 - panelMorph);
+    s += checkmark(QUEST_PANEL_X, QUEST_PANEL_Y - QUEST_PANEL_H / 2 + 100, 50, WHITE, 12, 1 - panelMorph);
+    s += rewardPile(QUEST_PANEL_X, QUEST_PANEL_Y + QUEST_PANEL_H / 2 - 150, 40, AMBER, 1 - panelMorph);
+  }
+  if (panelMorph > 0) { // Loop phase
+    s += ring(loopX, loopY, loopRadius, BLUE, loopStroke, panelMorph);
+  }
+
+  // Tasks and rewards on the loop
+  if (panelMorph > 0.5) {
+    for (var i = 0; i < 4; i++) {
+      var taskPhase = (playerLoopPhase + i * 0.25 + 0.1) % 1;
+      var taskAngle = taskPhase * Math.PI * 2 - Math.PI / 2;
+      var taskX = loopX + loopRadius * Math.cos(taskAngle);
+      var taskY = loopY + loopRadius * Math.sin(taskAngle);
+      s += dot(taskX, taskY, 15, DIM, panelMorph * 0.8); // Task dot
+    }
+    // Reward spark when player completes a segment
+    var rewardPulse = pulse(playerLoopPhase, 0.9, 0.1);
+    if (rewardPulse > 0) {
+      s += dot(playerX, playerY - 100, 20 + rewardPulse * 10, AMBER, rewardPulse);
+    }
+  }
+
+  s += player(playerX, playerY, 0, playerArmBend, playerLegBend, 1, AMBER);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): TAKE */
+function scene5(u) {
+  var s = '';
+  var playerShrink = lerp(1.0, 0.8, smooth(u));
+  var playerRigid = lerp(0, 0.5, smooth(u)); // Controls arm/leg bend
+  var loopRadius = 300;
+  var loopX = CX, loopY = CY;
+  var playerLoopPhase = (u * 0.6) % 1; // Slower, more automatic movement
+  var playerAngle = playerLoopPhase * Math.PI * 2 - Math.PI / 2;
+  var playerX = loopX + loopRadius * Math.cos(playerAngle);
+  var playerY = loopY + loopRadius * Math.sin(playerAngle) + 90;
+
+  var worldDim = lerp(0.1, 0.05, smooth(u)); // World background dims
+  var clockOpacity = ramp(u, 0.4, 0.6) * (1 - ramp(u, 0.8, 1.0));
+  var clockTick = Math.sin(u * Math.PI * 10) * 0.1 * ramp(u, 0.6, 0.7); // Brief tick
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Dimmed world background
+  s += line(CX - 400, BOT, CX - 100, TOP + 100, WHITE, 3, worldDim);
+  s += line(CX + 400, BOT, CX + 100, TOP + 100, WHITE, 3, worldDim);
+
+  s += ring(loopX, loopY, loopRadius, BLUE, 16, 1);
+
+  // Tasks on the loop
+  for (var i = 0; i < 4; i++) {
+    var taskPhase = (playerLoopPhase + i * 0.25 + 0.1) % 1;
+    var taskAngle = taskPhase * Math.PI * 2 - Math.PI / 2;
+    var taskX = loopX + loopRadius * Math.cos(taskAngle);
+    var taskY = loopY + loopRadius * Math.sin(taskAngle);
+    s += dot(taskX, taskY, 15, DIM, 0.8);
+  }
+
+  s += player(playerX, playerY, 0, playerRigid, playerRigid, playerShrink, AMBER);
+
+  // Clock icon
+  var clockHandHour = Math.PI / 2 + u * Math.PI * 0.1; // Slow movement
+  var clockHandMinute = Math.PI / 2 + u * Math.PI * 1.2 + clockTick; // Faster movement
+  s += clock(CX, TOP + 100, 60, WHITE, 8, clockHandHour, clockHandMinute, clockOpacity);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var loopOpen = smooth(ramp(u, 0.2, 0.7)); // Loop opens up
+  var loopRadius = lerp(300, 400, loopOpen);
+  var loopStroke = lerp(16, 10, loopOpen);
+  var playerX = lerp(CX, CX - 200, loopOpen);
+  var playerY = lerp(CY + 90, CY + 200, loopOpen);
+  var playerHeadRot = lerp(0, -0.3, loopOpen); // Player looks up/left
+  var worldBrighten = lerp(0.05, 0.2, smooth(u));
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Brightening world background
+  s += line(CX - 400, BOT, CX - 100, TOP + 100, WHITE, 3, worldBrighten);
+  s += line(CX + 400, BOT, CX + 100, TOP + 100, WHITE, 3, worldBrighten);
+
+  // Loop transforms into an open path
+  var pathD = "M " + (CX - loopRadius * (1 - loopOpen * 0.5)) + " " + (CY + loopRadius * (1 - loopOpen * 0.5)) +
+              " A " + loopRadius + " " + loopRadius + " 0 1 1 " + (CX + loopRadius * (1 - loopOpen * 0.5)) + " " + (CY + loopRadius * (1 - loopOpen * 0.5));
+  s += pathTag(pathD, BLUE, loopStroke, 1);
+
+  // Player looking up
+  s += player(playerX, playerY, playerHeadRot, 0, 0, 1, AMBER);
+  s += line(playerX, playerY - 80, playerX + 30 * Math.sin(playerHeadRot), playerY - 120 - 30 * Math.cos(playerHeadRot), WHITE, 7, 0.9); // Gaze line
+
+  // Small chevron indicating new direction/desire
+  if (loopOpen > 0.5) {
+    var chevronOp = ramp(u, 0.7, 0.9);
+    var chevronY = lerp(playerY - 180, playerY - 220, ramp(u, 0.7, 0.9));
+    var d = "M " + (playerX - 20) + " " + (chevronY + 10) + " L " + playerX + " " + (chevronY - 10) + " L " + (playerX + 20) + " " + (chevronY + 10);
+    s += pathTag(d, AMBER, 10, chevronOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
