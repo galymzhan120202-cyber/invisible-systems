@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Unlocking Your Phone Is a Little Game</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey for secondary dots
+var BLUE  = "#4C86F0";              // signal blue  -> system / feedback
+var AMBER = "#F2A93B";              // warm amber   -> YOU / user / desire
+var CORAL = "#FF5B5B";              // coral red    -> cost / habit
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom shape builders for phone theme ---------- */
+function lockIcon(x, y, size, col, sw, op) {
+  var halfSize = size / 2;
+  var g = '<g opacity="' + (op == null ? 1 : op) + '">';
+  g += rrectStroke(x, y + halfSize * 0.2, size, size * 0.8, size * 0.2, col, sw); // body
+  g += pathTag("M " + (x - halfSize * 0.4) + " " + (y - halfSize * 0.4) +
+               " A " + (halfSize * 0.4) + " " + (halfSize * 0.4) + " 0 0 1 " + (x + halfSize * 0.4) + " " + (y - halfSize * 0.4),
+               col, sw); // shackle
+  g += dot(x, y + halfSize * 0.3, sw * 0.8, col); // keyhole dot
+  g += '</g>';
+  return g;
+}
+
+function finger(x, y, r, col, op) {
+  return dot(x, y, r, col, op);
+}
+
+function starBurst(x, y, size, col, op) {
+  var s = '';
+  for (var i = 0; i < 8; i++) {
+    var angle = i * Math.PI / 4;
+    var x1 = x + Math.cos(angle) * size * 0.3;
+    var y1 = y + Math.sin(angle) * size * 0.3;
+    var x2 = x + Math.cos(angle) * size;
+    var y2 = y + Math.sin(angle) * size;
+    s += line(x1, y1, x2, y2, col, 8, op);
+  }
+  return s;
+}
+
+function clock(x, y, r, hAngle, mAngle, col, sw, op) {
+  var g = '<g opacity="' + (op == null ? 1 : op) + '">';
+  g += ring(x, y, r, col, sw);
+  g += line(x, y, x + Math.cos(hAngle) * r * 0.5, y + Math.sin(hAngle) * r * 0.5, col, sw * 1.5); // hour hand
+  g += line(x, y, x + Math.cos(mAngle) * r * 0.8, y + Math.sin(mAngle) * r * 0.8, col, sw); // minute hand
+  g += dot(x, y, sw * 1.2, col); // center dot
+  g += '</g>';
+  return g;
+}
+
+/* the "hero" phone element, always present */
+function heroPhone(x, y, w, h, rad, col, sw, op) {
+  op = (op == null ? 1 : op);
+  return '<g opacity="' + op + '">' +
+         rrectStroke(x, y, w, h, rad, col, sw, 1) +
+         rrect(x, y - h / 2 + rad / 2 + sw, w * 0.08, w * 0.015, w * 0.005, col, 1) + // top speaker bar
+         dot(x, y + h / 2 - rad / 2 - sw, w * 0.02, col, 1) + // bottom button
+         '</g>';
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+// Phone dimensions
+var PHONE_W = 320;
+var PHONE_H = 600;
+var PHONE_RAD = 40;
+var PHONE_SW = 10;
+var PHONE_Y = CY + 80;
+
+/* SCENE 1 (0-10): The Phone - simple locked state */
+function scene1(u) {
+  var s = '';
+  var scale = lerp(1.06, 1.0, smooth(u * 0.9));
+  var driftY = lerp(-24, 0, smooth(u * 0.9));
+  s += '<g ' + camera(scale, 0, driftY) + '>';
+
+  // Persistent faint background elements
+  s += rrect(CX, CY, W * 0.8, BOT - TOP, 80, DIM, 0.08);
+
+  var phoneX = CX;
+  var phoneY = PHONE_Y;
+
+  // Hero Phone
+  s += heroPhone(phoneX, phoneY, PHONE_W, PHONE_H, PHONE_RAD, WHITE, PHONE_SW);
+
+  // Lock icon fades in
+  var lockOpacity = ramp(u, 0.0, 0.4);
+  var lockScale = lerp(0.8, 1.0, easeOut(ramp(u, 0.0, 0.2)));
+  s += '<g transform="translate(' + phoneX + ' ' + (phoneY - 60) + ') scale(' + lockScale + ') translate(' + (-phoneX) + ' ' + (-(phoneY - 60)) + ')">';
+  s += lockIcon(phoneX, phoneY - 60, 80, WHITE, 8, lockOpacity);
+  s += '</g>';
+
+  // Small dots representing other tasks/distractions
+  for (var i = 0; i < 5; i++) {
+    var dy = Math.sin(u * Math.PI * 2 + i) * 20;
+    s += dot(CX - 280, TOP + 100 + i * 280 + dy, 18, DIM, 0.6);
+    s += dot(CX + 280, TOP + 200 + i * 280 + dy, 18, DIM, 0.6);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20): The Swipe/Unlock Action */
+function scene2(u) {
+  var s = '';
+  var shake = Math.sin(u * 42) * 3 * pulse(u, 0.18, 0.14);
+  s += '<g ' + camera(1.0, shake, 0) + '>';
+
+  s += rrect(CX, CY, W * 0.8, BOT - TOP, 80, DIM, 0.08);
+
+  var phoneX = CX;
+  var phoneY = PHONE_Y;
+
+  // Hero Phone
+  s += heroPhone(phoneX, phoneY, PHONE_W, PHONE_H, PHONE_RAD, WHITE, PHONE_SW);
+
+  // Screen glowing as it's about to be unlocked
+  var screenGlowOp = lerp(0, 0.2, smooth(ramp(u, 0.0, 0.3)));
+  s += rrect(phoneX, phoneY, PHONE_W - PHONE_SW * 2, PHONE_H - PHONE_SW * 2, PHONE_RAD - PHONE_SW, BLUE, screenGlowOp);
+
+  // Finger animation
+  var fingerStartX = phoneX + 100;
+  var fingerStartY = phoneY + 180;
+  var fingerEndX = phoneX - 100;
+  var fingerEndY = phoneY - 180;
+
+  var fingerX = lerp(fingerStartX, fingerEndX, easeOut(ramp(u, 0.1, 0.6)));
+  var fingerY = lerp(fingerStartY, fingerEndY, easeOut(ramp(u, 0.1, 0.6)));
+  var fingerOp = (1 - ramp(u, 0.6, 0.8)); // Fade out after swipe
+
+  s += finger(fingerX, fingerY, 20, AMBER, fingerOp);
+
+  // Swipe path trail
+  var pathT = ramp(u, 0.15, 0.65);
+  if (pathT > 0) {
+    var pathD = "M " + fingerStartX + " " + fingerStartY;
+    var currentX = lerp(fingerStartX, fingerEndX, pathT);
+    var currentY = lerp(fingerStartY, fingerEndY, pathT);
+    pathD += " L " + currentX + " " + currentY;
+    s += pathTag(pathD, AMBER, 8, fingerOp * 0.6);
+  }
+
+  // Unlock feedback (small pulse)
+  var unlockPulse = pulse(u, 0.75, 0.1);
+  if (unlockPulse > 0) {
+    s += ring(phoneX, phoneY, lerp(50, 100, unlockPulse), BLUE, 10, unlockPulse * 0.8);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30): The Reward/Feedback Loop */
+function scene3(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  s += rrect(CX, CY, W * 0.8, BOT - TOP, 80, DIM, 0.08);
+
+  var phoneX = CX;
+  var phoneY = PHONE_Y;
+
+  // Hero Phone
+  s += heroPhone(phoneX, phoneY, PHONE_W, PHONE_H, PHONE_RAD, WHITE, PHONE_SW);
+
+  // Screen showing content / reward
+  var screenFillOp = lerp(0.2, 0.9, smooth(ramp(u, 0.0, 0.3)));
+  s += rrect(phoneX, phoneY, PHONE_W - PHONE_SW * 2, PHONE_H - PHONE_SW * 2, PHONE_RAD - PHONE_SW, BLUE, screenFillOp);
+
+  // Starburst reward animation
+  var burstU = ramp(u, 0.1, 0.5);
+  var burstOp = (1 - burstU);
+  if (burstU > 0 && burstU < 1) {
+    var burstSize = lerp(0, 120, easeOut(burstU));
+    s += starBurst(phoneX, phoneY - 80, burstSize, AMBER, burstOp * 0.8);
+    s += dot(phoneX, phoneY - 80, lerp(10, 30, burstU), AMBER, burstOp);
+  }
+
+  // Small "ding" circles
+  for (var i = 0; i < 3; i++) {
+    var ringU = (u * 0.8 + i * 0.2) % 1;
+    var ringOp = (1 - ringU);
+    if (ringOp > 0.1) {
+      var r = lerp(20, 80, easeOut(ringU));
+      s += ring(phoneX + (i % 2 === 0 ? 80 : -80), phoneY + (i % 2 === 0 ? 100 : -100), r, AMBER, 6, ringOp * 0.6);
+    }
+  }
+
+  // Small content blocks appearing on screen
+  var contentOp = ramp(u, 0.4, 0.8);
+  s += rrect(phoneX, phoneY - 150, PHONE_W * 0.6, 60, 10, WHITE, contentOp * 0.8);
+  s += rrect(phoneX, phoneY, PHONE_W * 0.7, 80, 10, WHITE, contentOp * 0.8);
+  s += rrect(phoneX, phoneY + 150, PHONE_W * 0.5, 50, 10, WHITE, contentOp * 0.8);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40): The Habit Formation */
+function scene4(u) {
+  var s = '';
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  s += rrect(CX, CY, W * 0.8, BOT - TOP, 80, DIM, 0.08);
+
+  var phoneX = CX;
+  var phoneY = PHONE_Y;
+
+  // Hero Phone
+  s += heroPhone(phoneX, phoneY, PHONE_W, PHONE_H, PHONE_RAD, WHITE, PHONE_SW);
+
+  // Screen showing a "flow" of content
+  s += rrect(phoneX, phoneY, PHONE_W - PHONE_SW * 2, PHONE_H - PHONE_SW * 2, PHONE_RAD - PHONE_SW, BLUE, 0.9);
+
+  // Flowing elements representing habit / content feed
+  var flowCount = 6;
+  for (var i = 0; i < flowCount; i++) {
+    var flowU = (u * 0.7 + i / flowCount) % 1;
+    var flowOp = (1 - flowU);
+    var flowX = phoneX + Math.sin(flowU * Math.PI * 2) * lerp(200, 300, flowU);
+    var flowY = phoneY + Math.cos(flowU * Math.PI * 2) * lerp(200, 300, flowU);
+    var flowSize = lerp(10, 30, flowU);
+    s += dot(flowX, flowY, flowSize, WHITE, flowOp * 0.5);
+    s += line(flowX, flowY, phoneX + Math.sin(flowU * Math.PI * 2) * 100, phoneY + Math.cos(flowU * Math.PI * 2) * 100, WHITE, 4, flowOp * 0.3);
+  }
+
+  // Small "reward" dots entering the phone
+  for (var j = 0; j < 4; j++) {
+    var entryU = (u * 1.2 + j / 4) % 1;
+    var entryOp = (1 - entryU);
+    var entryX = lerp(CX + 400, phoneX, easeIn(entryU));
+    var entryY = lerp(TOP + j * 300 + rnd(j) * 100, phoneY, easeIn(entryU));
+    s += dot(entryX, entryY, 12, AMBER, entryOp * 0.7);
+  }
+
+  // A subtle "chain" or "belt" effect around the phone
+  var beltW = lerp(0, 180, smooth(ramp(u, 0.1, 0.5)));
+  s += rrectStroke(phoneX, phoneY, PHONE_W + beltW, PHONE_H + beltW, PHONE_RAD + beltW / 2, CORAL, 6, 0.3);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50): The Cost/Time Sink */
+function scene5(u) {
+  var s = '';
+  var scale = lerp(1.0, 0.8, smooth(u));
+  s += '<g ' + camera(scale, 0, lerp(0, 90, smooth(u))) + '>';
+
+  s += rrect(CX, CY, W * 0.8, BOT - TOP, 80, DIM, 0.08 * (1 - smooth(u)));
+
+  var phoneX = CX;
+  var phoneY = PHONE_Y;
+
+  // Hero Phone (now with a clock face)
+  s += heroPhone(phoneX, phoneY, PHONE_W, PHONE_H, PHONE_RAD, WHITE, PHONE_SW);
+
+  // Screen showing a clock
+  var clockOp = ramp(u, 0.0, 0.4);
+  var hourAngle = Math.PI * (-0.5 + u * 0.8); // Spins slowly
+  var minuteAngle = Math.PI * (-0.5 + u * 12); // Spins faster
+  s += clock(phoneX, phoneY, PHONE_W * 0.3, hourAngle, minuteAngle, CORAL, 8, clockOp);
+
+  // "Lost moments" stacking up (like the coral column in reference)
+  var baseY = BOT - 100;
+  var colX = CX - 200;
+  var nCoral = 8, prog = smooth(ramp(u, 0.1, 0.8)) * nCoral;
+  var stacked = Math.floor(prog);
+  for (var i = 0; i < nCoral; i++) {
+    var slotY = baseY - i * 70;
+    if (i < stacked) {
+      s += '<rect x="' + (colX - 80) + '" y="' + (slotY - 30) + '" width="160" height="60" rx="10" fill="' + CORAL + '" opacity="0.92"/>';
+    } else {
+      var fp = clamp(prog - i, 0, 1);
+      if (fp > 0) {
+        var fx = lerp(phoneX, colX, easeOut(fp));
+        var fy = lerp(phoneY - 100 - rnd(i) * 100, slotY, easeOut(fp));
+        s += rrect(fx, fy, 120, 50, 8, CORAL, 0.85); // Small "moment" blocks
+      }
+    }
+  }
+  s += rrectStroke(colX, baseY - nCoral * 35 + 20, 170, nCoral * 70 + 8, 10, CORAL, 2, 0.3);
+
+  // User figure looking at the phone / clock
+  var userHeadY = phoneY + 200;
+  s += dot(CX + 200, userHeadY, 20, AMBER, 1); // Head
+  s += line(CX + 200, userHeadY + 20, CX + 200, userHeadY + 100, AMBER, 8); // Body
+  s += line(CX + 200, userHeadY + 50, CX + 200 - 40, userHeadY + 80, AMBER, 8); // Arm
+  s += line(CX + 200, userHeadY + 50, CX + 200 + 40, userHeadY + 80, AMBER, 8); // Arm
+  s += line(CX + 200 + 40, userHeadY + 80, phoneX + PHONE_W / 2 + 20, phoneY + 50, AMBER, 8, 0.6); // Hand reaching to phone
+  s += line(CX + 200, userHeadY + 100, CX + 200 - 30, userHeadY + 150, AMBER, 8); // Leg
+  s += line(CX + 200, userHeadY + 100, CX + 200 + 30, userHeadY + 150, AMBER, 8); // Leg
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60): Awareness/Choice */
+function scene6(u) {
+  var s = '';
+  var scale = lerp(0.8, 0.92, smooth(clamp(u / 0.7, 0, 1)));
+  s += '<g ' + camera(scale, 0, lerp(90, 0, smooth(u))) + '>';
+
+  s += rrect(CX, CY, W * 0.8, BOT - TOP, 80, DIM, 0.08 * smooth(u)); // Background fades back in
+
+  var phoneX = CX;
+  var phoneY = PHONE_Y;
+
+  // Hero Phone (returning to a simpler state)
+  s += heroPhone(phoneX, phoneY, PHONE_W, PHONE_H, PHONE_RAD, WHITE, PHONE_SW);
+
+  // Screen becomes neutral blue, then fades
+  var screenFillOp = lerp(0.9, 0.0, smooth(ramp(u, 0.4, 0.8)));
+  s += rrect(phoneX, phoneY, PHONE_W - PHONE_SW * 2, PHONE_H - PHONE_SW * 2, PHONE_RAD - PHONE_SW, BLUE, screenFillOp);
+
+  // "Game over" or "Choice" indicator
+  var choiceOp = ramp(u, 0.1, 0.6);
+  if (choiceOp > 0.02) {
+    s += ring(phoneX, phoneY - 100, 80, AMBER, 10, choiceOp * 0.8);
+    s += line(phoneX - 30, phoneY - 100, phoneX + 30, phoneY - 100, AMBER, 10, choiceOp); // Horizontal bar
+    s += line(phoneX, phoneY - 130, phoneX, phoneY - 70, AMBER, 10, choiceOp); // Vertical bar (cross)
+  }
+
+  // User figure steps away, phone is put down
+  var userMove = smooth(ramp(u, 0.3, 0.8));
+  var userHeadY = lerp(phoneY + 200, CY + 200, userMove);
+  var userX = lerp(CX + 200, CX + 400, userMove);
+  var phoneLift = Math.sin(userMove * Math.PI) * 40; // Phone lifts slightly then settles
+  var finalPhoneY = lerp(phoneY, CY + 80, userMove);
+
+  s += dot(userX, userHeadY, 20, AMBER, 1); // Head
+  s += line(userX, userHeadY + 20, userX, userHeadY + 100, AMBER, 8); // Body
+  s += line(userX, userHeadY + 50, userX - 40, userHeadY + 80, AMBER, 8); // Arm
+  s += line(userX, userHeadY + 50, userX + 40, userHeadY + 80, AMBER, 8); // Arm
+  s += line(userX, userHeadY + 100, userX - 30, userHeadY + 150, AMBER, 8); // Leg
+  s += line(userX, userHeadY + 100, userX + 30, userHeadY + 150, AMBER, 8); // Leg
+
+  // Phone is now separate, simpler
+  s += heroPhone(CX - 150, finalPhoneY + phoneLift, PHONE_W, PHONE_H, PHONE_RAD, WHITE, PHONE_SW, 1 - userMove * 0.5);
+
+  // A simple dot or line representing a new focus/activity
+  var newFocusOp = ramp(u, 0.7, 1.0);
+  s += dot(CX + 150, CY + 100, 25, BLUE, newFocusOp);
+  s += line(CX + 150 - 50, CY + 100, CX + 150 + 50, CY + 100, BLUE, 10, newFocusOp * 0.7);
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; }
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500);
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
