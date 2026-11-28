@@ -1,0 +1,526 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why QR Codes Are Everywhere Now</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; width: 1080px; height: 1920px; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="svg" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+    <g id="stage"></g>
+  </svg>
+</div>
+<script>
+"use strict";
+
+/* ---------- constants ---------- */
+var W = 1080, H = 1920;
+var CX = 540, CY = 960;
+var TOP = 160, BOT = 1760;           // platform-safe vertical band (~8%)
+
+var WHITE = "#FFFFFF";
+var DIM   = "#8A93A6";              // muted grey
+var BLUE  = "#4C86F0";              // signal blue  -> QR, system, link
+var AMBER = "#F2A93B";              // warm amber   -> YOU, phone, desire
+var CORAL = "#FF5B5B";              // coral red    -> friction, old
+
+var DUR = 60;
+window.__duration = DUR;
+
+/* ---------- math helpers ---------- */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+function easeOut(x) { x = clamp(x, 0, 1); return 1 - (1 - x) * (1 - x); }
+function easeIn(x) { x = clamp(x, 0, 1); return x * x; }
+function rnd(i) { var s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); }
+function ramp(x, a, b) { return smooth((x - a) / (b - a)); }
+function pulse(x, c, w) { var d = Math.abs(x - c) / w; return d >= 1 ? 0 : (1 - d); }
+
+/* ---------- shape builders ---------- */
+function line(x1, y1, x2, y2, col, sw, op) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+         '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function dot(x, y, r, col, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function ring(x, y, r, col, sw, op) {
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="' + col +
+         '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrect(x, y, w, h, rad, col, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="' + col + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function rrectStroke(x, y, w, h, rad, col, sw, op) {
+  return '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
+         '" rx="' + rad + '" fill="none" stroke="' + col + '" stroke-width="' + sw + '" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function pathTag(d, col, sw, op) {
+  return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + sw +
+         '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (op == null ? 1 : op) + '"/>';
+}
+function camera(scale, tx, ty) {
+  return 'transform="translate(' + (CX + tx) + ' ' + (CY + ty) + ') scale(' + scale + ') translate(' + (-CX) + ' ' + (-CY) + ')"';
+}
+
+/* ---------- custom shapes ---------- */
+// Stick figure: base at (x,y), height ~220px
+function stickFigure(x, y, col, pose, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  var headR = 30;
+  var bodyH = 100;
+  var armL = 70;
+  var legL = 80;
+  var sw = 9;
+
+  // Head
+  g += dot(x, y - headR - bodyH - legL + 10, headR, col);
+
+  // Body
+  var bodyY1 = y - headR - bodyH - legL + 10 + headR;
+  var bodyY2 = bodyY1 + bodyH;
+  g += line(x, bodyY1, x, bodyY2, col, sw);
+
+  // Legs
+  var legY = bodyY2;
+  if (pose === 'walking') {
+    g += line(x - 18, legY, x - 30, legY + legL, col, sw);
+    g += line(x + 18, legY, x + 30, legY + legL - 20, col, sw);
+  } else {
+    g += line(x, legY, x - 25, legY + legL, col, sw);
+    g += line(x, legY, x + 25, legY + legL, col, sw);
+  }
+
+  // Arms
+  var armY = bodyY1 + 20;
+  if (pose === 'gesturing') {
+    g += line(x, armY, x - armL, armY - 40, col, sw); // Left arm up
+    g += line(x, armY, x + armL, armY + 20, col, sw); // Right arm down
+  } else if (pose === 'scanning') {
+    g += line(x, armY, x - armL + 10, armY + 20, col, sw); // Left arm holding phone
+    g += line(x, armY, x + armL - 10, armY + 20, col, sw); // Right arm holding phone
+  } else if (pose === 'thinking') {
+    g += line(x, armY, x - armL + 20, armY + 20, col, sw);
+    g += line(x, armY, x + armL - 20, armY + 20, col, sw);
+    g += dot(x - 20, armY + 50, 8, col); // Hand on chin
+  } else { // standing or walking
+    g += line(x, armY, x - armL, armY + 40, col, sw);
+    g += line(x, armY, x + armL, armY + 40, col, sw);
+  }
+
+  g += '</g>';
+  return g;
+}
+
+// Simple smartphone icon
+function phone(x, y, w, h, col, lens_col, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, w, h, 20, col); // Phone body
+  g += dot(x + w / 2 - 30, y - h / 2 + 30, 12, lens_col); // Camera lens
+  g += '</g>';
+  return g;
+}
+
+// Abstract QR code: square with some inner dots/squares
+function qrCode(x, y, size, col, density_seed, op) {
+  op = (op == null ? 1 : op);
+  var g = '<g opacity="' + op + '">';
+  g += rrect(x, y, size, size, size * 0.08, col); // Outer square
+  var innerSize = size * 0.12;
+  var cornerOffset = size / 2 - innerSize * 1.5 - size * 0.04; // Adjust for gap
+
+  // Corner patterns (fixed for QR-like look)
+  g += rrect(x - cornerOffset, y - cornerOffset, innerSize * 3, innerSize * 3, innerSize * 0.2, WHITE);
+  g += rrect(x + cornerOffset, y - cornerOffset, innerSize * 3, innerSize * 3, innerSize * 0.2, WHITE);
+  g += rrect(x - cornerOffset, y + cornerOffset, innerSize * 3, innerSize * 3, innerSize * 0.2, WHITE);
+  g += rrect(x - cornerOffset, y - cornerOffset, innerSize, innerSize, innerSize * 0.2, col);
+  g += rrect(x + cornerOffset, y - cornerOffset, innerSize, innerSize, innerSize * 0.2, col);
+  g += rrect(x - cornerOffset, y + cornerOffset, innerSize, innerSize, innerSize * 0.2, col);
+
+  // Random internal pattern
+  var numDots = 10 + Math.floor(density_seed * 15);
+  for (var i = 0; i < numDots; i++) {
+    var dx = lerp(-size / 2 + innerSize * 2, size / 2 - innerSize * 2, rnd(density_seed + i * 0.1));
+    var dy = lerp(-size / 2 + innerSize * 2, size / 2 - innerSize * 2, rnd(density_seed + i * 0.2));
+    g += dot(x + dx, y + dy, innerSize * 0.3, WHITE);
+  }
+  g += '</g>';
+  return g;
+}
+
+// Simple question mark glyph
+function questionMark(x, y, size, col, sw, op) {
+  op = (op == null ? 1 : op);
+  sw = sw || 10;
+  var d = "M " + (x - size * 0.4) + " " + (y - size * 0.4) +
+          " A " + (size * 0.4) + " " + (size * 0.4) + " 0 1 1 " + (x + size * 0.4) + " " + (y - size * 0.4) +
+          " L " + (x + size * 0.1) + " " + (y + size * 0.1) +
+          " V " + (y + size * 0.3);
+  var g = pathTag(d, col, sw, op);
+  g += dot(x, y + size * 0.45, sw / 2, col, op);
+  return g;
+}
+
+// Simplified link icon (two overlapping rings)
+function linkIcon(x, y, size, col, sw, op) {
+  op = (op == null ? 1 : op);
+  sw = sw || 10;
+  var r = size / 2;
+  var offset = size * 0.2;
+  var g = '<g opacity="' + op + '">';
+  g += ring(x - offset, y + offset, r, col, sw);
+  g += ring(x + offset, y - offset, r, col, sw);
+  g += '</g>';
+  return g;
+}
+
+/* =====================================================================
+   SCENES — inner markup for #stage at local time u in [0,1]
+   ===================================================================== */
+
+/* SCENE 1 (0-10): YOU + NEED */
+function scene1(u) {
+  var s = '';
+  var figureX = CX;
+  var figureY = BOT - 200; // Base of stick figure
+
+  var scale = lerp(1.0, 0.9, smooth(u));
+  var cameraY = lerp(0, 50, smooth(u));
+  s += '<g ' + camera(scale, 0, cameraY) + '>';
+
+  // Background QR codes popping up
+  var numQRs = 10;
+  for (var i = 0; i < numQRs; i++) {
+    var qrSize = lerp(80, 140, rnd(i));
+    var qrX = lerp(100, W - 100, rnd(i + 10));
+    var qrY = lerp(TOP + 50, BOT - 300, rnd(i + 20));
+    var popDelay = rnd(i + 30) * 0.8;
+    var qrOp = ramp(u, popDelay, popDelay + 0.3);
+    if (qrOp > 0.01) {
+      s += qrCode(qrX, qrY, qrSize, BLUE, rnd(i + 40), qrOp * 0.6);
+      // Faint grey rectangles for context (menus/posters)
+      s += rrect(qrX, qrY + qrSize/2 + 30, qrSize + 40, 60, 10, DIM, qrOp * 0.2);
+    }
+  }
+
+  // Amber stick figure
+  var gestureU = ramp(u, 0.2, 0.6);
+  s += stickFigure(figureX, figureY, AMBER, gestureU > 0.1 ? 'gesturing' : 'standing', 1);
+
+  // Question mark thought bubble
+  var qmOp = ramp(u, 0.5, 0.8);
+  if (qmOp > 0.01) {
+    s += questionMark(figureX + 80, figureY - 260, 60, AMBER, 10, qmOp);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 2 (10-20s): GO */
+function scene2(u) {
+  var s = '';
+  var figureX = CX - 200;
+  var figureY = BOT - 200;
+  var phoneW = 160, phoneH = 280;
+
+  var qrSize = lerp(100, 300, smooth(u));
+  var qrX = CX + lerp(0, 100, smooth(u));
+  var qrY = CY - lerp(0, 80, smooth(u));
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Large signal blue QR code
+  var qrOp = lerp(0.6, 1.0, ramp(u, 0.0, 0.2));
+  var qrGlowOp = pulse(u, 0.8, 0.1) * 0.8;
+  if (u < 0.9) { // QR code transforms away at the end
+    s += qrCode(qrX, qrY, qrSize, BLUE, 1, qrOp);
+    if (qrGlowOp > 0.01) {
+      s += ring(qrX, qrY, qrSize * 0.6, BLUE, 10, qrGlowOp);
+    }
+  }
+
+  // Amber stick figure holding phone
+  var scanPoseU = ramp(u, 0.1, 0.4);
+  var figureMoveX = lerp(0, 100, scanPoseU);
+  var figureMoveY = lerp(0, -50, scanPoseU);
+  s += stickFigure(figureX + figureMoveX, figureY + figureMoveY, AMBER, 'scanning', 1);
+
+  // Amber smartphone
+  var phoneMoveX = lerp(0, 120, scanPoseU);
+  var phoneMoveY = lerp(0, -60, scanPoseU);
+  var phoneRot = lerp(0, -15, scanPoseU);
+  var phoneOp = lerp(0.2, 1.0, ramp(u, 0.0, 0.2));
+  s += '<g transform="translate(' + (figureX + phoneMoveX + 60) + ' ' + (figureY + phoneMoveY - 100) + ') rotate(' + phoneRot + ') translate(' + (-(figureX + phoneMoveX + 60)) + ' ' + (-(figureY + phoneMoveY - 100)) + ')">';
+  s += phone(figureX + phoneMoveX + 60, figureY + phoneMoveY - 100, phoneW, phoneH, AMBER, BLUE, phoneOp);
+  s += '</g>';
+
+  // Coral red "typing" animation
+  var typingOp = ramp(u, 0.0, 0.2) * (1 - ramp(u, 0.2, 0.3));
+  if (typingOp > 0.01) {
+    var typeY = figureY + 100;
+    for (var i = 0; i < 4; i++) {
+      s += rrect(CX - 150 + i * 100, typeY, 80, 40, 10, CORAL, typingOp * 0.4);
+      s += line(CX - 150 + i * 100 - 20, typeY + 10, CX - 150 + i * 100 + 20, typeY + 10, WHITE, 6, typingOp * 0.8);
+      s += line(CX - 150 + i * 100 - 10, typeY - 10, CX - 150 + i * 100 + 10, typeY - 10, WHITE, 6, typingOp * 0.8);
+    }
+  }
+
+  // Warm amber "scan line"
+  var scanLineU = ramp(u, 0.4, 0.7);
+  if (scanLineU > 0.01 && u < 0.8) {
+    var scanY = lerp(qrY - qrSize / 2 + 20, qrY + qrSize / 2 - 20, easeOut(scanLineU));
+    s += line(qrX - qrSize / 2 + 10, scanY, qrX + qrSize / 2 - 10, scanY, AMBER, 8, scanLineU);
+  }
+
+  // Glowing signal blue web link icon
+  var linkIconOp = ramp(u, 0.8, 1.0);
+  if (linkIconOp > 0.01) {
+    s += linkIcon(qrX, qrY, qrSize * 0.8, BLUE, 12, linkIconOp);
+    s += ring(qrX, qrY, qrSize * 0.4 * (1 + (u - 0.8) * 2), BLUE, 8, linkIconOp * (1 - (u - 0.8) * 2));
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 3 (20-30s): SEARCH */
+function scene3(u) {
+  var s = '';
+  var figureX = CX;
+  var figureY = BOT - 200;
+
+  var cameraRot = lerp(0, 10, smooth(u * 0.8));
+  var cameraX = lerp(0, 80, smooth(u * 0.8));
+  s += '<g transform="translate(' + CX + ' ' + CY + ') rotate(' + cameraRot + ') translate(' + (-CX + cameraX) + ' ' + (-CY) + ')" >';
+
+  // Faded, desaturated coral red QR codes from the past
+  var numCoralQRs = 8;
+  for (var i = 0; i < numCoralQRs; i++) {
+    var qrSize = lerp(100, 200, rnd(i));
+    var qrX = lerp(100, W - 100, rnd(i + 10));
+    var qrY = lerp(TOP + 50, BOT - 300, rnd(i + 20));
+    var qrOp = lerp(0.3, 0, ramp(u, 0.4, 0.8));
+    if (qrOp > 0.01) {
+      s += qrCode(qrX, qrY, qrSize, CORAL, rnd(i + 40), qrOp);
+    }
+  }
+
+  // Vibrant signal blue QR codes pulsing
+  var numBlueQRs = 4;
+  for (var i = 0; i < numBlueQRs; i++) {
+    var qrSize = lerp(120, 240, rnd(i + 50));
+    var qrX = lerp(100, W - 100, rnd(i + 60));
+    var qrY = lerp(TOP + 50, BOT - 300, rnd(i + 70));
+    var pulseOp = 0.5 + 0.5 * Math.sin(u * Math.PI * 4 + i);
+    var qrOp = lerp(0.1, 0.7, ramp(u, 0.2, 0.6));
+    if (qrOp > 0.01) {
+      s += qrCode(qrX, qrY, qrSize, BLUE, rnd(i + 80), qrOp * pulseOp);
+    }
+  }
+
+  // Amber stick figure with question marks
+  s += stickFigure(figureX, figureY, AMBER, 'thinking', 1);
+
+  var qmOp = lerp(0, 1, ramp(u, 0.1, 0.5));
+  var qmRot = Math.sin(u * Math.PI * 3) * 10;
+  if (qmOp > 0.01) {
+    s += '<g transform="translate(' + (figureX + 60) + ' ' + (figureY - 260) + ') rotate(' + qmRot + ') translate(' + (-(figureX + 60)) + ' ' + (-(figureY - 260)) + ')">';
+    s += questionMark(figureX + 60, figureY - 260, 50, AMBER, 9, qmOp);
+    s += '</g>';
+    s += questionMark(figureX - 40, figureY - 290, 40, AMBER, 8, qmOp * 0.7);
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 4 (30-40s): FIND */
+function scene4(u) {
+  var s = '';
+  var phoneW = 200, phoneH = 360;
+  var phoneX = CX;
+  var phoneY = CY - 100;
+
+  s += '<g ' + camera(1.0, 0, 0) + '>';
+
+  // Amber smartphone, camera lens highlighted
+  var lensGrow = lerp(12, 24, smooth(ramp(u, 0.2, 0.4)));
+  var lensGlowOp = pulse(u, 0.3, 0.1) * 0.8;
+  s += phone(phoneX, phoneY, phoneW, phoneH, AMBER, BLUE, 1);
+  s += dot(phoneX + phoneW / 2 - 30, phoneY - phoneH / 2 + 30, lensGrow, BLUE, 1);
+  if (lensGlowOp > 0.01) {
+    s += ring(phoneX + phoneW / 2 - 30, phoneY - phoneH / 2 + 30, lensGrow + 10, BLUE, 6, lensGlowOp);
+  }
+
+  // Coral red "barrier" (text/numbers) shatters
+  var barrierOp = (1 - ramp(u, 0.0, 0.2)) * (1 - ramp(u, 0.2, 0.4));
+  if (barrierOp > 0.01) {
+    var barrierW = 400, barrierH = 200;
+    var barrierY = phoneY + phoneH / 2 + 100;
+    s += rrect(CX, barrierY, barrierW, barrierH, 15, CORAL, barrierOp);
+    for (var i = 0; i < 4; i++) {
+      s += line(CX - barrierW / 2 + 50, barrierY - barrierH / 2 + 40 + i * 40, CX + barrierW / 2 - 50, barrierY - barrierH / 2 + 40 + i * 40, WHITE, 6, barrierOp * 0.8);
+    }
+  }
+
+  // Shattering fragments
+  var shatterU = ramp(u, 0.2, 0.4);
+  if (shatterU > 0.01) {
+    for (var i = 0; i < 10; i++) {
+      var fragX = CX + lerp(0, rnd(i) * 300 - 150, shatterU);
+      var fragY = phoneY + phoneH / 2 + 100 + lerp(0, rnd(i + 10) * 200, shatterU);
+      var fragSize = lerp(10, 30, rnd(i + 20));
+      s += rrect(fragX, fragY, fragSize, fragSize, 5, CORAL, (1 - shatterU) * 0.8);
+    }
+  }
+
+  // Signal blue QR code appears
+  var qrOp = ramp(u, 0.4, 0.6);
+  var qrSize = 200;
+  var qrY = phoneY + phoneH / 2 + 100;
+  if (qrOp > 0.01) {
+    s += qrCode(CX, qrY, qrSize, BLUE, 0.5, qrOp);
+  }
+
+  // Signal blue line connects QR to phone
+  var connectU = ramp(u, 0.6, 0.8);
+  if (connectU > 0.01) {
+    var startX = CX, startY = qrY - qrSize / 2;
+    var endX = phoneX + phoneW / 2 - 30, endY = phoneY - phoneH / 2 + 30;
+    var midX = lerp(startX, endX, 0.5);
+    var midY = lerp(startY, endY, 0.5) - 80; // Curve slightly
+    var d = "M " + startX + " " + startY + " Q " + midX + " " + midY + " " + endX + " " + endY;
+    s += pathTag(d, BLUE, 8, connectU);
+    s += dot(lerp(startX, endX, connectU), lerp(startY, endY, connectU) - lerp(0, 80, connectU * (1-connectU)*4), 12, BLUE, connectU); // "Data" dot
+  }
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 5 (40-50s): TAKE */
+function scene5(u) {
+  var s = '';
+  var figureX = CX;
+  var figureY = BOT - 200;
+
+  var cameraZoom = lerp(1.0, 0.7, smooth(u));
+  var cameraY = lerp(0, 150, smooth(u));
+  s += '<g ' + camera(cameraZoom, 0, cameraY) + '>';
+
+  // Landscape of many signal blue "doorway" squares
+  var numDoorways = 20;
+  for (var i = 0; i < numDoorways; i++) {
+    var doorSize = lerp(80, 180, rnd(i));
+    var doorX = lerp(100, W - 100, rnd(i + 10));
+    var doorY = lerp(TOP + 50, BOT - 300, rnd(i + 20));
+
+    // Animate as if walking through a dense field
+    var scrollSpeed = 200;
+    var offset = (u * scrollSpeed + rnd(i + 30) * 100) % (BOT - TOP + doorSize * 2);
+    var currentY = TOP + offset - doorSize;
+    if (currentY > BOT + doorSize) currentY -= (BOT - TOP + doorSize * 2);
+    if (currentY < TOP - doorSize) currentY += (BOT - TOP + doorSize * 2);
+
+    var op = 0.4 + 0.6 * (1 - Math.abs(currentY - CY) / (H / 2)); // Fade based on distance from center
+    if (op > 0.05) {
+      s += rrect(doorX, currentY, doorSize, doorSize, doorSize * 0.1, BLUE, op);
+
+      // Faint, thin signal blue data lines
+      var lineOp = op * 0.3;
+      if (lineOp > 0.01) {
+        var lineLen = lerp(50, 150, rnd(i + 40));
+        var lineAngle = lerp(-45, 45, rnd(i + 50));
+        var endX = doorX + lineLen * Math.sin(lineAngle * Math.PI / 180);
+        var endY = currentY + lineLen * Math.cos(lineAngle * Math.PI / 180);
+        s += line(doorX, currentY, endX, endY, BLUE, 4, lineOp);
+        // Subtle pulse for data lines
+        s += dot(lerp(doorX, endX, (u * 2 + rnd(i*3)) % 1), lerp(currentY, endY, (u * 2 + rnd(i*3)) % 1), 8, BLUE, lineOp * (0.5 + 0.5 * Math.sin(u * Math.PI * 6 + i)));
+      }
+    }
+  }
+
+  // Amber stick figure
+  s += stickFigure(figureX, figureY, AMBER, 'walking', 1);
+
+  s += '</g>';
+  return s;
+}
+
+/* SCENE 6 (50-60s): RETURN + CHANGE */
+function scene6(u) {
+  var s = '';
+  var figureX = CX;
+  var figureY = BOT - 200;
+
+  var cameraZoom = lerp(0.7, 1.0, smooth(u));
+  var cameraY = lerp(150, 0, smooth(u));
+  s += '<g ' + camera(cameraZoom, 0, cameraY) + '>';
+
+  // Single, prominent signal blue QR code
+  var qrSize = lerp(300, 360, smooth(u));
+  var qrX = CX;
+  var qrY = CY - 100;
+  s += qrCode(qrX, qrY, qrSize, BLUE, 0.5, 1);
+  // Subtle blue aura pulse
+  var auraOp = 0.3 + 0.7 * Math.sin(u * Math.PI * 4);
+  s += ring(qrX, qrY, qrSize * 0.6, BLUE, 10, auraOp * 0.4);
+
+  // Amber stick figure walking calmly
+  s += stickFigure(figureX, figureY, AMBER, 'walking', 1);
+
+  // Warm amber "insight" icon (simplified link symbol or small glowing light)
+  var insightOp = ramp(u, 0.2, 0.6);
+  var insightScale = 1 + Math.sin(u * Math.PI * 4) * 0.1;
+  if (insightOp > 0.01) {
+    s += '<g transform="translate(' + (figureX) + ' ' + (figureY - 280) + ') scale(' + insightScale + ') translate(' + (-figureX) + ' ' + (-(figureY - 280)) + ')">';
+    s += linkIcon(figureX, figureY - 280, 80, AMBER, 12, insightOp);
+    s += '</g>';
+  }
+
+  s += '</g>';
+  return s;
+}
+
+var SCENES = [scene1, scene2, scene3, scene4, scene5, scene6];
+
+/* ---------- master render ---------- */
+function render(t) {
+  t = clamp(t, 0, DUR);
+  var idx = Math.min(5, Math.floor(t / 10));
+  var u = (t - idx * 10) / 10;
+  if (t >= DUR) { idx = 5; u = 1; } // Ensure final frame is stable
+  document.getElementById("stage").innerHTML = SCENES[idx](u);
+}
+
+/* ---------- boot / seek API ---------- */
+window.__seek = function (s) { render(s); };
+function boot() { render(0); window.__ready = true; }
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+  document.fonts.ready.then(boot);
+  setTimeout(function () { if (!window.__ready) boot(); }, 1500); // Fallback for slow font loading
+} else { boot(); }
+
+if (!window.__recording) {
+  var start = null;
+  function tick(ts) {
+    if (start == null) start = ts;
+    render(((ts - start) / 1000) % DUR);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

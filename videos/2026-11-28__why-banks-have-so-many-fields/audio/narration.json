@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You walk into the bank, ready to open an account or get a quick loan. You just want your money moving, efficiently. It should be straightforward, right?",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "But then they hand you the forms. Page after page, filled with countless boxes. Your name, address, mother's maiden name, even your dog's favorite treat.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "You stare at the document. Why all this? Is it just bureaucracy, or are they trying to annoy you? It feels like unnecessary prying.",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "Then it clicks: every field serves a purpose. Banks are legally bound to prevent fraud and money laundering. Each data point feeds into complex risk models.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "This data mountain is the cost of a secure system. Your details, while feeling intrusive, shield both you and the bank from illicit activities.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "So you sigh, pick up the pen, and fill it out. You still don't love it, but now you understand. Forms aren't just paperwork; they're invisible trust machinery.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]

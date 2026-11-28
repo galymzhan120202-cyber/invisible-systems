@@ -1,0 +1,38 @@
+[
+  {
+    "id": "scene-01",
+    "text": "You're out. Another QR code. On menus, posters, everywhere. A few years ago, rare. Now, ubiquitous. You just want simple, instant information.",
+    "rate": "+5%",
+    "start": 0.3
+  },
+  {
+    "id": "scene-02",
+    "text": "You used to ignore them. But then, you pull out your phone, point, and click. Instantly, a menu loads, a website opens. It worked, seamlessly.",
+    "rate": "+5%",
+    "start": 10.3
+  },
+  {
+    "id": "scene-03",
+    "text": "This smooth experience makes you wonder: why the sudden explosion? QR codes existed for decades. Was it a global decision, or just recent events?",
+    "rate": "+5%",
+    "start": 20.3
+  },
+  {
+    "id": "scene-04",
+    "text": "The real system is simpler: friction disappeared. Modern smartphone cameras scan codes directly, no app needed. This tiny technical shift removed the biggest barrier.",
+    "rate": "+5%",
+    "start": 30.3
+  },
+  {
+    "id": "scene-05",
+    "text": "The cost? Your physical world is now full of invisible doorways. Every object becomes a clickable link, making access effortless but also trackable.",
+    "rate": "+5%",
+    "start": 40.3
+  },
+  {
+    "id": "scene-06",
+    "text": "Next time, you won't just see a pattern. You'll see an efficient, ubiquitous bridge – a triumph of minimal friction, connecting our world.",
+    "rate": "+5%",
+    "start": 50.3
+  }
+]
